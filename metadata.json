@@ -1,0 +1,5 @@
+{
+  "name": "Nomad - Gamified Travel Platform",
+  "description": "A premium, gamified trip management platform for explorers and organizers with real-time tracking and social features.",
+  "requestFramePermissions": ["geolocation", "camera", "microphone"]
+}
