@@ -5,26 +5,35 @@ import {
   MapPin, Calendar, Users, Shield, Zap, Award,
   ChevronRight, ChevronLeft, Search, LayoutDashboard,
   Settings, LogOut, Plus, BarChart3, Ticket, Wallet,
-  Navigation, MessageSquare, AlertTriangle, Fuel, Cloud,
+  Navigation, MessageSquare, AlertTriangle, Cloud,
   Camera, Star, TrendingUp, Leaf, Trophy, X, Sparkles,
-  Bell, ChevronDown, Globe, FileText, UserCheck,
+  Bell, ChevronDown, ChevronUp, Globe, FileText, UserCheck,
   Upload, ImagePlus, Trash2, Tag, Phone, Mail,
   Eye, Copy, Check, Lock, Unlock, DollarSign,
   ArrowUpRight, ArrowDownRight, Filter, Edit2,
   RefreshCw, Download, Clock, UserCircle, Image,
   Hash, Percent, List, ShoppingBag, Activity, Target, Users2,
-  Heart, Share2, Bookmark, ChevronUp, SlidersHorizontal,
+  Heart, Share2, Bookmark, SlidersHorizontal,
   Compass, Map, Gift, Flame, BadgeCheck, CreditCard,
   Percent as PercentIcon, CheckCircle, AlertCircle, Info,
   ThumbsUp, MessageCircle, CornerDownRight, Send, Menu,
+  Crosshair, Play, Pause, Radio, BellRing, ListOrdered, Sun, Moon,
 } from 'lucide-react';
 import { signInWithGoogle } from "./lib/auth";
 import { supabase } from "./lib/supabaseClient";
+import MapboxRouteMap from "./components/MapboxRouteMap";
+import LiveTripMap, {
+  readLiveMapStoredTheme,
+  type LiveTripMapRef,
+  type MapTheme,
+} from "./components/LiveTripMap";
+import { io } from "socket.io-client";
 
 // ─── UTILS ──────────────────────────────────────────────────
 type User = { id: string; name: string; email: string; role: 'user' | 'organizer'; level?: number; xp?: number };
-type Trip = { id: string; name: string; theme?: string; banner_url?: string; banner?: string; date?: string; price?: number; isFree?: boolean; meetupPoint?: string; endLocation?: string; duration?: string; ageGroup?: string; language?: string; description?: string; prerequisites?: string; terms?: string; maxParticipants?: number; joinedCount?: number; organizer?: string; tags?: string[]; rating?: number; reviews?: Review[]; endDate?: string; time?: string; privacy?: string };
+type Trip = { id: string; name: string; theme?: string; banner_url?: string; banner?: string; date?: string; price?: number; isFree?: boolean; meetupPoint?: string; endLocation?: string; duration?: string; ageGroup?: string; language?: string; description?: string; prerequisites?: string; terms?: string; maxParticipants?: number; joinedCount?: number; organizer?: string; tags?: string[]; rating?: number; reviews?: Review[]; endDate?: string; time?: string; privacy?: string; meetupLat?: number; meetupLng?: number; endLat?: number; endLng?: number; status?: string };
 type Review = { id: string; user: string; avatar: string; rating: number; text: string; date: string; likes: number };
+type PlaceSuggestion = { id: string; place_name: string; center: [number, number] };
 
 function cn(...classes: (string | boolean | undefined | null)[]): string {
   return classes.filter(Boolean).join(' ');
@@ -79,8 +88,126 @@ function generateCouponCode(prefix = 'NOMAD'): string {
   return prefix + Array.from({length:6},()=>chars[Math.floor(Math.random()*chars.length)]).join('');
 }
 
+function asNum(v: unknown): number | undefined {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/** Match server `tripScopeFromDate` — local calendar day, no UTC drift. */
+function parseDateOnlyLocal(s: string | undefined | null): Date | null {
+  if (!s) return null;
+  const m = String(s).trim().slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const t = Date.parse(String(s));
+  if (Number.isNaN(t)) return null;
+  const d = new Date(t);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function startOfTodayLocalClient(): Date {
+  const n = new Date();
+  return new Date(n.getFullYear(), n.getMonth(), n.getDate());
+}
+
+function tripDateVsToday(dateStr: string | undefined): "today" | "future" | "past" | "unknown" {
+  const d = parseDateOnlyLocal(dateStr);
+  if (!d) return "unknown";
+  const t0 = startOfTodayLocalClient().getTime();
+  const t1 = d.getTime();
+  if (t1 === t0) return "today";
+  if (t1 < t0) return "past";
+  return "future";
+}
+
+function isBookingCancelledOrCompleted(t: Trip): boolean {
+  const s = String(t.status || "").toLowerCase();
+  return s === "cancelled" || s === "canceled" || s === "completed" || s === "refunded";
+}
+
+function isPrivateTrip(t: Trip): boolean {
+  return String(t.privacy || "").toLowerCase() === "private";
+}
+
+function normalizeTripFromApi(raw: any): Trip {
+  const tags = typeof raw?.tags === 'string'
+    ? (() => {
+        try {
+          const parsed = JSON.parse(raw.tags);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })()
+    : Array.isArray(raw?.tags)
+      ? raw.tags
+      : [];
+
+  const normalizedReviews: Review[] = Array.isArray(raw?.reviews)
+    ? raw.reviews.map((r: any, idx: number) => ({
+        id: String(r?.id ?? `review-${idx}`),
+        user: r?.user_name || r?.user || "Explorer",
+        avatar: r?.avatar || r?.user_name || "explorer",
+        rating: Number(r?.rating) || 0,
+        text: r?.text || "",
+        date: r?.created_at
+          ? new Date(r.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+          : "Recent",
+        likes: Number(r?.likes) || 0,
+      }))
+    : [];
+
+  return {
+    id: String(raw?.trip_id ?? raw?.id),
+    name: raw?.trip_name || raw?.name || 'Untitled Trip',
+    theme: raw?.trip_theme || raw?.theme || 'Adventure',
+    banner_url: raw?.banner_url || undefined,
+    date: raw?.trip_date || raw?.date || undefined,
+    time: raw?.trip_time || raw?.time || undefined,
+    duration: raw?.trip_duration || raw?.duration || undefined,
+    price: asNum(raw?.trip_price ?? raw?.price ?? raw?.amount_paid) || 0,
+    isFree: (asNum(raw?.trip_price ?? raw?.price ?? raw?.amount_paid) || 0) <= 0,
+    meetupPoint: raw?.trip_start_location || raw?.start_location || undefined,
+    endLocation: raw?.trip_end_location || raw?.end_location || undefined,
+    description: raw?.trip_description || raw?.description || undefined,
+    prerequisites: raw?.prerequisites || undefined,
+    terms: raw?.terms || undefined,
+    maxParticipants: asNum(raw?.trip_max_participants ?? raw?.max_participants),
+    joinedCount: asNum(raw?.joined_count) ?? asNum(raw?.participant_count) ?? 0,
+    organizer: raw?.organizer_name || 'Organizer',
+    tags,
+    reviews: normalizedReviews,
+    rating: normalizedReviews.length
+      ? Number((normalizedReviews.reduce((sum, review) => sum + review.rating, 0) / normalizedReviews.length).toFixed(1))
+      : asNum(raw?.rating),
+    privacy: raw?.privacy || undefined,
+    status: raw?.trip_status || raw?.status || raw?.booking_status || undefined,
+    banner:
+      (typeof raw?.banner === "string" && raw.banner) ||
+      (raw?.banner_url ? String(raw.banner_url).replace(/\W/g, "").slice(-20) : undefined) ||
+      `trip-${raw?.trip_id ?? raw?.id ?? "x"}`,
+    meetupLat: asNum(raw?.meetup_lat) ?? asNum(raw?.start_lat),
+    meetupLng: asNum(raw?.meetup_lng) ?? asNum(raw?.start_lng),
+    endLat: asNum(raw?.end_lat),
+    endLng: asNum(raw?.end_lng),
+  };
+}
+
 type CouponType = {id:string;code:string;discount:number;limit:number;used:number;expiry:string;active:boolean;prefix:string};
 type InviteType = {type:'phone'|'email';value:string};
+
+type OrgDashEvent = {
+  id: number;
+  name: string;
+  date: string;
+  theme: string;
+  joined: number;
+  max: number;
+  revenue: number;
+  status: string;
+  scope: "today" | "upcoming" | "past";
+  banner: string;
+  privacy: "public" | "private";
+};
 
 // ─── SHARED COMPONENTS ──────────────────────────────────────
 const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & {variant?:'primary'|'secondary'|'outline'|'ghost'|'danger';size?:'sm'|'md'|'lg'}>(
@@ -216,7 +343,7 @@ const AppNav = ({ user, onLogout }: { user?: User | null; onLogout?: () => void 
         )}
       </AnimatePresence>
 
-      <nav ref={navRef} className="fixed top-0 w-full z-50 px-4 md:px-6 py-3.5 flex justify-between items-center bg-black/85 backdrop-blur-2xl border-b border-white/[0.07]"
+      <nav ref={navRef} className="fixed top-0 z-50 w-full safe-pt safe-px px-4 md:px-6 py-3.5 flex justify-between items-center bg-black/85 backdrop-blur-2xl border-b border-white/[0.07]"
         style={{ boxShadow: '0 1px 40px rgba(0,0,0,0.5)' }}>
 
         {/* ── LOGO ── */}
@@ -605,7 +732,7 @@ const AppNav = ({ user, onLogout }: { user?: User | null; onLogout?: () => void 
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.2 }}
-            className="fixed top-[60px] left-0 right-0 z-40 md:hidden bg-[#080808] border-b border-white/[0.08] shadow-[0_20px_60px_rgba(0,0,0,0.8)]">
+            className="fixed left-0 right-0 z-40 md:hidden bg-[#080808] border-b border-white/[0.08] shadow-[0_20px_60px_rgba(0,0,0,0.8)] top-[calc(3.5rem+env(safe-area-inset-top,0px))] max-h-[min(70dvh,calc(100dvh-3.5rem-env(safe-area-inset-top,0px)))] overflow-y-auto">
             <div className="p-4 space-y-1">
               {/* Mobile nav links */}
               {navLinks.map(link => (
@@ -794,7 +921,7 @@ const TripCard = ({trip,saved,onSave}:{trip:Trip;saved?:boolean;onSave?:()=>void
 
 // ─── LANDING PAGE ────────────────────────────────────────────
 const LandingPage = () => (
-  <div className="min-h-screen bg-black overflow-hidden">
+  <div className="min-h-dvh bg-black overflow-hidden">
     <AppNav/>
     <section className="relative pt-32 pb-20 px-6 flex flex-col items-center text-center">
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-[600px] opacity-20 -z-10" style={{background:'radial-gradient(ellipse at center top, rgba(255,255,255,0.3) 0%, transparent 70%)'}}/>
@@ -823,7 +950,7 @@ const LoginPage = ({setUser}:{setUser:(u:User)=>void}) => {
   const [email,setEmail]=useState('');const [password,setPassword]=useState('');const [role,setRole]=useState<'user'|'organizer'>('user');const [loading,setLoading]=useState(false);const [error,setError]=useState<string|undefined>();const navigate=useNavigate();
   const handleLogin=async(e:React.FormEvent)=>{e.preventDefault();setLoading(true);setError(undefined);try{const res=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,role})});if(!res.ok){const body=await res.json().catch(()=>({}));setError(body.error||'Login failed');setLoading(false);return;}const data=await res.json();const user:User={id:String(data.id??data.auth_user_id??email),name:data.name||email.split('@')[0]||'Explorer',email:data.email||email,role:data.role||role,level:data.level??1,xp:data.xp??0};setUser(user);navigate((data.role||role)==='organizer'?'/organizer':'/dashboard');}catch(err:any){console.error('Login error',err);setError('Something went wrong, please try again.');}finally{setLoading(false);}};
   return(
-    <div className="min-h-screen flex items-center justify-center px-6 bg-black">
+    <div className="min-h-dvh flex items-center justify-center px-6 bg-black">
       <div className="w-full max-w-md">
         <div className="text-center mb-10"><Link to="/" className="inline-flex w-16 h-16 bg-white rounded-2xl items-center justify-center mx-auto mb-6 hover:scale-105 transition-transform"><Navigation className="text-black w-8 h-8"/></Link><h1 className="text-3xl font-bold mb-2">Welcome Back</h1><p className="text-white/50">Sign in to your Nomad account</p></div>
         <Card className="p-8">
@@ -865,9 +992,9 @@ const LoginPage = ({setUser}:{setUser:(u:User)=>void}) => {
 // ─── SIGNUP PAGE ─────────────────────────────────────────────
 const SignupPage = ({setUser}:{setUser:(u:User)=>void}) => {
   const [email,setEmail]=useState('');const [password,setPassword]=useState('');const [name,setName]=useState('');const [role,setRole]=useState<'user'|'organizer'>('user');const [loading,setLoading]=useState(false);const [error,setError]=useState<string|undefined>();const navigate=useNavigate();
-  const handleSignup=async(e:React.FormEvent)=>{e.preventDefault();setLoading(true);setError(undefined);try{const res=await fetch('/api/auth/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,name,role})});if(!res.ok){const body=await res.json().catch(()=>({}));setError(body.error||'Sign up failed');setLoading(false);return;}const data=await res.json();const user:User={id:String(data.id??data.auth_user_id??email),name:data.name||name||email.split('@')[0]||'Explorer',email:data.email||email,role:data.role||role,level:data.level??1,xp:data.xp??0};setUser(user);navigate((data.role||role)==='organizer'?'/organizer':'/dashboard');}catch(err:any){console.error('Signup error',err);setError('Something went wrong, please try again.');}finally{setLoading(false);}};
+  const handleSignup=async(e:React.FormEvent)=>{e.preventDefault();setLoading(true);setError(undefined);try{const res=await fetch('/api/auth/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,name,role})});if(!res.ok){const body=await res.json().catch(()=>({}));const msg=[body.error,body.hint].filter(Boolean).join(' — ')||'Sign up failed';setError(msg);setLoading(false);return;}const data=await res.json();const user:User={id:String(data.id??data.auth_user_id??email),name:data.name||name||email.split('@')[0]||'Explorer',email:data.email||email,role:data.role||role,level:data.level??1,xp:data.xp??0};setUser(user);navigate((data.role||role)==='organizer'?'/organizer':'/dashboard');}catch(err:any){console.error('Signup error',err);setError('Something went wrong, please try again.');}finally{setLoading(false);}};
   return(
-    <div className="min-h-screen flex items-center justify-center px-6 bg-black">
+    <div className="min-h-dvh flex items-center justify-center px-6 bg-black">
       <div className="w-full max-w-md">
         <div className="text-center mb-10"><h1 className="text-3xl font-bold mb-2">Create Account</h1><p className="text-white/50">Join the community of explorers</p></div>
         <Card className="p-8">
@@ -911,11 +1038,68 @@ const UserDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
   const [activeTab,setActiveTab]=useState('upcoming');
   const navigate=useNavigate();
   const [savedTrips,setSavedTrips]=useState<string[]>(['1','3']);
+  const [bookings, setBookings] = useState<Trip[]>([]);
+  const [bookingsLoading, setBookingsLoading] = useState(true);
+  const [exploreTrips, setExploreTrips] = useState<Trip[]>([]);
 
-  const UPCOMING = MOCK_TRIPS.slice(0,2);
-  const PAST = [{id:'p1',name:'Pune Night Ride',theme:'Night Ride',banner:'nightride',date:'Sun, 12 Oct 2024',duration:'1 Day',isFree:true,meetupPoint:'FC Road, Pune',rating:5,joinedCount:18,maxParticipants:20,reviews:[]}];
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setBookingsLoading(true);
+        const key =
+          user.id && /^\d+$/.test(String(user.id).trim())
+            ? String(user.id).trim()
+            : user.email || user.id;
+        if (!key) {
+          if (mounted) setBookings([]);
+          return;
+        }
+        const res = await fetch(`/api/users/${encodeURIComponent(key)}/bookings`);
+        if (!res.ok) return;
+        const rows = await res.json();
+        if (!mounted) return;
+        const mapped = (rows || []).map((r: any) => normalizeTripFromApi(r));
+        setBookings(mapped);
+      } catch {
+        if (mounted) setBookings([]);
+      } finally {
+        if (mounted) setBookingsLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [user.id, user.email]);
 
-  const INVITES = [{id:'i1',name:'Goa Secret Beaches',host:'Wave Riders',date:'Dec 12, 2024',banner:'goa',expires:'48h',slots:2}];
+  const upcomingList = bookings.filter(
+    (t) =>
+      !isBookingCancelledOrCompleted(t) &&
+      tripDateVsToday(t.date) !== "past" &&
+      !isPrivateTrip(t),
+  );
+  const pastList = bookings.filter(
+    (t) => isBookingCancelledOrCompleted(t) || tripDateVsToday(t.date) === "past",
+  );
+  const invitesList = bookings.filter(
+    (t) =>
+      !isBookingCancelledOrCompleted(t) &&
+      tripDateVsToday(t.date) !== "past" &&
+      isPrivateTrip(t),
+  );
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/trips');
+        if (!res.ok) return;
+        const rows = await res.json();
+        setExploreTrips((rows || []).map((r: any) => normalizeTripFromApi(r)));
+      } catch {
+        setExploreTrips([]);
+      }
+    })();
+  }, []);
 
   const TABS=[{id:'upcoming',label:'Upcoming',icon:Calendar},{id:'past',label:'Past Trips',icon:Clock},{id:'explore',label:'Explore',icon:Compass},{id:'invites',label:'Invites',icon:Mail},{id:'rewards',label:'Rewards',icon:Trophy},{id:'profile',label:'Profile',icon:UserCircle}];
 
@@ -925,11 +1109,14 @@ const UserDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
     switch(activeTab) {
       case 'upcoming': return (
         <div className="space-y-5">
-          {UPCOMING.map(trip=>(
+          {bookingsLoading && (
+            <Card className="p-6 text-sm text-white/50">Loading your booked trips...</Card>
+          )}
+          {upcomingList.map(trip=>(
             <Card key={trip.id} className="p-0 overflow-hidden">
               <div className="flex flex-col md:flex-row">
                 <div className="md:w-48 h-40 md:h-auto relative flex-shrink-0">
-                  <img src={`https://picsum.photos/seed/${trip.banner}/400/300`} alt={trip.name} className="w-full h-full object-cover opacity-70" referrerPolicy="no-referrer"/>
+                  <img src={`https://picsum.photos/seed/${trip.banner || trip.id}/400/300`} alt={trip.name} className="w-full h-full object-cover opacity-70" referrerPolicy="no-referrer"/>
                   <div className="absolute inset-0 bg-gradient-to-r from-transparent to-black/40"/>
                   <div className="absolute top-3 left-3"><Badge variant="success">Upcoming</Badge></div>
                 </div>
@@ -946,13 +1133,13 @@ const UserDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
                   <div className="flex gap-3">
                     <Button size="sm" onClick={()=>navigate(`/trip/${trip.id}/live`)}>Go Live</Button>
                     <Button variant="outline" size="sm" onClick={()=>navigate(`/trip/${trip.id}`)}>View Details</Button>
-                    <Button variant="ghost" size="sm">Cancel</Button>
+                    <Button variant="ghost" size="sm" onClick={()=>navigate(`/trip/${trip.id}`)}>Manage</Button>
                   </div>
                 </div>
               </div>
             </Card>
           ))}
-          {UPCOMING.length===0 && (
+          {!bookingsLoading && upcomingList.length===0 && (
             <div className="py-20 text-center">
               <Calendar size={40} className="text-white/20 mx-auto mb-4"/>
               <p className="text-white/40 font-medium mb-4">No upcoming trips</p>
@@ -963,26 +1150,36 @@ const UserDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
       );
       case 'past': return (
         <div className="space-y-4">
-          {PAST.map(trip=>(
+          {bookingsLoading && (
+            <Card className="p-6 text-sm text-white/50">Loading past trips...</Card>
+          )}
+          {!bookingsLoading && pastList.map(trip=>(
             <Card key={trip.id} className="p-5 flex items-center gap-5">
-              <div className="w-20 h-20 rounded-xl overflow-hidden flex-shrink-0"><img src={`https://picsum.photos/seed/${trip.banner}/200/200`} alt="" className="w-full h-full object-cover opacity-60" referrerPolicy="no-referrer"/></div>
+              <div className="w-20 h-20 rounded-xl overflow-hidden flex-shrink-0"><img src={`https://picsum.photos/seed/${trip.banner || trip.id}/200/200`} alt="" className="w-full h-full object-cover opacity-60" referrerPolicy="no-referrer"/></div>
               <div className="flex-1">
                 <h3 className="font-bold mb-1">{trip.name}</h3>
-                <p className="text-sm text-white/40 mb-2">{trip.date} · {trip.duration}</p>
-                <StarRating rating={trip.rating}/>
+                <p className="text-sm text-white/40 mb-2">{trip.date || "—"} · {trip.duration || "—"}</p>
+                <StarRating rating={trip.rating ?? 0}/>
               </div>
               <div className="flex flex-col gap-2 items-end">
                 <Badge variant="default">Completed</Badge>
-                <button className="text-xs text-white/40 hover:text-white flex items-center gap-1"><MessageCircle size={11}/> Write Review</button>
+                <button type="button" onClick={()=>navigate(`/trip/${trip.id}`)} className="text-xs text-white/40 hover:text-white flex items-center gap-1"><MessageCircle size={11}/> Write Review</button>
               </div>
             </Card>
           ))}
+          {!bookingsLoading && pastList.length===0 && (
+            <div className="py-20 text-center">
+              <Clock size={40} className="text-white/20 mx-auto mb-4"/>
+              <p className="text-white/40 font-medium mb-4">No past trips yet</p>
+              <Button onClick={()=>navigate('/explore')}>Explore Trips</Button>
+            </div>
+          )}
         </div>
       );
       case 'explore': return (
         <div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {MOCK_TRIPS.slice(0,6).map(trip=>(
+            {exploreTrips.slice(0,6).map(trip=>(
               <TripCard key={trip.id} trip={trip} saved={savedTrips.includes(trip.id)} onSave={()=>setSavedTrips(p=>p.includes(trip.id)?p.filter(x=>x!==trip.id):[...p,trip.id])}/>
             ))}
           </div>
@@ -991,29 +1188,36 @@ const UserDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
       );
       case 'invites': return (
         <div className="space-y-4">
-          {INVITES.map(inv=>(
-            <Card key={inv.id} className="p-0 overflow-hidden">
+          {bookingsLoading && (
+            <Card className="p-6 text-sm text-white/50">Loading invites...</Card>
+          )}
+          {!bookingsLoading && invitesList.map(trip=>(
+            <Card key={trip.id} className="p-0 overflow-hidden">
               <div className="flex">
                 <div className="w-32 h-32 flex-shrink-0 relative">
-                  <img src={`https://picsum.photos/seed/${inv.banner}/300/300`} alt="" className="w-full h-full object-cover opacity-60" referrerPolicy="no-referrer"/>
+                  <img src={`https://picsum.photos/seed/${trip.banner || trip.id}/300/300`} alt="" className="w-full h-full object-cover opacity-60" referrerPolicy="no-referrer"/>
                   <div className="absolute inset-0 flex items-center justify-center"><Lock size={20} className="text-amber-400"/></div>
                 </div>
                 <div className="p-5 flex-1">
                   <div className="flex items-start justify-between mb-2">
-                    <div><h3 className="font-bold">{inv.name}</h3><p className="text-sm text-white/40">by {inv.host}</p></div>
-                    <Badge variant="warning">Private Invite</Badge>
+                    <div><h3 className="font-bold">{trip.name}</h3><p className="text-sm text-white/40">by {trip.organizer || "Organizer"}</p></div>
+                    <Badge variant="warning">Private</Badge>
                   </div>
-                  <p className="text-xs text-white/40 mb-3"><Calendar size={11} className="inline mr-1"/>{inv.date} · Only {inv.slots} slots left</p>
+                  <p className="text-xs text-white/40 mb-3"><Calendar size={11} className="inline mr-1"/>{trip.date || "TBA"}{typeof trip.maxParticipants === "number" && trip.maxParticipants > 0 ? ` · ${Math.max(0, trip.maxParticipants - (trip.joinedCount || 0))} slots left` : ""}</p>
                   <div className="flex gap-2">
-                    <Button size="sm" className="text-xs">Accept Invite</Button>
-                    <Button variant="ghost" size="sm" className="text-xs">Decline</Button>
+                    <Button size="sm" className="text-xs" onClick={()=>navigate(`/trip/${trip.id}`)}>View trip</Button>
+                    <Button variant="ghost" size="sm" className="text-xs" onClick={()=>navigate(`/trip/${trip.id}/live`)}>Go Live</Button>
                   </div>
                 </div>
               </div>
-              <div className="px-5 py-2 bg-amber-500/5 border-t border-amber-500/10 text-[10px] text-amber-400 font-semibold flex items-center gap-1"><Clock size={10}/> Invite expires in {inv.expires}</div>
             </Card>
           ))}
-          {INVITES.length===0&&<div className="py-20 text-center"><Mail size={40} className="text-white/20 mx-auto mb-4"/><p className="text-white/40">No private invites yet</p></div>}
+          {!bookingsLoading && invitesList.length===0 && (
+            <div className="py-20 text-center">
+              <Mail size={40} className="text-white/20 mx-auto mb-4"/>
+              <p className="text-white/40">No private bookings yet. Invite-only trips appear here once you book.</p>
+            </div>
+          )}
         </div>
       );
       case 'rewards': return (
@@ -1084,7 +1288,7 @@ const UserDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white">
+    <div className="min-h-dvh bg-black text-white">
       <AppNav user={user} onLogout={onLogout}/>
       <div className="max-w-7xl mx-auto px-4 md:px-8 pt-24 pb-12">
         {/* Header */}
@@ -1140,8 +1344,26 @@ const MarketplacePage = ({user}:{user:User|null}) => {
   const [sortBy,setSortBy]=useState('trending');
   const [showFilters,setShowFilters]=useState(false);
   const [savedTrips,setSavedTrips]=useState<string[]>([]);
+  const [marketTrips, setMarketTrips] = useState<Trip[]>([]);
+  const [marketLoading, setMarketLoading] = useState(true);
 
-  const filtered = MOCK_TRIPS.filter(t=>{
+  useEffect(() => {
+    (async () => {
+      try {
+        setMarketLoading(true);
+        const res = await fetch('/api/trips');
+        if (!res.ok) return;
+        const rows = await res.json();
+        setMarketTrips((rows || []).map((r: any) => normalizeTripFromApi(r)));
+      } catch {
+        setMarketTrips([]);
+      } finally {
+        setMarketLoading(false);
+      }
+    })();
+  }, []);
+
+  const filtered = marketTrips.filter(t=>{
     if(search && !t.name.toLowerCase().includes(search.toLowerCase()) && !(t.meetupPoint||'').toLowerCase().includes(search.toLowerCase())) return false;
     if(theme && t.theme!==theme) return false;
     if(language && t.language!==language) return false;
@@ -1163,7 +1385,7 @@ const MarketplacePage = ({user}:{user:User|null}) => {
   const activeFiltersCount = [theme,priceRange,duration,language,ageGroup].filter(Boolean).length;
 
   return (
-    <div className="min-h-screen bg-black text-white">
+    <div className="min-h-dvh bg-black text-white">
       <AppNav user={user}/>
       <div className="max-w-7xl mx-auto px-4 md:px-8 pt-24 pb-12">
         {/* Header */}
@@ -1242,6 +1464,7 @@ const MarketplacePage = ({user}:{user:User|null}) => {
         <div className="mb-4 flex items-center justify-between">
           <p className="text-sm text-white/40">{sorted.length} expeditions found</p>
         </div>
+        {marketLoading && <Card className="p-5 text-sm text-white/50">Loading trips...</Card>}
         {sorted.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {sorted.map(trip=>(
@@ -1264,7 +1487,9 @@ const MarketplacePage = ({user}:{user:User|null}) => {
 const TripDetailPage = ({user}:{user:User|null}) => {
   const {id}=useParams();
   const navigate=useNavigate();
-  const trip = MOCK_TRIPS.find(t=>t.id===id) || null;
+  const [dbTrip, setDbTrip] = useState<Trip | null>(null);
+  const [tripLoading, setTripLoading] = useState(false);
+  const trip = dbTrip;
   const [couponInput,setCouponInput]=useState('');
   const [appliedCoupon,setAppliedCoupon]=useState<{code:string;discount:number}|null>(null);
   const [couponError,setCouponError]=useState('');
@@ -1273,9 +1498,59 @@ const TripDetailPage = ({user}:{user:User|null}) => {
   const [bookingStep,setBookingStep]=useState(1);
   const [participants,setParticipants]=useState(1);
   const [saved,setSaved]=useState(false);
+  const [bookingSubmitting, setBookingSubmitting] = useState(false);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewText, setReviewText] = useState('');
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewError, setReviewError] = useState('');
+  const [liveReviews, setLiveReviews] = useState<Review[]>([]);
 
-  if(!trip) return (
-    <div className="min-h-screen bg-black flex items-center justify-center">
+  useEffect(() => {
+    if (!id) return;
+    (async () => {
+      try {
+        setTripLoading(true);
+        const res = await fetch(`/api/trips/${id}`);
+        if (!res.ok) return;
+        const raw = await res.json();
+        setDbTrip(normalizeTripFromApi(raw));
+      } catch {
+        setDbTrip(null);
+      } finally {
+        setTripLoading(false);
+      }
+    })();
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/trips/${id}/reviews`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const mapped: Review[] = Array.isArray(data)
+          ? data.map((r: any, idx: number) => ({
+              id: String(r?.id ?? `review-${idx}`),
+              user: r?.user_name || r?.user || "Explorer",
+              avatar: r?.avatar || r?.user_name || "explorer",
+              rating: Number(r?.rating) || 0,
+              text: r?.text || "",
+              date: r?.created_at
+                ? new Date(r.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+                : "Recent",
+              likes: Number(r?.likes) || 0,
+            }))
+          : [];
+        setLiveReviews(mapped);
+      } catch {
+        setLiveReviews([]);
+      }
+    })();
+  }, [id]);
+
+  if(!trip || tripLoading) return (
+    <div className="min-h-dvh bg-black flex items-center justify-center">
       <div className="text-center"><div className="w-10 h-10 border-2 border-white/20 border-t-white rounded-full animate-spin mx-auto mb-4"/><p className="text-white/40">Loading…</p></div>
     </div>
   );
@@ -1292,13 +1567,89 @@ const TripDetailPage = ({user}:{user:User|null}) => {
     }
   };
 
+  const currentReviews = liveReviews.length ? liveReviews : (trip.reviews || []);
+  const ratingAvg = currentReviews.length
+    ? Number((currentReviews.reduce((sum, r) => sum + r.rating, 0) / currentReviews.length).toFixed(1))
+    : (trip.rating || 0);
   const basePrice = trip.isFree ? 0 : (trip.price||0) * participants;
   const discount = appliedCoupon ? Math.round(basePrice * appliedCoupon.discount / 100) : 0;
   const finalPrice = basePrice - discount;
   const slots = (trip.maxParticipants||20) - (trip.joinedCount||0);
 
+  const confirmBooking = async () => {
+    if (!user || !id) return;
+    setBookingSubmitting(true);
+    try {
+      const res = await fetch('/api/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          trip_id: Number(id),
+          user_id: Number(user.id),
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCouponError(body.error || 'Booking failed');
+        return;
+      }
+      setBooked(true);
+      setCouponError('');
+    } catch {
+      setCouponError('Booking failed');
+    } finally {
+      setBookingSubmitting(false);
+    }
+  };
+
+  const submitReview = async () => {
+    if (!user || !id) return;
+    if (!reviewRating) {
+      setReviewError('Please select a rating');
+      return;
+    }
+    if (!reviewText.trim()) {
+      setReviewError('Please write a review');
+      return;
+    }
+    setReviewSubmitting(true);
+    setReviewError('');
+    try {
+      const res = await fetch(`/api/trips/${id}/reviews`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: Number(user.id),
+          rating: reviewRating,
+          text: reviewText.trim(),
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setReviewError(body.error || 'Failed to submit review');
+        return;
+      }
+      const newReview: Review = {
+        id: String(body.id || Date.now()),
+        user: user.name,
+        avatar: user.name,
+        rating: reviewRating,
+        text: reviewText.trim(),
+        date: new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }),
+        likes: 0,
+      };
+      setLiveReviews(prev => [newReview, ...prev]);
+      setReviewRating(0);
+      setReviewText('');
+    } catch {
+      setReviewError('Failed to submit review');
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-black text-white">
+    <div className="min-h-dvh bg-black text-white">
       <AppNav user={user}/>
 
       {/* Hero Banner */}
@@ -1316,7 +1667,7 @@ const TripDetailPage = ({user}:{user:User|null}) => {
             <h1 className="text-4xl md:text-6xl font-bold mb-3">{trip.name}</h1>
             <div className="flex flex-wrap items-center gap-4 text-sm text-white/60">
               <span className="flex items-center gap-1.5"><BadgeCheck size={14} className="text-emerald-400"/>{trip.organizer}</span>
-              <span className="flex items-center gap-1.5"><Star size={14} className="text-amber-400 fill-amber-400"/>{trip.rating} ({trip.reviews?.length} reviews)</span>
+              <span className="flex items-center gap-1.5"><Star size={14} className="text-amber-400 fill-amber-400"/>{ratingAvg} ({currentReviews.length} reviews)</span>
               <span className="flex items-center gap-1.5"><Users size={14}/>{trip.joinedCount}/{trip.maxParticipants} joined</span>
             </div>
           </div>
@@ -1365,11 +1716,11 @@ const TripDetailPage = ({user}:{user:User|null}) => {
                 </div>}
               </div>
               <div className="rounded-2xl overflow-hidden border border-white/10 h-52 bg-[#0a0a0a] relative">
-                <div className="absolute inset-0 opacity-[0.04]" style={{backgroundImage:'linear-gradient(rgba(255,255,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,1) 1px, transparent 1px)',backgroundSize:'30px 30px'}}/>
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-                  <div className="w-12 h-12 rounded-full bg-white/[0.06] border border-white/10 flex items-center justify-center"><Map size={20} className="text-white/40"/></div>
-                  <a href={`https://maps.google.com/?q=${encodeURIComponent(trip.meetupPoint||'India')}`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-5 py-2 rounded-xl border border-white/10 text-sm font-semibold text-white/50 hover:text-white hover:border-white/30 bg-white/[0.03] transition-all"><Globe size={13}/> Open in Google Maps</a>
-                </div>
+                <MapboxRouteMap
+                  className="h-52"
+                  start={trip.meetupLat !== undefined && trip.meetupLng !== undefined ? { lat: trip.meetupLat, lng: trip.meetupLng } : null}
+                  end={trip.endLat !== undefined && trip.endLng !== undefined ? { lat: trip.endLat, lng: trip.endLng } : null}
+                />
               </div>
             </div>
 
@@ -1427,13 +1778,13 @@ const TripDetailPage = ({user}:{user:User|null}) => {
             <div>
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold">Reviews</h2>
-                <div className="flex items-center gap-2"><Star size={18} className="text-amber-400 fill-amber-400"/><span className="text-2xl font-bold">{trip.rating}</span><span className="text-white/40">/ 5</span></div>
+                <div className="flex items-center gap-2"><Star size={18} className="text-amber-400 fill-amber-400"/><span className="text-2xl font-bold">{ratingAvg}</span><span className="text-white/40">/ 5</span></div>
               </div>
               {/* Rating breakdown */}
               <div className="mb-6 space-y-2">
                 {[5,4,3,2,1].map(stars=>{
-                  const count = (trip.reviews||[]).filter(r=>r.rating===stars).length;
-                  const pct = (trip.reviews?.length||1) > 0 ? (count/(trip.reviews?.length||1))*100 : 0;
+                  const count = currentReviews.filter(r=>r.rating===stars).length;
+                  const pct = currentReviews.length > 0 ? (count/currentReviews.length)*100 : 0;
                   return (
                     <div key={stars} className="flex items-center gap-3">
                       <div className="flex items-center gap-1 w-16 flex-shrink-0"><span className="text-xs text-white/40">{stars}</span><Star size={10} className="text-amber-400 fill-amber-400"/></div>
@@ -1444,7 +1795,7 @@ const TripDetailPage = ({user}:{user:User|null}) => {
                 })}
               </div>
               <div className="space-y-5">
-                {(trip.reviews||[]).map(rev=>(
+                {currentReviews.map(rev=>(
                   <div key={rev.id} className="p-5 bg-white/[0.03] border border-white/[0.06] rounded-2xl">
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-3">
@@ -1461,9 +1812,10 @@ const TripDetailPage = ({user}:{user:User|null}) => {
               {user && (
                 <div className="mt-5 p-5 bg-white/[0.02] border border-white/[0.06] rounded-2xl">
                   <p className="text-sm font-semibold mb-3">Write a Review</p>
-                  <div className="flex gap-1 mb-3">{[1,2,3,4,5].map(s=><button key={s} className="text-amber-400 hover:scale-110 transition-transform"><Star size={20} className="fill-amber-400/20 hover:fill-amber-400"/></button>)}</div>
-                  <textarea placeholder="Share your experience…" className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl p-3 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-white/20 resize-none min-h-[80px]"/>
-                  <Button size="sm" className="mt-3 text-xs flex items-center gap-2"><Send size={12}/> Submit Review</Button>
+                  <div className="flex gap-1 mb-3">{[1,2,3,4,5].map(s=><button key={s} onClick={()=>setReviewRating(s)} className="text-amber-400 hover:scale-110 transition-transform"><Star size={20} className={cn(s<=reviewRating?'fill-amber-400':'fill-amber-400/20')}/></button>)}</div>
+                  <textarea value={reviewText} onChange={e=>setReviewText(e.target.value)} placeholder="Share your experience…" className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl p-3 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-white/20 resize-none min-h-[80px]"/>
+                  {reviewError && <p className="text-xs text-red-400 mt-2">{reviewError}</p>}
+                  <Button size="sm" className="mt-3 text-xs flex items-center gap-2" onClick={submitReview} disabled={reviewSubmitting}><Send size={12}/> {reviewSubmitting?'Submitting...':'Submit Review'}</Button>
                 </div>
               )}
             </div>
@@ -1592,8 +1944,8 @@ const TripDetailPage = ({user}:{user:User|null}) => {
                       </label>
                     ))}
                   </div>
-                  <Button className="w-full py-4 text-base flex items-center gap-2" onClick={()=>setBooked(true)}>
-                    <CheckCircle size={16}/> {trip.isFree?'Confirm Request':`Pay ₹${finalPrice.toLocaleString()}`}
+                  <Button className="w-full py-4 text-base flex items-center gap-2" onClick={confirmBooking} disabled={bookingSubmitting}>
+                    <CheckCircle size={16}/> {bookingSubmitting ? 'Processing...' : (trip.isFree?'Confirm Request':`Pay ₹${finalPrice.toLocaleString()}`)}
                   </Button>
                   <p className="text-center text-[10px] text-white/20 mt-3">Secured by 256-bit SSL encryption</p>
                 </div>
@@ -1609,6 +1961,7 @@ const TripDetailPage = ({user}:{user:User|null}) => {
 // ─── ORGANIZER DASHBOARD ─────────────────────────────────────
 const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
   const [activeTab,setActiveTab]=useState("Today's Events");
+  const [showMobileOrganizerTabs, setShowMobileOrganizerTabs] = useState(false);
   const navigate=useNavigate();
   const TABS=[
     {id:"Today's Events",icon:Clock},{id:'Upcoming Events',icon:Calendar},
@@ -1616,13 +1969,15 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
     {id:'Marketplace Listings',icon:ShoppingBag},{id:'Revenue Analytics',icon:BarChart3},
     {id:'Coupons',icon:Tag},{id:'Profile',icon:UserCircle},
   ];
-  const MOCK=[
+  /** Sample rows for Revenue Analytics tab only (not organizer trip data). */
+  const REVENUE_SAMPLE=[
     {id:1,name:'Coastal Bike Expedition',date:'Today, 26 Oct',theme:'Bike Ride',joined:12,max:20,revenue:14400,status:'active',banner:'trip1',privacy:'public' as 'public'|'private'},
     {id:2,name:'Himalayan Ridge Trek',date:'Fri, 8 Nov',theme:'Trekking',joined:8,max:15,revenue:9600,status:'upcoming',banner:'trip2',privacy:'public' as 'public'|'private'},
     {id:3,name:'Desert Night Ride',date:'Sat, 15 Nov',theme:'Night Ride',joined:6,max:12,revenue:7200,status:'upcoming',banner:'trip3',privacy:'private' as 'public'|'private'},
     {id:4,name:'Monsoon Valley Trek',date:'Sun, 5 Oct',theme:'Trekking',joined:18,max:18,revenue:21600,status:'completed',banner:'trip4',privacy:'public' as 'public'|'private'},
   ];
-  const [events,setEvents]=useState(MOCK);
+  const [events,setEvents]=useState<OrgDashEvent[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
   const [coupons,setCoupons]=useState<CouponType[]>([
     {id:'1',code:'NOMADLUX10',discount:10,limit:50,used:23,expiry:'Dec 31',active:true,prefix:'NOMAD'},
     {id:'2',code:'EARLYBIRD25',discount:25,limit:20,used:18,expiry:'Nov 15',active:true,prefix:'EARLY'},
@@ -1632,13 +1987,57 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
   const [genCode,setGenCode]=useState('');
   const cc='bg-white/[0.03] border border-white/10 rounded-2xl hover:border-white/20 transition-colors';
 
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setEventsLoading(true);
+        const res = await fetch(`/api/organizers/${user.id}/events`);
+        if (!res.ok) return;
+        const rows = await res.json();
+        if (!mounted) return;
+        const mapped: OrgDashEvent[] = (rows || []).map((row: any) => {
+          const scope = (row.scope || "upcoming") as OrgDashEvent["scope"];
+          const d = row.date ? parseDateOnlyLocal(String(row.date)) : null;
+          const dateShort = d
+            ? d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })
+            : "TBA";
+          const dateLabel = scope === "today" ? `Today, ${dateShort}` : dateShort;
+          return {
+            id: Number(row.id),
+            name: row.name || "Untitled Event",
+            date: dateLabel,
+            theme: row.theme || "Adventure",
+            joined: Number(row.joined_count || 0),
+            max: Number(row.max_participants || 0),
+            revenue: Number(row.revenue || 0),
+            status: scope === "today" ? "active" : scope === "past" ? "completed" : "upcoming",
+            scope,
+            banner: row.banner_url || row.banner || `trip-${row.id}`,
+            privacy: row.privacy === "private" ? "private" : "public",
+          };
+        });
+        setEvents(mapped);
+      } catch {
+        if (mounted) setEvents([]);
+      } finally {
+        if (mounted) setEventsLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [user.id]);
+
   const renderTab=()=>{
     switch(activeTab){
       case"Today's Events":case'Upcoming Events':{
-        const filt=activeTab==="Today's Events"?'active':'upcoming';
-        const list=events.filter(t=>t.status===filt);
+        const list=events.filter(t=>
+          activeTab==="Today's Events" ? t.scope==="today" : t.scope==="upcoming",
+        );
         return(
           <div className="space-y-4">
+            {eventsLoading && <Card className="p-4 text-sm text-white/50">Loading events...</Card>}
             {list.length===0?(
               <div className="py-24 text-center bg-white/[0.02] rounded-2xl border border-white/[0.06]">
                 <Calendar size={32} className="text-white/20 mx-auto mb-4"/>
@@ -1651,7 +2050,7 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <h3 className="font-bold text-white truncate">{trip.name}</h3>
-                    <Badge variant={trip.status==='active'?'success':'default'}>{trip.status}</Badge>
+                    <Badge variant={trip.scope==='today'?'success':'default'}>{trip.scope==='today'?'Today':trip.scope==='past'?'Completed':'Upcoming'}</Badge>
                     <Badge variant={trip.privacy==='public'?'info':'warning'}>
                       {trip.privacy==='public' ? 'Public' : 'Private'}
                     </Badge>
@@ -1706,7 +2105,7 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
               <div className="flex-1 min-w-0">
                 <h3 className="font-bold text-white truncate mb-1">{trip.name}</h3>
                 <p className="text-xs text-white/40">{trip.date} · {trip.joined}/{trip.max} participants</p>
-                <div className="mt-2 w-full h-1 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-white" style={{width:`${(trip.joined/trip.max)*100}%`}}/></div>
+                <div className="mt-2 w-full h-1 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-white" style={{width:`${trip.max > 0 ? Math.min(100, (trip.joined/trip.max)*100) : 0}%`}}/></div>
               </div>
               <Badge variant={trip.status==='active'?'success':trip.status==='completed'?'warning':'default'}>{trip.status}</Badge>
               <div className="flex gap-1.5 flex-shrink-0">
@@ -1728,17 +2127,20 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
               </div>
             ))}
           </div>
-          {MOCK.filter(t=>t.status!=='completed').map(trip=>(
+          {events.filter(t=>t.privacy==='public'&&t.scope!=='past').map(trip=>(
             <div key={trip.id} className={cn(cc,'p-5 flex items-center gap-4')}>
               <div className="w-14 h-14 bg-gray-800 rounded-xl overflow-hidden flex-shrink-0"><img src={`https://picsum.photos/seed/${trip.banner}/200/200`} alt="" className="w-full h-full object-cover opacity-70" referrerPolicy="no-referrer"/></div>
-              <div className="flex-1"><h3 className="font-bold text-sm mb-0.5">{trip.name}</h3><p className="text-xs text-white/40">{trip.joined} booked · {trip.max-trip.joined} slots left</p></div>
+              <div className="flex-1"><h3 className="font-bold text-sm mb-0.5">{trip.name}</h3><p className="text-xs text-white/40">{trip.joined} booked{trip.max > 0 ? ` · ${Math.max(0, trip.max - trip.joined)} slots left` : ""}</p></div>
               <div className="flex items-center gap-2">
                 <Badge variant="success">Public</Badge>
-                <button className="px-3 py-1.5 text-xs font-semibold border border-white/10 rounded-lg text-white/50 hover:text-white hover:border-white/30 transition-all flex items-center gap-1"><Eye size={12}/> Preview</button>
-                <button className="px-3 py-1.5 text-xs font-semibold border border-white/10 rounded-lg text-white/50 hover:text-white hover:border-white/30 transition-all flex items-center gap-1"><Edit2 size={12}/> Edit</button>
+                <button type="button" onClick={()=>navigate(`/trip/${trip.id}`)} className="px-3 py-1.5 text-xs font-semibold border border-white/10 rounded-lg text-white/50 hover:text-white hover:border-white/30 transition-all flex items-center gap-1"><Eye size={12}/> Preview</button>
+                <button type="button" onClick={()=>navigate(`/organizer/create`)} className="px-3 py-1.5 text-xs font-semibold border border-white/10 rounded-lg text-white/50 hover:text-white hover:border-white/30 transition-all flex items-center gap-1"><Edit2 size={12}/> Edit</button>
               </div>
             </div>
           ))}
+          {events.filter(t=>t.privacy==='public'&&t.scope!=='past').length===0 && !eventsLoading && (
+            <div className="py-12 text-center text-white/40 text-sm">No public listings yet. Create a public event to appear in the marketplace.</div>
+          )}
         </div>
       );
       case'Revenue Analytics':return(
@@ -1754,11 +2156,11 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
           <div className={cn(cc,'p-6')}>
             <div className="flex items-center justify-between mb-6"><h3 className="font-bold">Revenue by Event</h3><button className="flex items-center gap-1.5 text-xs text-white/40 hover:text-white"><Download size={13}/> Export</button></div>
             <div className="space-y-5">
-              {MOCK.map(trip=>(
+              {REVENUE_SAMPLE.map(trip=>(
                 <div key={trip.id}>
                   <div className="flex items-center justify-between mb-1.5"><span className="text-sm font-medium text-white/80">{trip.name}</span><span className="text-sm font-bold">₹{trip.revenue.toLocaleString()}</span></div>
                   <div className="h-1.5 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-white rounded-full" style={{width:`${(trip.revenue/21600)*100}%`}}/></div>
-                  <div className="flex justify-between mt-1"><span className="text-[10px] text-white/30">{trip.joined} participants</span><span className="text-[10px] text-white/30">₹{Math.round(trip.revenue/trip.joined).toLocaleString()}/person</span></div>
+                  <div className="flex justify-between mt-1"><span className="text-[10px] text-white/30">{trip.joined} participants</span><span className="text-[10px] text-white/30">₹{trip.joined ? Math.round(trip.revenue/trip.joined).toLocaleString() : "0"}/person</span></div>
                 </div>
               ))}
             </div>
@@ -1835,7 +2237,7 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
   };
 
   return(
-    <div className="min-h-screen bg-black text-white">
+    <div className="min-h-dvh bg-black text-white">
       <AppNav user={user} onLogout={onLogout}/>
       <div className="pt-20 flex">
         <aside className="w-64 border-r border-white/[0.06] fixed top-20 bottom-0 left-0 hidden lg:flex flex-col overflow-hidden">
@@ -1852,7 +2254,7 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
           </div>
           <div className="p-4 border-t border-white/[0.06]"><button onClick={onLogout} className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-white/30 hover:text-white hover:bg-white/5 cursor-pointer transition-all text-sm"><LogOut size={16}/> Logout</button></div>
         </aside>
-        <main className="flex-1 lg:ml-64 p-6 lg:p-10 min-h-screen">
+        <main className="flex-1 lg:ml-64 p-6 lg:p-10 min-h-dvh">
           {activeTab!=='Create Event'&&(
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
               {[{label:'Total Revenue',value:'₹52,800',trend:'+12%',icon:DollarSign},{label:'Participants',value:'1,240',trend:'+5%',icon:Users},{label:'Events Hosted',value:'42',trend:'98% success',icon:Calendar},{label:'Active Coupons',value:'8',trend:'3 expiring',icon:Tag}].map(s=>(
@@ -1862,6 +2264,98 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
                 </div>
               ))}
             </div>
+          )}
+          {/* Mobile organizer tabs: bottom sheet selector (big tap targets) */}
+          <div className="md:hidden mb-4">
+            <button
+              type="button"
+              onClick={() => setShowMobileOrganizerTabs(true)}
+              className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-2xl bg-white/[0.04] border border-white/10 text-white/70 hover:text-white hover:border-white/20 transition-all touch-manipulation"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-white/[0.04] border border-white/10 text-white/40">
+                  <span className="text-base">≡</span>
+                </span>
+                <span className="text-sm font-bold truncate">{activeTab}</span>
+              </div>
+              <ChevronDown size={16} className="text-white/30" />
+            </button>
+          </div>
+
+          {showMobileOrganizerTabs && (
+            <>
+              <div
+                className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] md:hidden"
+                onClick={() => setShowMobileOrganizerTabs(false)}
+              />
+              <div className="fixed left-0 right-0 bottom-0 z-[101] md:hidden bg-[#0d0d0d] border-t border-white/10 rounded-t-3xl shadow-[0_-20px_60px_rgba(0,0,0,0.8)]">
+                <div className="safe-pb p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-bold text-white/80">Organizer options</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowMobileOrganizerTabs(false)}
+                      className="w-10 h-10 rounded-xl bg-white/[0.04] border border-white/10 text-white/40 hover:text-white hover:bg-white/10 hover:border-white/20 transition-all"
+                      aria-label="Close"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {TABS.map(({ id, icon: Icon }) => {
+                      const isActive = activeTab === id;
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => {
+                            setShowMobileOrganizerTabs(false);
+                            if (id === "Create Event") navigate("/organizer/create");
+                            else setActiveTab(id);
+                          }}
+                          className={cn(
+                            "w-full flex items-center justify-between gap-3 px-4 py-3 rounded-2xl border transition-all touch-manipulation",
+                            isActive
+                              ? "bg-white text-black border-white"
+                              : "bg-white/[0.03] border-white/10 text-white/60 hover:text-white hover:bg-white/10 hover:border-white/20",
+                          )}
+                        >
+                          <span className="flex items-center gap-3 min-w-0">
+                            <span
+                              className={cn(
+                                "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 border",
+                                isActive ? "bg-black/10 border-black/20" : "bg-white/[0.04] border-white/10",
+                              )}
+                            >
+                              <Icon size={16} className={isActive ? "" : "text-white/50"} />
+                            </span>
+                            <span className="text-sm font-bold truncate">
+                              {id === "Today's Events"
+                                ? "Today"
+                                : id === "Upcoming Events"
+                                  ? "Upcoming"
+                                  : id === "Manage Events"
+                                    ? "Manage"
+                                    : id === "Marketplace Listings"
+                                      ? "Market"
+                                      : id === "Revenue Analytics"
+                                        ? "Revenue"
+                                        : id === "Coupons"
+                                          ? "Coupons"
+                                          : id === "Profile"
+                                            ? "Profile"
+                                            : "Create"}
+                            </span>
+                          </span>
+                          <span className="text-xs font-bold text-white/40">{isActive ? "Active" : ""}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </>
           )}
           <div className="flex items-center justify-between mb-6">
             <div><h1 className="text-2xl font-bold">{activeTab}</h1><p className="text-white/40 text-sm mt-0.5">Manage your {activeTab.toLowerCase()}</p></div>
@@ -1905,7 +2399,21 @@ const CreateEventPage = ({user}:{user:User}) => {
   const [showPrivacyDrop,setShowPrivacyDrop]=useState(false);
   const [activeTagCat,setActiveTagCat]=useState(Object.keys(TRIP_TAGS)[0]);
   const [sections,setSections]=useState({basic:true,datetime:true,location:true,capacity:true,about:true,requirements:false,contact:false,coupons:false,tags:false});
+  const [startSuggestions, setStartSuggestions] = useState<PlaceSuggestion[]>([]);
+  const [endSuggestions, setEndSuggestions] = useState<PlaceSuggestion[]>([]);
+  const [startCoords, setStartCoords] = useState<{lat:number;lng:number} | null>(null);
+  const [endCoords, setEndCoords] = useState<{lat:number;lng:number} | null>(null);
+  const [mapLoading, setMapLoading] = useState(false);
   const toggle=(s:keyof typeof sections)=>setSections(p=>({...p,[s]:!p[s]}));
+
+  const geocodePlace = async (query: string): Promise<PlaceSuggestion[]> => {
+    const value = query.trim();
+    if (value.length < 3) return [];
+    const response = await fetch(`/api/maps/geocode?query=${encodeURIComponent(value)}&limit=5`);
+    if (!response.ok) return [];
+    const data = await response.json();
+    return Array.isArray(data?.features) ? data.features : [];
+  };
 
   const handleBanner=(file:File)=>{
     if(!file.type.startsWith('image/'))return;
@@ -1918,6 +2426,30 @@ const CreateEventPage = ({user}:{user:User}) => {
   const toggleTag=(tag:string)=>setForm(p=>({...p,selectedTags:p.selectedTags.includes(tag)?p.selectedTags.filter(t=>t!==tag):[...p.selectedTags,tag]}));
   const addInvite=()=>{const v=inviteInput.trim();if(!v||invites.find(i=>i.value===v))return;setInvites(p=>[...p,{type:v.includes('@')?'email':'phone',value:v}]);setInviteInput('');};
 
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      try {
+        const results = await geocodePlace(form.meetupPoint);
+        setStartSuggestions(results);
+      } catch {
+        setStartSuggestions([]);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [form.meetupPoint]);
+
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      try {
+        const results = await geocodePlace(form.endLocation);
+        setEndSuggestions(results);
+      } catch {
+        setEndSuggestions([]);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [form.endLocation]);
+
   const cc='bg-white/[0.03] border border-white/10 rounded-2xl hover:border-white/20 transition-colors';
   const SH=({label,section,icon:Icon}:{label:string;section:keyof typeof sections;icon:React.ElementType})=>(
     <button type="button" onClick={()=>toggle(section)} className="w-full flex items-center justify-between py-3.5 px-5 hover:bg-white/[0.02] transition-colors rounded-t-2xl">
@@ -1927,7 +2459,7 @@ const CreateEventPage = ({user}:{user:User}) => {
   );
 
   return (
-    <div className="min-h-screen bg-black text-white">
+    <div className="min-h-dvh bg-black text-white">
       <AppNav user={user}/>
       <div className="max-w-6xl mx-auto px-4 md:px-8 pt-28 pb-6 border-b border-white/[0.06]">
         <div className="flex items-center justify-between">
@@ -1940,6 +2472,36 @@ const CreateEventPage = ({user}:{user:User}) => {
           onSubmit={async e => {
             e.preventDefault();
             try {
+              setMapLoading(true);
+              let resolvedStart = startCoords;
+              let resolvedEnd = endCoords;
+
+              if (!resolvedStart && form.meetupPoint.trim()) {
+                const features = await geocodePlace(form.meetupPoint);
+                if (features[0]?.center) {
+                  resolvedStart = {
+                    lng: Number(features[0].center[0]),
+                    lat: Number(features[0].center[1]),
+                  };
+                }
+              }
+
+              if (!resolvedStart) {
+                alert("Please choose a valid meetup location from suggestions.");
+                setMapLoading(false);
+                return;
+              }
+
+              if (!resolvedEnd && form.endLocation.trim()) {
+                const features = await geocodePlace(form.endLocation);
+                if (features[0]?.center) {
+                  resolvedEnd = {
+                    lng: Number(features[0].center[0]),
+                    lat: Number(features[0].center[1]),
+                  };
+                }
+              }
+
               const payload = {
                 organizer_id: Number(user.id) || undefined,
                 name: form.name,
@@ -1950,8 +2512,16 @@ const CreateEventPage = ({user}:{user:User}) => {
                 duration: form.duration,
                 price: form.isFree ? 0 : Number(form.price || 0),
                 max_participants: form.maxParticipants,
-                meetup_lat: null,
-                meetup_lng: null,
+                meetup_lat: resolvedStart?.lat ?? null,
+                meetup_lng: resolvedStart?.lng ?? null,
+                start_lat: resolvedStart?.lat ?? null,
+                start_lng: resolvedStart?.lng ?? null,
+                end_lat: resolvedEnd?.lat ?? null,
+                end_lng: resolvedEnd?.lng ?? null,
+                start_place_name: form.meetupPoint,
+                start_place_address: form.meetupPoint,
+                end_place_name: form.endLocation || null,
+                end_place_address: form.endLocation || null,
                 privacy: form.privacy.toLowerCase(),
                 banner_url: bannerPreview || null,
                 start_location: form.meetupPoint,
@@ -1969,15 +2539,24 @@ const CreateEventPage = ({user}:{user:User}) => {
 
               if (!res.ok) {
                 const body = await res.json().catch(() => ({}));
-                alert(body.error || "Failed to create event");
+                const msg = [body.error, body.details, body.hint].filter(Boolean).join("\n");
+                alert(msg || "Failed to create event");
                 return;
               }
 
-              const data = await res.json();
-              navigate(`/trip/${data.id}`);
+              const data = await res.json().catch(() => ({}));
+              const createdId = data?.id ?? data?.trip_id;
+              if (!createdId) {
+                alert("Event created, but trip id was missing in response. Open it from Organizer Dashboard.");
+                navigate("/organizer");
+                return;
+              }
+              navigate(`/trip/${createdId}`);
             } catch (err) {
               console.error("Create event error", err);
               alert("Something went wrong while creating the event.");
+            } finally {
+              setMapLoading(false);
             }
           }}
           className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-8"
@@ -2043,18 +2622,80 @@ const CreateEventPage = ({user}:{user:User}) => {
               <SH label="Meetup Location" section="location" icon={MapPin}/>
               <AnimatePresence>{sections.location&&(<motion.div initial={{height:0}} animate={{height:'auto'}} exit={{height:0}} className="overflow-hidden"><div className="px-5 pb-5 pt-1 space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div><label className="text-[10px] font-bold text-white/30 uppercase tracking-wider mb-1.5 block">Start / Meetup Point</label><input type="text" placeholder="e.g. Gateway of India, Mumbai" value={form.meetupPoint} onChange={e=>setForm(p=>({...p,meetupPoint:e.target.value}))} className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2.5 text-sm font-semibold placeholder:text-white/15 focus:outline-none focus:border-white/30 text-white/90"/></div>
-                  <div><label className="text-[10px] font-bold text-white/30 uppercase tracking-wider mb-1.5 block">End / Drop-off Location</label><input type="text" placeholder="e.g. Lonavala Station" value={form.endLocation} onChange={e=>setForm(p=>({...p,endLocation:e.target.value}))} className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2.5 text-sm font-semibold placeholder:text-white/15 focus:outline-none focus:border-white/30 text-white/90"/></div>
-                </div>
-                <div className="rounded-2xl overflow-hidden border border-white/10 relative bg-[#0d0d0d] h-44">
-                  <div className="absolute inset-0 opacity-[0.04]" style={{backgroundImage:'linear-gradient(rgba(255,255,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,1) 1px, transparent 1px)',backgroundSize:'30px 30px'}}/>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-white/[0.06] border border-white/10 flex items-center justify-center"><MapPin size={18} className="text-white/40"/></div>
-                    <p className="text-xs text-white/30">Google Maps integration</p>
-                    <a href={`https://maps.google.com/?q=${encodeURIComponent(form.meetupPoint||'India')}`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg border border-white/10 text-xs font-semibold text-white/50 hover:text-white hover:border-white/30 bg-white/[0.03] transition-all"><Globe size={12}/> Open in Maps</a>
+                  <div className="relative">
+                    <label className="text-[10px] font-bold text-white/30 uppercase tracking-wider mb-1.5 block">Start / Meetup Point</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Gateway of India, Mumbai"
+                      value={form.meetupPoint}
+                      onChange={e => {
+                        const value = e.target.value;
+                        setForm(p => ({ ...p, meetupPoint: value }));
+                        setStartCoords(null);
+                      }}
+                      className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2.5 text-sm font-semibold placeholder:text-white/15 focus:outline-none focus:border-white/30 text-white/90"
+                    />
+                    {startSuggestions.length > 0 && (
+                      <div className="absolute z-30 mt-1 w-full rounded-xl border border-white/10 bg-[#111] max-h-44 overflow-y-auto">
+                        {startSuggestions.map(item => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => {
+                              setForm(p => ({ ...p, meetupPoint: item.place_name }));
+                              setStartCoords({ lat: Number(item.center[1]), lng: Number(item.center[0]) });
+                              setStartSuggestions([]);
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs text-white/75 hover:bg-white/10 transition-colors"
+                          >
+                            {item.place_name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  {form.meetupPoint&&<div className="absolute bottom-3 left-3 right-3 px-3 py-2 bg-black/70 backdrop-blur-sm rounded-xl border border-white/10"><p className="text-xs font-semibold text-white/80 flex items-center gap-1.5"><MapPin size={11} className="text-emerald-400"/>{form.meetupPoint}</p></div>}
+                  <div className="relative">
+                    <label className="text-[10px] font-bold text-white/30 uppercase tracking-wider mb-1.5 block">End / Drop-off Location</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Lonavala Station"
+                      value={form.endLocation}
+                      onChange={e => {
+                        const value = e.target.value;
+                        setForm(p => ({ ...p, endLocation: value }));
+                        setEndCoords(null);
+                      }}
+                      className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2.5 text-sm font-semibold placeholder:text-white/15 focus:outline-none focus:border-white/30 text-white/90"
+                    />
+                    {endSuggestions.length > 0 && (
+                      <div className="absolute z-30 mt-1 w-full rounded-xl border border-white/10 bg-[#111] max-h-44 overflow-y-auto">
+                        {endSuggestions.map(item => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => {
+                              setForm(p => ({ ...p, endLocation: item.place_name }));
+                              setEndCoords({ lat: Number(item.center[1]), lng: Number(item.center[0]) });
+                              setEndSuggestions([]);
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs text-white/75 hover:bg-white/10 transition-colors"
+                          >
+                            {item.place_name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
+                <MapboxRouteMap className="h-44 rounded-2xl overflow-hidden border border-white/10" start={startCoords} end={endCoords} />
+                {startCoords && (
+                  <div className="px-3 py-2 bg-black/70 backdrop-blur-sm rounded-xl border border-white/10">
+                    <p className="text-xs font-semibold text-white/80 flex items-center gap-1.5">
+                      <MapPin size={11} className="text-emerald-400"/>
+                      {form.meetupPoint} ({startCoords.lat.toFixed(5)}, {startCoords.lng.toFixed(5)})
+                    </p>
+                  </div>
+                )}
               </div></motion.div>)}</AnimatePresence>
             </div>
             {/* CAPACITY & PRICING */}
@@ -2144,8 +2785,8 @@ const CreateEventPage = ({user}:{user:User}) => {
             </AnimatePresence>
             {/* SUBMIT */}
             <div className="pt-2 pb-10">
-              <button type="submit" className="w-full py-4 bg-white text-black rounded-2xl font-bold text-base tracking-wide hover:bg-gray-100 active:scale-[0.99] transition-all relative overflow-hidden group shadow-[0_0_40px_rgba(255,255,255,0.08)]">
-                <span className="relative z-10 flex items-center justify-center gap-2"><Sparkles size={16}/> Publish Event</span>
+              <button type="submit" disabled={mapLoading} className={cn("w-full py-4 bg-white text-black rounded-2xl font-bold text-base tracking-wide hover:bg-gray-100 active:scale-[0.99] transition-all relative overflow-hidden group shadow-[0_0_40px_rgba(255,255,255,0.08)]", mapLoading && "opacity-60 cursor-not-allowed")}>
+                <span className="relative z-10 flex items-center justify-center gap-2"><Sparkles size={16}/> {mapLoading ? "Publishing..." : "Publish Event"}</span>
                 <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 bg-gradient-to-r from-transparent via-black/5 to-transparent"/>
               </button>
               <p className="text-center text-[10px] text-white/20 mt-3 uppercase tracking-[0.15em]">Event will be reviewed before going live</p>
@@ -2261,8 +2902,6 @@ type TripPhase = 'waiting' | 'live' | 'ended' | 'post';
 type MemberStatus = 'arrived' | 'on-way' | 'absent';
 type MemberRole = 'organizer' | 'co-admin' | 'moderator' | 'member';
 type ChatMode = 'all' | 'admin-only';
-type RoadQuality = 'smooth' | 'rough' | 'damaged' | 'blocked';
-
 type LiveMember = {
   id: string; name: string; avatar: string; status: MemberStatus;
   role: MemberRole; muted: boolean; blocked: boolean;
@@ -2271,7 +2910,6 @@ type LiveMember = {
 };
 
 type Checkpoint = { id: string; name: string; lat: number; lng: number; reached: boolean; badge: string; xp: number };
-type ChatMessage = { id: string; sender: string; avatar: string; text: string; time: string; role: MemberRole; sticker?: string };
 type MapPin = { id: string; type: 'parking' | 'fuel' | 'attraction' | 'hazard' | 'road-damage'; lat: number; lng: number; label: string; addedBy: string };
 type WeatherAlert = { type: 'rain' | 'wind' | 'fog' | 'clear'; message: string; severity: 'low' | 'medium' | 'high' };
 
@@ -2293,14 +2931,6 @@ const MOCK_CHECKPOINTS: Checkpoint[] = [
   { id:'cp4',name:'Alibaug Beach',lat:18.641,lng:72.872,reached:false,badge:'🏖️',xp:150 },
 ];
 
-const MOCK_CHAT: ChatMessage[] = [
-  { id:'c1',sender:'Arjun Mehta',avatar:'arjun',text:'Welcome everyone! Stay safe and follow convoy rules 🏍️',time:'08:02',role:'organizer' },
-  { id:'c2',sender:'Priya Sharma',avatar:'priya',text:'Ready! The coastal road looks beautiful today',time:'08:05',role:'co-admin' },
-  { id:'c3',sender:'Rahul Dev',avatar:'rahul',text:'Let\'s goooo! 🔥',time:'08:06',role:'member' },
-  { id:'c4',sender:'Arjun Mehta',avatar:'arjun',text:'⚠️ Fuel stop at Panvel — everyone fill up before the ghats',time:'08:12',role:'organizer' },
-  { id:'c5',sender:'Vikram Nair',avatar:'vikram',text:'Copy that! See you at Panvel',time:'08:13',role:'moderator' },
-];
-
 const MOCK_MAP_PINS: MapPin[] = [
   { id:'p1',type:'parking',lat:18.985,lng:73.112,label:'HP Parking — Panvel',addedBy:'Arjun Mehta' },
   { id:'p2',type:'fuel',lat:18.985,lng:73.115,label:'HP Petrol Pump',addedBy:'Priya Sharma' },
@@ -2316,7 +2946,8 @@ type TripStats = { distanceCovered: number; duration: string; carbonSaved: numbe
 const LiveTripPage = ({ user }: { user: User }) => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const trip = MOCK_TRIPS.find(t => t.id === id) || MOCK_TRIPS[0];
+  const [trip, setTrip] = useState<Trip | null>(null);
+  const [tripLoading, setTripLoading] = useState(true);
 
   // ─── PHASE STATE ───────────────────────────────────────────
   const [phase, setPhase] = useState<TripPhase>('waiting');
@@ -2331,30 +2962,310 @@ const LiveTripPage = ({ user }: { user: User }) => {
   const [chatMode, setChatMode] = useState<ChatMode>('all');
   const [stickersEnabled, setStickersEnabled] = useState(true);
   const [videoCallActive, setVideoCallActive] = useState(false);
+  // ─── GROUP COMMS (VOICE) ───────────────────────────────────
+  type VoiceMode = "open" | "ptt" | "controlled";
+  // Default: staff talk (admin / co-admin / moderator). Members must request to speak.
+  const [voiceMode, setVoiceMode] = useState<VoiceMode>("controlled");
+  const [pttHeld, setPttHeld] = useState(false);
+  const [localSpeaking, setLocalSpeaking] = useState(false);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micTrackRef = useRef<MediaStreamTrack | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const rafSpeakingRef = useRef<number | null>(null);
+  const lastSpokeAtRef = useRef<number>(0);
+  const [micError, setMicError] = useState<string | null>(null);
+  // Zoom-style speaking permissions for controlled mode
+  const [speakRequests, setSpeakRequests] = useState<string[]>([]);
+  const [approvedSpeakers, setApprovedSpeakers] = useState<string[]>([]);
   const [attendanceTab, setAttendanceTab] = useState<'all' | 'arrived' | 'pending'>('all');
 
   // ─── LIVE MAP STATE ────────────────────────────────────────
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>(MOCK_CHECKPOINTS);
   const [mapPins, setMapPins] = useState<MapPin[]>(MOCK_MAP_PINS);
-  const [chat, setChat] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
   const [showSOS, setShowSOS] = useState(false);
-  const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showAddPin, setShowAddPin] = useState(false);
-  const [showRoadFeedback, setShowRoadFeedback] = useState(false);
   const [newPinType, setNewPinType] = useState<MapPin['type']>('parking');
   const [newPinLabel, setNewPinLabel] = useState('');
-  const [liveTab, setLiveTab] = useState<'chat' | 'members' | 'checkpoints' | 'leaderboard'>('chat');
+  const [liveTab, setLiveTab] = useState<'members' | 'checkpoints' | 'leaderboard'>('members');
   const [tripPaused, setTripPaused] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [mapSelected, setMapSelected] = useState<string | null>(null);
+  const socketRef = useRef<ReturnType<typeof io> | null>(null);
+  const liveMapRef = useRef<LiveTripMapRef>(null);
+  const [liveMapTheme, setLiveMapTheme] = useState<MapTheme>(() => readLiveMapStoredTheme());
+  const [stravaShareLive, setStravaShareLive] = useState(false);
+  const [stravaTrackLaps, setStravaTrackLaps] = useState(false);
+  /** Peek = map-first driving view; expanded = full convoy controls (Google Maps–style sheet). */
+  const [liveSheetSnap, setLiveSheetSnap] = useState<"peek" | "expanded">("peek");
 
   // ─── POST-TRIP STATE ───────────────────────────────────────
   const [postRating, setPostRating] = useState(0);
   const [postReview, setPostReview] = useState('');
   const [postShared, setPostShared] = useState(false);
   const [postSubmitted, setPostSubmitted] = useState(false);
+  const [accessChecking, setAccessChecking] = useState(true);
+  const [accessDenied, setAccessDenied] = useState('');
+  const [endingTrip, setEndingTrip] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    (async () => {
+      try {
+        setTripLoading(true);
+        const res = await fetch(`/api/trips/${id}`);
+        if (!res.ok) {
+          setTrip(null);
+          return;
+        }
+        const raw = await res.json();
+        setTrip(normalizeTripFromApi(raw));
+      } catch {
+        setTrip(null);
+      } finally {
+        setTripLoading(false);
+      }
+    })();
+  }, [id]);
+
+  /** Keep demo rider dots near this trip’s meetup so the live map matches the route. */
+  const snappedMeetupForTripRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!id || trip?.meetupLat == null || trip?.meetupLng == null) return;
+    if (snappedMeetupForTripRef.current === id) return;
+    snappedMeetupForTripRef.current = id;
+    const lat0 = trip.meetupLat;
+    const lng0 = trip.meetupLng;
+    setMembers((prev) =>
+      prev.map((m, i) => ({
+        ...m,
+        lat: lat0 + Math.sin(i * 1.3) * 0.01,
+        lng: lng0 + Math.cos(i * 1.1) * 0.01,
+      })),
+    );
+  }, [id, trip?.meetupLat, trip?.meetupLng]);
+
+  // ─── GROUP COMMS (LOCAL MIC + SPEAKING DETECTION) ─────────────────────────
+  const userName = (user.name ?? "").trim().toLowerCase();
+  const userFirst = userName.split(" ")[0] || "";
+
+  // Local member matching:
+  // - Prefer explicit member id like "m1"
+  // - Fall back to numeric ids like "1" -> "m1"
+  // - Finally match by name prefix (mock waiting room uses full names)
+  const localMemberById =
+    typeof user.id === "string" && /^m\d+$/.test(user.id)
+      ? user.id
+      : Number.isFinite(Number(user.id))
+        ? `m${Number(user.id)}`
+        : null;
+
+  const localMember =
+    (localMemberById ? members.find((m) => m.id === localMemberById) : null) ??
+    (members.find((m) => m.name.trim().toLowerCase() === userName) ??
+      members.find((m) => userFirst && m.name.trim().toLowerCase().startsWith(userFirst))) ??
+    null;
+
+  const localMemberId = localMember?.id ?? null;
+  const localRole = localMember?.role ?? "member";
+  // Fallback for real users: organizer profile should be able to switch to Talk All even
+  // if the mock waiting-room member matching fails.
+  const canModerateVoice =
+    localRole === "organizer" ||
+    localRole === "co-admin" ||
+    localRole === "moderator" ||
+    user.role === "organizer";
+  const localMuted = localMember?.muted ?? true;
+  const localAllowedInControlled =
+    voiceMode !== "controlled" ||
+    canModerateVoice ||
+    (localMemberId ? approvedSpeakers.includes(localMemberId) : false);
+
+  // Start/stop microphone when the voice channel is connected.
+  useEffect(() => {
+    let cancelled = false;
+
+    const cleanup = () => {
+      try {
+        if (rafSpeakingRef.current != null) {
+          cancelAnimationFrame(rafSpeakingRef.current);
+          rafSpeakingRef.current = null;
+        }
+        lastSpokeAtRef.current = 0;
+        setLocalSpeaking(false);
+        setMicError(null);
+      } catch {
+        // noop
+      }
+
+      try {
+        micTrackRef.current?.stop();
+      } catch {
+        // noop
+      }
+      micTrackRef.current = null;
+
+      try {
+        micStreamRef.current?.getTracks().forEach((t) => t.stop());
+      } catch {
+        // noop
+      }
+      micStreamRef.current = null;
+
+      try {
+        if (audioCtxRef.current) {
+          audioCtxRef.current.close();
+        }
+      } catch {
+        // noop
+      }
+      audioCtxRef.current = null;
+      analyserRef.current = null;
+    };
+
+    if (!videoCallActive) {
+      cleanup();
+      return;
+    }
+
+    // If already connected, don't re-init.
+    if (micStreamRef.current) return;
+
+    (async () => {
+      try {
+        setMicError(null);
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+
+        micStreamRef.current = stream;
+        micTrackRef.current = stream.getAudioTracks()[0] ?? null;
+
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        const ctx: AudioContext = new AudioCtx();
+        audioCtxRef.current = ctx;
+
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0.85;
+        source.connect(analyser);
+        analyserRef.current = analyser;
+
+        const data = new Float32Array(analyser.fftSize);
+        const threshold = 0.02; // local speaking threshold (tune if needed)
+        const holdMs = 350;
+
+        const tick = () => {
+          const trackEnabled = micTrackRef.current?.enabled ?? false;
+          if (!trackEnabled || !analyserRef.current) {
+            setLocalSpeaking((prev) => (prev ? false : prev));
+            rafSpeakingRef.current = requestAnimationFrame(tick);
+            return;
+          }
+
+          analyserRef.current.getFloatTimeDomainData(data);
+          let sum = 0;
+          for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+          const rms = Math.sqrt(sum / data.length);
+
+          const now = Date.now();
+          if (rms > threshold) lastSpokeAtRef.current = now;
+          const speaking = now - lastSpokeAtRef.current <= holdMs;
+          setLocalSpeaking((prev) => (prev === speaking ? prev : speaking));
+
+          rafSpeakingRef.current = requestAnimationFrame(tick);
+        };
+
+        rafSpeakingRef.current = requestAnimationFrame(tick);
+      } catch (e) {
+        console.error("Mic permission / setup failed:", e);
+        if (!cancelled) {
+          setMicError("Microphone access failed. Please allow mic permission and try Join again.");
+          setVideoCallActive(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      cleanup();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoCallActive]);
+
+  // Enable/disable the local mic track depending on mode + mute + permissions.
+  useEffect(() => {
+    const track = micTrackRef.current;
+    if (!track) return;
+
+    if (!videoCallActive) {
+      track.enabled = false;
+      setLocalSpeaking(false);
+      return;
+    }
+
+    const allowed = localAllowedInControlled;
+    const shouldEnable =
+      allowed &&
+      !localMuted &&
+      (voiceMode !== "ptt" ? true : pttHeld);
+
+    track.enabled = shouldEnable;
+    if (!shouldEnable) setLocalSpeaking(false);
+  }, [videoCallActive, voiceMode, pttHeld, localAllowedInControlled, localMuted]);
+
+  // When switching comm scope:
+  // - controlled (staff talk): staff unmuted, members muted unless explicitly approved
+  // - open (all talk): everyone unmuted, clear requests/approvals
+  useEffect(() => {
+    if (!videoCallActive) return;
+
+    setSpeakRequests([]);
+    setApprovedSpeakers([]);
+    setPttHeld(false);
+    setLocalSpeaking(false);
+
+    setMembers((prev) =>
+      prev.map((m) => {
+        const isStaff = m.role === "organizer" || m.role === "co-admin" || m.role === "moderator";
+        if (voiceMode === "controlled") {
+          return isStaff ? { ...m, muted: false } : { ...m, muted: true };
+        }
+        // open mode
+        return { ...m, muted: false };
+      }),
+    );
+  }, [voiceMode, videoCallActive]);
+
+  useEffect(() => {
+    if (!id) return;
+    (async () => {
+      try {
+        setAccessChecking(true);
+        const res = await fetch(`/api/trips/${id}/live-access?user_id=${encodeURIComponent(user.id)}`);
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body.allowed !== true) {
+          setAccessDenied(body.error || "You do not have permission to access this trip live room.");
+          return;
+        }
+        setAccessDenied('');
+      } catch {
+        setAccessDenied('Could not validate live access right now.');
+      } finally {
+        setAccessChecking(false);
+      }
+    })();
+  }, [id, user.id]);
+
 
   // Timer for live phase
   useEffect(() => {
@@ -2378,73 +3289,123 @@ const LiveTripPage = ({ user }: { user: User }) => {
   }, [phase]);
 
   const formatTime = (s: number) => `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+  /** Strava-style clock (mm:ss or h:mm:ss). */
+  const formatElapsedStrava = (sec: number) => {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  };
+  const formatPaceMinPerKm = (elapsedSec: number, distKm: number) => {
+    if (distKm < 0.01) return '--:--';
+    const secPerKm = elapsedSec / distKm;
+    const m = Math.floor(secPerKm / 60);
+    const s = Math.floor(secPerKm % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+  };
   const arrivedCount = members.filter(m => m.status === 'arrived').length;
   const totalCount = members.length;
+  const myDistanceKm = localMember?.distanceCovered ?? 0;
 
   const toggleMute = (id: string) => setMembers(p => p.map(m => m.id === id ? { ...m, muted: !m.muted } : m));
+  const toggleMuteWithVoiceRules = (targetId: string) => {
+    if (!localMemberId) {
+      toggleMute(targetId);
+      return;
+    }
+    const isSelf = targetId === localMemberId;
+    // In controlled mode, only allowed speakers can unmute themselves.
+    if (voiceMode === "controlled" && isSelf && localMuted && !localAllowedInControlled) return;
+    // In any mode, only moderators can mute/unmute other users.
+    if (!canModerateVoice && !isSelf) return;
+    toggleMute(targetId);
+  };
+
+  // Zoom-style "raise hand" for controlled (staff talk) mode.
+  const requestToSpeak = () => {
+    if (!localMemberId) return;
+    // If already approved or already requested, ignore.
+    if (localAllowedInControlled) return;
+    setSpeakRequests((prev) => (prev.includes(localMemberId) ? prev : [...prev, localMemberId]));
+    // Keep them muted until staff approves.
+    setMembers((prev) =>
+      prev.map((m) => (m.id === localMemberId ? { ...m, muted: true } : m)),
+    );
+  };
+
+  const allowSpeaker = (targetId: string) => {
+    setApprovedSpeakers((prev) =>
+      prev.includes(targetId) ? prev : [...prev, targetId],
+    );
+    setSpeakRequests((prev) => prev.filter((id) => id !== targetId));
+    setMembers((prev) => prev.map((m) => (m.id === targetId ? { ...m, muted: false } : m)));
+  };
+
+  const denySpeaker = (targetId: string) => {
+    setApprovedSpeakers((prev) => prev.filter((id) => id !== targetId));
+    setSpeakRequests((prev) => prev.filter((id) => id !== targetId));
+    setMembers((prev) => prev.map((m) => (m.id === targetId ? { ...m, muted: true } : m)));
+  };
   const toggleBlock = (id: string) => setMembers(p => p.map(m => m.id === id ? { ...m, blocked: !m.blocked } : m));
   const assignRole = (id: string, role: MemberRole) => setMembers(p => p.map(m => m.id === id ? { ...m, role } : m));
 
-  // Load existing chat messages for this trip from backend
+  // Realtime socket integration for live location updates.
   useEffect(() => {
     if (!id) return;
-    (async () => {
-      try {
-        setChatLoading(true);
-        const res = await fetch(`/api/trips/${id}/messages`);
-        if (!res.ok) return;
-        const data: { id: number; user_id: number; message: string; created_at: string }[] = await res.json();
-        setChat(
-          data.map(m => ({
-            id: String(m.id),
-            sender: user.name,
-            avatar: user.name,
-            text: m.message,
-            time: new Date(m.created_at).toLocaleTimeString('en-IN', {
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
-            role: 'organizer',
-          }))
-        );
-      } catch {
-        // ignore for now
-      } finally {
-        setChatLoading(false);
-      }
-    })();
-  }, [id, user.name]);
+    const socket = io("/", {
+      transports: ["polling", "websocket"],
+      reconnection: true,
+      reconnectionAttempts: 8,
+      reconnectionDelay: 500,
+    });
+    socketRef.current = socket;
+    socket.emit("join-trip", Number(id));
 
-  const sendMessage = async () => {
-    if (!chatInput.trim() || !id) return;
-    try {
-      const res = await fetch(`/api/trips/${id}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: Number(user.id) || undefined,
-          message: chatInput.trim(),
-        }),
-      });
-      if (!res.ok) return;
-      const saved: { id: number; user_id: number; message: string; created_at: string } = await res.json();
-      const msg: ChatMessage = {
-        id: String(saved.id),
-        sender: user.name,
-        avatar: user.name,
-        text: saved.message,
-        time: new Date(saved.created_at).toLocaleTimeString('en-IN', {
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        role: 'organizer',
-      };
-      setChat(p => [...p, msg]);
-      setChatInput('');
-    } catch (err) {
-      console.error('Send message failed', err);
-    }
-  };
+    socket.on("location-updated", (payload: { userId: number; lat: number; lng: number; speed?: number }) => {
+      setMembers(prev =>
+        prev.map(m =>
+          Number(m.id.replace("m", "")) === payload.userId
+            ? {
+                ...m,
+                lat: payload.lat,
+                lng: payload.lng,
+                speed: payload.speed ?? m.speed,
+              }
+            : m
+        )
+      );
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [id]);
+
+  useEffect(() => {
+    if (!id || phase !== "live") return;
+    if (!navigator.geolocation) return;
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        socketRef.current?.emit("update-location", {
+          tripId: Number(id),
+          userId: Number(user.id),
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          speed: position.coords.speed,
+          heading: position.coords.heading,
+          recordedAt: new Date(position.timestamp).toISOString(),
+        });
+      },
+      () => {
+        // silently ignore permission/position errors
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+    );
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [id, phase, user.id]);
 
   const addPin = () => {
     if (!newPinLabel.trim()) return;
@@ -2458,10 +3419,88 @@ const LiveTripPage = ({ user }: { user: User }) => {
     setShowAddPin(false);
   };
 
-  const endTrip = () => {
-    setPhase('ended');
-    setTimeout(() => setPhase('post'), 2800);
+  const endTrip = async () => {
+    if (!id) return;
+    setEndingTrip(true);
+    try {
+      const res = await fetch(`/api/trips/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "completed",
+          user_id: Number(user.id),
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(body.error || "Unable to end trip");
+        return;
+      }
+      setPhase('ended');
+      setTimeout(() => setPhase('post'), 2800);
+    } finally {
+      setEndingTrip(false);
+    }
   };
+
+  const submitPostTripReview = async () => {
+    if (!id) return;
+    if (!postRating || !postReview.trim()) {
+      alert("Please provide a rating and review.");
+      return;
+    }
+    try {
+      const res = await fetch(`/api/trips/${id}/reviews`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: Number(user.id),
+          rating: postRating,
+          text: postReview.trim(),
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(body.error || "Failed to submit review");
+        return;
+      }
+      setPostSubmitted(true);
+    } catch {
+      alert("Failed to submit review");
+    }
+  };
+  if (accessChecking) return (
+    <div className="min-h-dvh bg-black text-white flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-10 h-10 border-2 border-white/20 border-t-white rounded-full animate-spin mx-auto mb-4"/>
+        <p className="text-white/40">Checking trip permissions...</p>
+      </div>
+    </div>
+  );
+
+  if (tripLoading || !trip) return (
+    <div className="min-h-dvh bg-black text-white flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-10 h-10 border-2 border-white/20 border-t-white rounded-full animate-spin mx-auto mb-4"/>
+        <p className="text-white/40">{tripLoading ? "Loading trip..." : "Trip not found"}</p>
+      </div>
+    </div>
+  );
+
+  if (accessDenied) return (
+    <div className="min-h-dvh bg-black text-white flex items-center justify-center px-4">
+      <Card className="p-6 max-w-md text-center">
+        <AlertTriangle size={22} className="text-amber-400 mx-auto mb-3"/>
+        <p className="font-semibold mb-2">Live access denied</p>
+        <p className="text-sm text-white/50 mb-4">{accessDenied}</p>
+        <div className="flex gap-2 justify-center">
+          <Button onClick={() => navigate(`/trip/${id}`)}>Go to Trip</Button>
+          <Button variant="outline" onClick={() => navigate(user.role === 'organizer' ? '/organizer' : '/dashboard')}>Back</Button>
+        </div>
+      </Card>
+    </div>
+  );
+
 
   const roleColor = (role: MemberRole) => ({
     organizer: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
@@ -2495,15 +3534,15 @@ const LiveTripPage = ({ user }: { user: User }) => {
           </button>
           <button
             onClick={endTrip}
+            disabled={endingTrip}
             className="flex-1 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 font-bold text-sm hover:bg-red-500/20 transition-all"
           >
-            End Trip
+            {endingTrip ? 'Ending...' : 'End Trip'}
           </button>
         </div>
         <button
           onClick={() => {
             setShowExitConfirm(false);
-            if (id) navigate(`/trip/${id}`);
           }}
           className="mt-3 w-full py-2 text-sm text-white/30 hover:text-white transition-colors"
         >
@@ -2530,7 +3569,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
 
   // ─── POST-TRIP ─────────────────────────────────────────────
   if (phase === 'post') return (
-    <div className="min-h-screen bg-black text-white overflow-y-auto">
+    <div className="min-h-dvh bg-black text-white overflow-y-auto">
       <div className="max-w-2xl mx-auto px-4 py-10">
         {/* Header */}
         <motion.div initial={{opacity:0,y:20}} animate={{opacity:1,y:0}} className="text-center mb-8">
@@ -2645,7 +3684,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
               placeholder="Share your experience — what made this trip special?"
               className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl p-4 text-sm text-white placeholder:text-white/15 focus:outline-none focus:border-white/20 resize-none min-h-[90px] mb-4"
             />
-            <Button className="w-full flex items-center justify-center gap-2" onClick={() => setPostSubmitted(true)}>
+            <Button className="w-full flex items-center justify-center gap-2" onClick={submitPostTripReview}>
               <Send size={14}/> Submit Review
             </Button>
           </motion.div>
@@ -2674,9 +3713,20 @@ const LiveTripPage = ({ user }: { user: User }) => {
         </motion.div>
 
         {/* Actions */}
-        <div className="flex gap-3">
-          <Button className="flex-1" onClick={() => navigate('/dashboard')}>Go to Dashboard</Button>
-          <Button variant="outline" className="flex-1" onClick={() => navigate('/explore')}>Find Next Trip</Button>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Button
+            className="flex-1 min-h-12 touch-manipulation"
+            onClick={() => navigate(user.role === "organizer" ? "/organizer" : "/dashboard")}
+          >
+            {user.role === "organizer" ? "Organizer dashboard" : "Go to Dashboard"}
+          </Button>
+          <Button
+            variant="outline"
+            className="flex-1 min-h-12 touch-manipulation"
+            onClick={() => navigate(user.role === "organizer" ? "/organizer" : "/explore")}
+          >
+            {user.role === "organizer" ? "Manage events" : "Find Next Trip"}
+          </Button>
         </div>
       </div>
     </div>
@@ -2684,9 +3734,9 @@ const LiveTripPage = ({ user }: { user: User }) => {
 
   // ─── WAITING ROOM ──────────────────────────────────────────
   if (phase === 'waiting') return (
-    <div className="fixed inset-0 bg-black text-white overflow-hidden flex flex-col">
+    <div className="fixed inset-0 bg-black text-white overflow-y-auto flex flex-col safe-pt safe-pb safe-px">
       {/* Header Bar */}
-      <div className="flex items-center justify-between px-5 py-3.5 bg-black/90 backdrop-blur-xl border-b border-white/[0.07] flex-shrink-0">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-5 sm:py-3.5 bg-black/90 backdrop-blur-xl border-b border-white/[0.07] flex-shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"/>
           <span className="text-sm font-bold">Waiting Room</span>
@@ -2700,7 +3750,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden flex flex-col lg:flex-row">
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
         {/* LEFT: Trip Info + Controls */}
         <div className="w-full lg:w-80 border-r border-white/[0.06] flex flex-col flex-shrink-0">
           {/* Trip Banner */}
@@ -2717,41 +3767,282 @@ const LiveTripPage = ({ user }: { user: User }) => {
           {/* Organizer Controls */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/20">Organizer Controls</p>
-
-            {/* Video Call */}
-            <button onClick={() => setVideoCallActive(!videoCallActive)}
-              className={cn('w-full flex items-center gap-3 p-3 rounded-xl border text-sm font-semibold transition-all',
-                videoCallActive ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-white/[0.03] border-white/10 text-white/60 hover:text-white hover:border-white/25')}>
-              <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center', videoCallActive ? 'bg-emerald-500/20' : 'bg-white/[0.06]')}>
-                {videoCallActive ? <CheckCircle size={14} className="text-emerald-400"/> : <Users size={14}/>}
+            
+            {/* Group Comms (Voice Channel) */}
+            <div className="p-3 bg-white/[0.03] border border-white/10 rounded-xl space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold text-white/30 uppercase tracking-wider mb-1">Group Comms</p>
+                  <p className="text-[11px] text-white/55">
+                    {members.filter((m) => m.status !== "absent").length} members active
+                  </p>
+                </div>
+                <div
+                  className={cn(
+                    "px-2 py-1 rounded-lg border text-[10px] font-bold whitespace-nowrap",
+                    videoCallActive
+                      ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                      : "bg-white/[0.03] border-white/10 text-white/50",
+                  )}
+                >
+                  {videoCallActive ? "Voice Connected" : "Not Connected"}
+                </div>
               </div>
-              {videoCallActive ? 'Video Call Active' : 'Start Video / Audio Call'}
-            </button>
+              {micError && (
+                <p className="text-[10px] text-red-400 leading-tight">
+                  {micError}
+                </p>
+              )}
 
-            {/* Chat Mode */}
-            <div className="p-3 bg-white/[0.03] border border-white/10 rounded-xl">
-              <p className="text-[10px] font-bold text-white/30 uppercase tracking-wider mb-2">Chat Mode</p>
-              <div className="flex gap-1.5">
-                {(['all','admin-only'] as ChatMode[]).map(m => (
-                  <button key={m} onClick={() => setChatMode(m)}
-                    className={cn('flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all',
-                      chatMode===m ? 'bg-white text-black border-white' : 'bg-white/[0.03] border-white/10 text-white/40 hover:border-white/20')}>
-                    {m === 'all' ? 'All Members' : 'Admin Only'}
-                  </button>
-                ))}
+              {/* Mode selector: staff talk vs open talk */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={!canModerateVoice}
+                  onClick={() => setVoiceMode("open")}
+                  className={cn(
+                    "py-2 rounded-xl border text-[10px] font-bold transition-all touch-manipulation",
+                    voiceMode === "open"
+                      ? "bg-white text-black border-white"
+                      : "bg-white/[0.03] border-white/10 text-white/50 hover:bg-white/[0.06] hover:border-white/20",
+                    !canModerateVoice && "opacity-40 cursor-not-allowed",
+                  )}
+                >
+                  Talk All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVoiceMode("controlled")}
+                  className={cn(
+                    "py-2 rounded-xl border text-[10px] font-bold transition-all touch-manipulation",
+                    voiceMode === "controlled"
+                      ? "bg-white text-black border-white"
+                      : "bg-white/[0.03] border-white/10 text-white/50 hover:bg-white/[0.06] hover:border-white/20",
+                  )}
+                >
+                  Staff Talk
+                </button>
               </div>
-            </div>
 
-            {/* Stickers Toggle */}
-            <div className="flex items-center justify-between p-3 bg-white/[0.03] border border-white/10 rounded-xl">
+              {/* Join / Disconnect */}
               <div className="flex items-center gap-2">
-                <span className="text-lg">🎭</span>
-                <div><p className="text-xs font-semibold text-white/70">Stickers & Chat</p><p className="text-[10px] text-white/30">Allow reactions</p></div>
+                {!videoCallActive ? (
+                  <button
+                    type="button"
+                    onClick={() => setVideoCallActive(true)}
+                    className="flex-1 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-bold hover:bg-emerald-500/20 transition-all touch-manipulation"
+                  >
+                    Join Voice Channel
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPttHeld(false);
+                        setVideoCallActive(false);
+                      }}
+                      className="flex-1 py-3 rounded-xl bg-white/[0.04] border border-white/10 text-white/70 text-xs font-bold hover:bg-white/10 transition-all touch-manipulation"
+                    >
+                      Disconnect
+                    </button>
+                    <button
+                      type="button"
+                      disabled={localMuted && !localAllowedInControlled}
+                      onClick={() => {
+                        if (localMuted && !localAllowedInControlled) return;
+                        if (!localMemberId) return;
+                        setMembers((prev) =>
+                          prev.map((mm) =>
+                            mm.id === localMemberId ? { ...mm, muted: !mm.muted } : mm,
+                          ),
+                        );
+                      }}
+                      className={cn(
+                        "py-3 px-3 rounded-xl border text-xs font-bold touch-manipulation",
+                        localMuted
+                          ? "bg-white/[0.04] border-white/10 text-white/70 hover:border-white/20 disabled:opacity-40 disabled:hover:border-white/10"
+                          : "bg-red-500/10 border-red-500/20 text-red-300 hover:bg-red-500/20 disabled:opacity-40 disabled:hover:bg-red-500/10",
+                      )}
+                    >
+                      {localMuted ? "Unmute" : "Mute"}
+                    </button>
+                  </>
+                )}
               </div>
-              <button onClick={() => setStickersEnabled(!stickersEnabled)}
-                className={cn('relative w-10 h-5.5 rounded-full transition-all', stickersEnabled ? 'bg-white' : 'bg-white/10')}>
-                <div className={cn('absolute top-0.5 w-4 h-4 rounded-full transition-all shadow-sm', stickersEnabled ? 'right-0.5 bg-black' : 'left-0.5 bg-white/40')}/>
-              </button>
+
+              {/* Raise hand / Requests (Zoom style) in Staff Talk mode */}
+              {videoCallActive && voiceMode === "controlled" && (
+                <>
+                  {!canModerateVoice ? (
+                    localMemberId ? (
+                      <button
+                        type="button"
+                        disabled={localAllowedInControlled || speakRequests.includes(localMemberId)}
+                        onClick={requestToSpeak}
+                        className={cn(
+                          "w-full py-3 rounded-xl border text-xs font-bold touch-manipulation transition-all",
+                          localAllowedInControlled
+                            ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-300"
+                            : speakRequests.includes(localMemberId)
+                              ? "bg-white/[0.03] border-white/10 text-white/50 cursor-not-allowed"
+                              : "bg-black/40 border-white/15 text-white/70 hover:border-white/25",
+                        )}
+                      >
+                        {localAllowedInControlled
+                          ? "Approved to speak"
+                          : speakRequests.includes(localMemberId)
+                            ? "Request Sent"
+                            : "Raise Hand (Request to Speak)"}
+                      </button>
+                    ) : null
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-bold text-white/30 uppercase tracking-wider">
+                        Speak Requests
+                      </p>
+                      {speakRequests.length === 0 ? (
+                        <div className="py-4 text-center text-[10px] text-white/35 border border-white/10 rounded-xl bg-white/[0.02]">
+                          No requests yet
+                        </div>
+                      ) : (
+                        <div className="max-h-[150px] overflow-y-auto space-y-2">
+                          {speakRequests.map((rid) => {
+                            const rm = members.find((m) => m.id === rid);
+                            if (!rm) return null;
+                            return (
+                              <div
+                                key={rid}
+                                className="flex items-center gap-2 p-2 rounded-xl border border-white/10 bg-white/[0.02]"
+                              >
+                                <div className="w-9 h-9 rounded-xl overflow-hidden bg-white/10 border border-white/10 flex-shrink-0">
+                                  <img
+                                    src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${rm.avatar}`}
+                                    alt=""
+                                    className="w-full h-full object-cover"
+                                  />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[11px] font-bold truncate">{rm.name}</p>
+                                  <p className="text-[9px] text-white/30">Requested to speak</p>
+                                </div>
+                                <div className="flex gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => allowSpeaker(rid)}
+                                    className="px-2 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[10px] font-bold touch-manipulation"
+                                  >
+                                    Allow
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => denySpeaker(rid)}
+                                    className="px-2 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300 text-[10px] font-bold touch-manipulation"
+                                  >
+                                    Deny
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Push-to-talk control */}
+              {videoCallActive && voiceMode === "ptt" && (
+                <button
+                  type="button"
+                  onPointerDown={(e) => {
+                    if (localMuted) return;
+                    setPttHeld(true);
+                  }}
+                  onPointerUp={() => setPttHeld(false)}
+                  onPointerCancel={() => setPttHeld(false)}
+                  disabled={localMuted || (localMuted && !localAllowedInControlled)}
+                  className={cn(
+                    "w-full py-3 rounded-xl border text-xs font-bold touch-manipulation transition-all",
+                    localMuted
+                      ? "bg-white/[0.03] border-white/10 text-white/40 disabled:opacity-40"
+                      : "bg-black/40 border-white/15 text-white/70 hover:border-white/25 active:opacity-90",
+                  )}
+                >
+                  {pttHeld ? "Speaking..." : "Hold to Talk"}
+                </button>
+              )}
+
+              {/* Participant cards */}
+              <div className="max-h-[240px] overflow-y-auto pr-1 space-y-2">
+                {members
+                  .filter((m) => m.status !== "absent")
+                  .map((m) => {
+                    const isLocal = localMemberId && m.id === localMemberId;
+                    const isSpeaking = !!isLocal && localSpeaking && !m.muted && videoCallActive;
+                    const isStaffMember =
+                      m.role === "organizer" || m.role === "co-admin" || m.role === "moderator";
+                    const requested =
+                      voiceMode === "controlled" &&
+                      !isStaffMember &&
+                      speakRequests.includes(m.id);
+                    const micLabel = isSpeaking ? "Speaking" : requested ? "Requested" : m.muted ? "Muted" : "Idle";
+                    return (
+                      <div
+                        key={m.id}
+                        className={cn(
+                          "flex items-center gap-2 p-2 rounded-2xl border backdrop-blur-sm",
+                          isSpeaking
+                            ? "bg-emerald-500/10 border-emerald-500/25 shadow-[0_0_30px_rgba(16,185,129,0.18)]"
+                            : "bg-white/[0.03] border-white/10",
+                        )}
+                      >
+                        <div className="w-10 h-10 rounded-xl overflow-hidden bg-white/10 border border-white/10 flex-shrink-0">
+                          <img
+                            src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${m.avatar}`}
+                            alt=""
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[11px] font-bold truncate">{m.name}</p>
+                            <span
+                              className={cn(
+                                "text-[9px] font-bold px-1.5 py-0.5 rounded-full border",
+                                roleColor(m.role),
+                              )}
+                            >
+                              {m.role}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span
+                              className={cn(
+                                "text-[9px] font-bold",
+                                isSpeaking ? "text-emerald-300" : m.muted ? "text-white/40" : "text-white/40",
+                              )}
+                            >
+                              {isSpeaking ? "🎙️" : m.muted ? "🔇" : "●"} {micLabel}
+                            </span>
+                            {isLocal && (
+                              <span className="text-[9px] text-white/25 ml-auto whitespace-nowrap">
+                                {voiceMode === "controlled" ? "Staff Talk" : "All Talk"}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+
+              {videoCallActive && voiceMode === "controlled" && (
+                <p className="text-[10px] text-white/35">
+                  Staff Talk: only Admin / Co-Admin / Moderator (and approved speakers) can speak. Others can Raise Hand.
+                </p>
+              )}
             </div>
 
             {/* Checkpoints Preview */}
@@ -2807,11 +4098,23 @@ const LiveTripPage = ({ user }: { user: User }) => {
                 m.status !== 'arrived'
               ).map(member => (
                 <motion.div key={member.id} layout
-                  className={cn('p-4 rounded-2xl border transition-all',
-                    member.blocked ? 'opacity-40 border-red-500/20 bg-red-500/[0.03]' :
-                    member.status === 'arrived' ? 'bg-white/[0.03] border-white/10' :
-                    member.status === 'on-way' ? 'bg-amber-500/[0.03] border-amber-500/15' :
-                    'bg-white/[0.02] border-white/[0.05] opacity-50')}>
+                  className={cn(
+                    'p-4 rounded-2xl border transition-all',
+                    videoCallActive &&
+                      localMemberId &&
+                      member.id === localMemberId &&
+                      localSpeaking &&
+                      !member.muted
+                      ? 'border-emerald-400/60 bg-emerald-500/[0.05] shadow-[0_0_30px_rgba(16,185,129,0.18)]'
+                      : null,
+                    member.blocked
+                      ? 'opacity-40 border-red-500/20 bg-red-500/[0.03]'
+                      : member.status === 'arrived'
+                        ? 'bg-white/[0.03] border-white/10'
+                        : member.status === 'on-way'
+                          ? 'bg-amber-500/[0.03] border-amber-500/15'
+                          : 'bg-white/[0.02] border-white/[0.05] opacity-50',
+                  )}>
                   <div className="flex items-start gap-3">
                     <div className="relative flex-shrink-0">
                       <div className="w-10 h-10 rounded-xl overflow-hidden bg-white/10">
@@ -2824,37 +4127,84 @@ const LiveTripPage = ({ user }: { user: User }) => {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 mb-0.5">
                         <p className="text-sm font-bold truncate">{member.name}</p>
-                        {member.muted && <span className="text-[9px] text-red-400">🔇</span>}
+                      {videoCallActive &&
+                      localMemberId &&
+                      member.id === localMemberId &&
+                      localSpeaking &&
+                      !member.muted ? (
+                        <span className="text-[9px] text-emerald-400">🎙️</span>
+                      ) : videoCallActive ? (
+                        member.muted ? (
+                          <span className="text-[9px] text-red-400">🔇</span>
+                        ) : (
+                          <span className="text-[9px] text-white/25">●</span>
+                        )
+                      ) : null}
                       </div>
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={cn('text-[9px] font-bold px-1.5 py-0.5 rounded-full border capitalize', roleColor(member.role))}>{member.role}</span>
+                      <span
+                        className={cn(
+                          "text-[9px] font-bold px-1.5 py-0.5 rounded-full border capitalize",
+                          roleColor(member.role),
+                        )}
+                      >
+                        {member.role === "organizer"
+                          ? "Admin"
+                          : member.role === "co-admin"
+                            ? "Co-Admin"
+                            : member.role === "moderator"
+                              ? "Moderator"
+                              : "Member"}
+                      </span>
                         <span className={cn('text-[9px] font-bold text-white/30 capitalize')}>
                           {member.status === 'arrived' ? '✓ Arrived' : member.status === 'on-way' ? '→ On Way' : '✗ Absent'}
                         </span>
                       </div>
                     </div>
                   </div>
-                  {/* Actions */}
-                  {member.role !== 'organizer' && (
+                  {/* Voice Actions (mobile-friendly) */}
+                  {(canModerateVoice || (localMemberId && member.id === localMemberId)) && (
                     <div className="flex gap-1.5 mt-3 flex-wrap">
-                      <button onClick={() => toggleMute(member.id)}
-                        className={cn('flex-1 py-1 rounded-lg text-[9px] font-bold border transition-all',
-                          member.muted ? 'bg-red-500/10 border-red-500/20 text-red-400' : 'bg-white/[0.04] border-white/[0.08] text-white/40 hover:border-white/20')}>
-                        {member.muted ? 'Unmute' : 'Mute'}
+                      <button
+                        onClick={() => toggleMuteWithVoiceRules(member.id)}
+                        className={cn(
+                          "flex-1 py-1 rounded-lg text-[9px] font-bold border transition-all touch-manipulation",
+                          member.muted
+                            ? "bg-red-500/10 border-red-500/20 text-red-400"
+                            : "bg-white/[0.04] border-white/[0.08] text-white/40 hover:border-white/20",
+                        )}
+                      >
+                        {member.muted ? "Unmute" : "Mute"}
                       </button>
-                      <button onClick={() => toggleBlock(member.id)}
-                        className={cn('flex-1 py-1 rounded-lg text-[9px] font-bold border transition-all',
-                          member.blocked ? 'bg-white/5 border-white/10 text-white/40' : 'bg-red-500/[0.06] border-red-500/15 text-red-400/70 hover:bg-red-500/10')}>
-                        {member.blocked ? 'Unblock' : 'Block'}
-                      </button>
-                      <select
-                        value={member.role}
-                        onChange={e => assignRole(member.id, e.target.value as MemberRole)}
-                        className="flex-1 py-1 px-1.5 rounded-lg text-[9px] font-bold bg-white/[0.04] border border-white/[0.08] text-white/40 focus:outline-none appearance-none cursor-pointer hover:border-white/20 transition-all">
-                        {(['member','moderator','co-admin'] as MemberRole[]).map(r => (
-                          <option key={r} value={r} className="bg-[#111] capitalize">{r}</option>
-                        ))}
-                      </select>
+
+                      {canModerateVoice && (
+                        <>
+                          <button
+                            onClick={() => toggleBlock(member.id)}
+                            className={cn(
+                              "flex-1 py-1 rounded-lg text-[9px] font-bold border transition-all touch-manipulation",
+                              member.blocked
+                                ? "bg-white/5 border-white/10 text-white/40"
+                                : "bg-red-500/[0.06] border-red-500/15 text-red-400/70 hover:bg-red-500/10",
+                            )}
+                          >
+                            {member.blocked ? "Unblock" : "Block"}
+                          </button>
+                          <select
+                            value={member.role}
+                            onChange={(e) =>
+                              assignRole(member.id, e.target.value as MemberRole)
+                            }
+                            className="flex-1 py-1 px-1.5 rounded-lg text-[9px] font-bold bg-white/[0.04] border border-white/[0.08] text-white/40 focus:outline-none appearance-none cursor-pointer hover:border-white/20 transition-all"
+                          >
+                            {(["member", "moderator", "co-admin"] as MemberRole[]).map((r) => (
+                              <option key={r} value={r} className="bg-[#111] capitalize">
+                                {r}
+                              </option>
+                            ))}
+                          </select>
+                        </>
+                      )}
                     </div>
                   )}
                 </motion.div>
@@ -2866,149 +4216,196 @@ const LiveTripPage = ({ user }: { user: User }) => {
     </div>
   );
 
-  // ─── LIVE MAP PHASE ────────────────────────────────────────
+  // ─── LIVE MAP PHASE (Strava-style) ─────────────────────────
   return (
-    <div className="fixed inset-0 bg-black text-white overflow-hidden flex flex-col">
-      {/* Top HUD Bar */}
-      <div className="flex items-center justify-between px-4 py-3 bg-black/90 backdrop-blur-xl border-b border-white/[0.07] flex-shrink-0 z-10">
-        <div className="flex items-center gap-3">
-          {tripPaused ? (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-xl">
-              <div className="w-1.5 h-1.5 bg-amber-400 rounded-full"/>
-              <span className="text-xs font-bold text-amber-400">PAUSED</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-xl">
-              <div className="w-1.5 h-1.5 bg-red-400 rounded-full animate-pulse"/>
-              <span className="text-xs font-bold text-red-400">LIVE</span>
-            </div>
-          )}
-          <span className="font-mono text-sm font-bold text-white/70">{formatTime(elapsedSec)}</span>
-          <span className="text-white/20">·</span>
-          <span className="text-xs text-white/40">{members.filter(m=>m.status!=='absent').reduce((a,m) => a + m.distanceCovered, 0).toFixed(0)} km total</span>
-        </div>
-        <div className="flex items-center gap-2">
-          {/* Weather */}
-          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-white/[0.04] border border-white/10 rounded-xl">
-            <Cloud size={12} className="text-blue-400"/>
-            <span className="text-[10px] text-white/50">28°C Clear</span>
-          </div>
-          {/* Pause/End */}
-          <button onClick={() => setTripPaused(!tripPaused)}
-            className={cn('px-3 py-1.5 rounded-xl border text-xs font-bold transition-all',
-              tripPaused ? 'bg-white text-black border-white' : 'bg-white/[0.04] border-white/10 text-white/60 hover:text-white')}>
-            {tripPaused ? '▶ Resume' : '⏸ Pause'}
-          </button>
-          <button onClick={() => setShowExitConfirm(true)}
-            className="px-3 py-1.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-bold hover:bg-red-500/20 transition-all">
-            End Trip
-          </button>
-        </div>
-      </div>
+    <div className="fixed inset-0 flex flex-col overflow-hidden bg-black text-white safe-pt safe-pb">
+      <div className="relative min-h-0 flex-1">
+        <div className="absolute inset-0 overflow-hidden bg-[#0a1628]">
+          <LiveTripMap
+            ref={liveMapRef}
+            minimalChrome
+            mapTheme={liveMapTheme}
+            onMapThemeChange={setLiveMapTheme}
+            className="absolute inset-0 z-0"
+            start={
+              trip?.meetupLat != null && trip?.meetupLng != null
+                ? { lat: trip.meetupLat, lng: trip.meetupLng }
+                : null
+            }
+            end={
+              trip?.endLat != null && trip?.endLng != null
+                ? { lat: trip.endLat, lng: trip.endLng }
+                : null
+            }
+            riders={members
+              .filter((m) => m.status !== "absent")
+              .map((m) => ({
+                id: m.id,
+                lat: m.lat,
+                lng: m.lng,
+                name: m.name,
+                avatar: m.avatar,
+                role: m.role,
+                speed: m.speed,
+                distanceCovered: m.distanceCovered,
+                checkpoints: m.checkpoints,
+                xpGained: m.xpGained,
+                memberStatus: m.status,
+              }))}
+            pins={mapPins}
+            checkpoints={checkpoints}
+            selectedRiderId={mapSelected}
+            onSelectRider={setMapSelected}
+          />
 
-      {/* Main Content: Map + Sidebar */}
-      <div className="flex-1 flex overflow-hidden">
-
-        {/* MAP AREA */}
-        <div className="flex-1 relative overflow-hidden" style={{ background: 'radial-gradient(ellipse at center, #0a1628 0%, #050d1a 50%, #020810 100%)' }}>
-          {/* Pokémon-Go style grid */}
-          <div className="absolute inset-0" style={{ backgroundImage: 'linear-gradient(rgba(99,179,237,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(99,179,237,0.03) 1px, transparent 1px)', backgroundSize: '60px 60px' }}/>
-          {/* Roads simulation */}
-          <svg className="absolute inset-0 w-full h-full opacity-20" viewBox="0 0 800 600" preserveAspectRatio="none">
-            <path d="M0,300 Q200,250 400,300 Q600,350 800,280" stroke="#4299e1" strokeWidth="3" fill="none" strokeDasharray="8,4"/>
-            <path d="M100,0 Q150,200 200,300 Q250,400 300,600" stroke="#4299e1" strokeWidth="2" fill="none" strokeDasharray="6,3" opacity="0.5"/>
-            <path d="M500,0 Q520,150 480,300 Q440,450 500,600" stroke="#4299e1" strokeWidth="2" fill="none" strokeDasharray="6,3" opacity="0.5"/>
-          </svg>
-
-          {/* Member avatars on map */}
-          {members.filter(m => m.status !== 'absent').map((m, i) => (
-            <motion.div
-              key={m.id}
-              animate={{ x: Math.sin(elapsedSec * 0.01 + i) * 3, y: Math.cos(elapsedSec * 0.008 + i) * 2 }}
-              transition={{ duration: 2, repeat: Infinity, repeatType: 'reverse', ease: 'easeInOut' }}
-              className="absolute cursor-pointer"
-              style={{ left: `${15 + (i % 4) * 20 + Math.sin(i) * 5}%`, top: `${25 + Math.floor(i / 4) * 30 + Math.cos(i) * 8}%` }}
-              onClick={() => setMapSelected(mapSelected === m.id ? null : m.id)}>
-              <div className={cn('relative', mapSelected === m.id && 'z-20')}>
-                {/* Speed bubble */}
-                {m.speed > 0 && (
-                  <motion.div initial={{opacity:0,y:5}} animate={{opacity:1,y:0}}
-                    className="absolute -top-7 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-black/80 backdrop-blur-sm border border-white/10 rounded-full whitespace-nowrap">
-                    <span className="text-[9px] font-bold text-white">{Math.round(m.speed)} km/h</span>
-                  </motion.div>
-                )}
-                {/* Avatar pin */}
-                <div className={cn('w-10 h-10 rounded-full border-2 overflow-hidden shadow-lg transition-all',
-                  m.role === 'organizer' ? 'border-amber-400 shadow-amber-400/30' :
-                  m.role === 'co-admin' ? 'border-blue-400 shadow-blue-400/20' :
-                  'border-white/40')}>
-                  <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${m.avatar}`} alt="" className="w-full h-full object-cover"/>
-                </div>
-                {/* Pin arrow */}
-                <div className={cn('w-2 h-2 rotate-45 mx-auto -mt-1',
-                  m.role === 'organizer' ? 'bg-amber-400' : m.role === 'co-admin' ? 'bg-blue-400' : 'bg-white/40')}/>
-                {/* Selected info card */}
-                {mapSelected === m.id && (
-                  <motion.div initial={{opacity:0,scale:0.8,y:5}} animate={{opacity:1,scale:1,y:0}}
-                    className="absolute top-14 left-1/2 -translate-x-1/2 w-44 bg-black/90 backdrop-blur-xl border border-white/15 rounded-2xl p-3 shadow-2xl z-30">
-                    <p className="font-bold text-sm mb-1">{m.name}</p>
-                    <div className="space-y-1 text-[10px] text-white/50">
-                      <p>🏍️ {Math.round(m.speed)} km/h</p>
-                      <p>📍 {m.distanceCovered.toFixed(1)} km covered</p>
-                      <p>🏁 {m.checkpoints} checkpoints</p>
-                      <p>⚡ {m.xpGained} XP</p>
-                    </div>
-                  </motion.div>
-                )}
-              </div>
-            </motion.div>
-          ))}
-
-          {/* Map pins */}
-          {mapPins.map(pin => (
-            <div key={pin.id} className="absolute cursor-pointer group"
-              style={{ left: `${45 + Math.sin(pin.id.length) * 25}%`, top: `${40 + Math.cos(pin.id.length) * 20}%` }}>
-              <div className="relative">
-                <div className="w-8 h-8 rounded-full bg-black/80 backdrop-blur-sm border border-white/20 flex items-center justify-center text-base shadow-lg">
-                  {pinIcon(pin.type)}
-                </div>
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-black/90 border border-white/10 rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
-                  <p className="text-[9px] font-bold text-white">{pin.label}</p>
-                  <p className="text-[8px] text-white/30">by {pin.addedBy}</p>
-                </div>
-              </div>
-            </div>
-          ))}
-
-          {/* Checkpoints on map */}
-          {checkpoints.map((cp, i) => (
-            <div key={cp.id} className="absolute"
-              style={{ left: `${20 + i * 22}%`, top: '65%' }}>
-              <div className={cn('w-9 h-9 rounded-full border-2 flex items-center justify-center text-base shadow-lg',
-                cp.reached ? 'border-emerald-400 bg-emerald-500/20' : 'border-white/20 bg-black/60')}>
-                {cp.badge}
-              </div>
-              <div className="w-0.5 h-3 bg-white/20 mx-auto"/>
-              <div className={cn('w-2 h-2 rounded-full mx-auto', cp.reached ? 'bg-emerald-400' : 'bg-white/20')}/>
-            </div>
-          ))}
-
-          {/* ── FLOATING ACTION BUTTONS ── */}
-          <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-2">
-            {[
-              { icon: '🆘', label: 'SOS', action: () => setShowSOS(true), danger: true },
-              { icon: '🔔', label: 'Regroup', action: () => {}, danger: false },
-              { icon: '🅿️', label: 'Add Pin', action: () => setShowAddPin(true), danger: false },
-              { icon: '⛽', label: 'Fuel', action: () => {}, danger: false },
-              { icon: '🚧', label: 'Road', action: () => setShowRoadFeedback(true), danger: false },
-              { icon: '📸', label: 'Nearby', action: () => {}, danger: false },
-            ].map(btn => (
-              <button key={btn.label} onClick={btn.action} title={btn.label}
-                className={cn('w-11 h-11 rounded-2xl border backdrop-blur-sm flex items-center justify-center text-lg shadow-lg transition-all hover:scale-105 active:scale-95',
-                  btn.danger ? 'bg-red-500/20 border-red-500/40 hover:bg-red-500/30' : 'bg-black/60 border-white/15 hover:border-white/30')}>
-                {btn.icon}
+          {/* Strava-style top: minimize + promo pill */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col gap-2 px-3 pt-2 safe-pt">
+            <div className="pointer-events-auto flex items-start justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setShowExitConfirm(true)}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white shadow-lg backdrop-blur-md transition hover:bg-black/70 active:scale-95"
+                aria-label="Trip options"
+              >
+                <ChevronDown size={22} strokeWidth={2.2} />
               </button>
-            ))}
+              <button
+                type="button"
+                className="max-w-[min(100%,15rem)] truncate rounded-full border border-amber-500/35 bg-black/45 px-3 py-2 text-left text-[10px] font-semibold leading-snug text-white/85 shadow backdrop-blur-md transition hover:border-amber-400/50 sm:max-w-[20rem]"
+              >
+                <span className="mr-1" aria-hidden>🔥</span>
+                Weekly heatmap — tap to explore popular routes
+              </button>
+              <div className="h-11 w-11 shrink-0" aria-hidden />
+            </div>
+          </div>
+
+          {/* Map controls (Strava-style, right column) — basemap theme is on the left */}
+          <div className="pointer-events-auto absolute right-3 top-[36%] z-20 flex -translate-y-1/2 flex-col gap-2 md:right-5">
+            <button
+              type="button"
+              onClick={() => liveMapRef.current?.togglePitch()}
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-white/18 bg-black/60 text-[10px] font-bold text-white shadow-lg backdrop-blur-md transition hover:bg-black/70 active:scale-95"
+              title="3D tilt"
+            >
+              3D
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (navigator.geolocation) {
+                  navigator.geolocation.getCurrentPosition(
+                    (pos) =>
+                      liveMapRef.current?.flyTo({
+                        lat: pos.coords.latitude,
+                        lng: pos.coords.longitude,
+                        zoom: 15,
+                      }),
+                    () => {
+                      if (trip?.meetupLat != null && trip?.meetupLng != null) {
+                        liveMapRef.current?.flyTo({
+                          lat: trip.meetupLat,
+                          lng: trip.meetupLng,
+                          zoom: 13,
+                        });
+                      }
+                    },
+                    { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 },
+                  );
+                } else if (trip?.meetupLat != null && trip?.meetupLng != null) {
+                  liveMapRef.current?.flyTo({ lat: trip.meetupLat, lng: trip.meetupLng, zoom: 13 });
+                }
+              }}
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-white/18 bg-black/60 text-white shadow-lg backdrop-blur-md transition hover:bg-black/70 active:scale-95"
+              title="Locate me"
+            >
+              <Crosshair size={18} />
+            </button>
+          </div>
+
+          {mapSelected && (() => {
+            const m = members.find((x) => x.id === mapSelected);
+            if (!m) return null;
+            return (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-3 right-3 z-20 max-h-[45vh] overflow-y-auto pointer-events-auto sm:bottom-24 sm:left-4 sm:right-4 md:left-auto md:right-4 md:w-80"
+              >
+                <div className="border border-cyan-500/25 bg-black/90 p-4 shadow-[0_0_30px_rgba(34,211,238,0.12)] backdrop-blur-xl rounded-2xl">
+                  <p className="mb-1 font-mono text-[9px] font-bold uppercase tracking-widest text-cyan-400/80">Driver telemetry</p>
+                  <p className="mb-3 text-sm font-bold text-white">{m.name}</p>
+                  <div className="grid grid-cols-2 gap-2 text-[10px] text-white/55">
+                    <p className="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5">
+                      <span className="text-white/35">Speed</span>
+                      <br />
+                      <span className="font-mono text-cyan-300">{Math.round(m.speed)} km/h</span>
+                    </p>
+                    <p className="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5">
+                      <span className="text-white/35">Distance</span>
+                      <br />
+                      <span className="font-mono text-amber-300">{m.distanceCovered.toFixed(1)} km</span>
+                    </p>
+                    <p className="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5">
+                      <span className="text-white/35">Gates</span>
+                      <br />
+                      <span className="font-mono text-white/90">{m.checkpoints}</span>
+                    </p>
+                    <p className="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5">
+                      <span className="text-white/35">XP</span>
+                      <br />
+                      <span className="font-mono text-emerald-300">{m.xpGained}</span>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMapSelected(null)}
+                    className="mt-3 w-full rounded-lg border border-white/10 py-2 text-[10px] text-white/40 hover:text-white"
+                  >
+                    Close
+                  </button>
+                </div>
+              </motion.div>
+            );
+          })()}
+
+          {/* ── Map basemap theme: dark / light (Lucide — matches HUD chrome) ── */}
+          <div
+            className="pointer-events-auto absolute left-2 top-[42%] z-20 flex -translate-y-1/2 flex-col sm:left-4 sm:top-1/2"
+            role="group"
+            aria-label="Map appearance"
+          >
+            <div className="flex flex-col overflow-hidden rounded-2xl border border-white/18 bg-black/60 shadow-lg backdrop-blur-md">
+              <button
+                type="button"
+                onClick={() => setLiveMapTheme("dark")}
+                aria-pressed={liveMapTheme === "dark"}
+                title="Dark map"
+                className={cn(
+                  "flex h-11 w-11 touch-manipulation items-center justify-center transition-colors",
+                  liveMapTheme === "dark"
+                    ? "bg-white text-black"
+                    : "text-white/45 hover:bg-white/10 hover:text-white",
+                )}
+              >
+                <Moon size={18} strokeWidth={2.25} aria-hidden />
+              </button>
+              <div className="h-px bg-white/12" aria-hidden />
+              <button
+                type="button"
+                onClick={() => setLiveMapTheme("light")}
+                aria-pressed={liveMapTheme === "light"}
+                title="Light map"
+                className={cn(
+                  "flex h-11 w-11 touch-manipulation items-center justify-center transition-colors",
+                  liveMapTheme === "light"
+                    ? "bg-white text-black"
+                    : "text-white/45 hover:bg-white/10 hover:text-white",
+                )}
+              >
+                <Sun size={18} strokeWidth={2.25} aria-hidden />
+              </button>
+            </div>
           </div>
 
           {/* SOS Modal */}
@@ -3016,7 +4413,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
             {showSOS && (
               <>
                 <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="absolute inset-0 bg-red-950/60 backdrop-blur-sm z-40" onClick={() => setShowSOS(false)}/>
-                <motion.div initial={{scale:0.8,opacity:0}} animate={{scale:1,opacity:1}} exit={{scale:0.8,opacity:0}} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-80 bg-[#0d0d0d] border-2 border-red-500/50 rounded-3xl p-6 z-50 text-center shadow-[0_0_60px_rgba(239,68,68,0.3)]">
+                <motion.div initial={{scale:0.8,opacity:0}} animate={{scale:1,opacity:1}} exit={{scale:0.8,opacity:0}} className="absolute left-1/2 top-1/2 z-50 w-[min(100%,20rem)] max-h-[85dvh] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border-2 border-red-500/50 bg-[#0d0d0d] p-5 text-center shadow-[0_0_60px_rgba(239,68,68,0.3)] sm:w-80 sm:p-6">
                   <div className="w-16 h-16 rounded-full bg-red-500/20 border-2 border-red-500/40 flex items-center justify-center mx-auto mb-4 animate-pulse">
                     <AlertTriangle size={28} className="text-red-400"/>
                   </div>
@@ -3038,7 +4435,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
             {showAddPin && (
               <>
                 <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="absolute inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={() => setShowAddPin(false)}/>
-                <motion.div initial={{y:20,opacity:0}} animate={{y:0,opacity:1}} exit={{y:20,opacity:0}} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-72 bg-[#0d0d0d] border border-white/15 rounded-2xl p-5 z-50">
+                <motion.div initial={{y:20,opacity:0}} animate={{y:0,opacity:1}} exit={{y:20,opacity:0}} className="absolute left-1/2 top-1/2 z-50 w-[min(100%,18rem)] max-h-[85dvh] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-white/15 bg-[#0d0d0d] p-4 sm:w-72 sm:p-5">
                   <h3 className="font-bold mb-3">Add Map Pin</h3>
                   <div className="grid grid-cols-5 gap-1.5 mb-3">
                     {(['parking','fuel','attraction','hazard','road-damage'] as MapPin['type'][]).map(t => (
@@ -3059,117 +4456,282 @@ const LiveTripPage = ({ user }: { user: User }) => {
             )}
           </AnimatePresence>
 
-          {/* Road Quality Feedback */}
-          <AnimatePresence>
-            {showRoadFeedback && (
-              <>
-                <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="absolute inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={() => setShowRoadFeedback(false)}/>
-                <motion.div initial={{y:20,opacity:0}} animate={{y:0,opacity:1}} exit={{y:20,opacity:0}} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-72 bg-[#0d0d0d] border border-white/15 rounded-2xl p-5 z-50">
-                  <h3 className="font-bold mb-1">Road Quality</h3>
-                  <p className="text-xs text-white/40 mb-4">Mark current road condition for other riders</p>
-                  <div className="grid grid-cols-2 gap-2 mb-3">
-                    {[{q:'smooth' as RoadQuality,e:'🟢',l:'Smooth'},{q:'rough' as RoadQuality,e:'🟡',l:'Rough'},{q:'damaged' as RoadQuality,e:'🔴',l:'Damaged'},{q:'blocked' as RoadQuality,e:'⛔',l:'Blocked'}].map(({q,e,l}) => (
-                      <button key={q} onClick={() => { setMapPins(p => [...p, { id:Date.now().toString(), type:'road-damage', lat:18.8, lng:73.0, label:`${l} road`, addedBy:user.name }]); setShowRoadFeedback(false); }}
-                        className="flex items-center gap-2 p-3 rounded-xl bg-white/[0.04] border border-white/10 hover:border-white/25 transition-all text-sm font-semibold">
-                        <span className="text-base">{e}</span> {l}
-                      </button>
-                    ))}
-                  </div>
-                  <button onClick={() => setShowRoadFeedback(false)} className="w-full py-2 text-xs text-white/30 hover:text-white transition-colors">Cancel</button>
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
-
-          {/* Emergency Broadcast Banner */}
+          {/* Paused banner */}
           <AnimatePresence>
             {tripPaused && (
               <motion.div initial={{y:-60,opacity:0}} animate={{y:0,opacity:1}} exit={{y:-60,opacity:0}}
-                className="absolute top-4 left-1/2 -translate-x-1/2 px-5 py-3 bg-amber-500/20 border border-amber-500/40 rounded-2xl backdrop-blur-sm shadow-lg flex items-center gap-3 z-30">
-                <div className="w-2 h-2 bg-amber-400 rounded-full"/>
-                <span className="text-sm font-bold text-amber-400">⏸ Trip Paused — All members notified</span>
+                className="absolute top-20 left-1/2 z-30 flex max-w-[min(100%,22rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/20 px-5 py-3 shadow-lg backdrop-blur-sm sm:top-24">
+                <div className="h-2 w-2 shrink-0 rounded-full bg-amber-400"/>
+                <span className="text-sm font-bold text-amber-400">Trip paused — convoy notified</span>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
+      </div>
 
-        {/* SIDEBAR */}
-        <div className="w-80 border-l border-white/[0.06] flex flex-col bg-[#060606] flex-shrink-0">
-          {/* Sidebar Tabs */}
-          <div className="flex gap-0.5 p-2 border-b border-white/[0.06] flex-shrink-0">
-            {(['chat','members','checkpoints','leaderboard'] as const).map(tab => (
-              <button key={tab} onClick={() => setLiveTab(tab)}
-                className={cn('flex-1 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-all capitalize',
+      {/* Bottom sheet — peek (map-first) or expanded; smooth height + inner scroll */}
+      <div
+        className={cn(
+          "relative z-30 flex shrink-0 flex-col overflow-hidden rounded-t-[22px] border border-white/10 border-b-0 bg-[#0c0c0c] shadow-[0_-8px_48px_rgba(0,0,0,0.65)] transition-[max-height] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+          liveSheetSnap === "peek" ? "max-h-[min(32vh,280px)]" : "max-h-[min(90dvh,920px)]",
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => setLiveSheetSnap((s) => (s === "peek" ? "expanded" : "peek"))}
+          className="flex w-full shrink-0 flex-col items-center gap-0.5 pb-1 pt-2 touch-manipulation"
+          aria-expanded={liveSheetSnap === "expanded"}
+          aria-label={liveSheetSnap === "peek" ? "Expand trip panel" : "Collapse trip panel"}
+        >
+          <span className="h-1 w-10 rounded-full bg-white/30" />
+          <ChevronUp
+            size={18}
+            className={cn("text-white/40 transition-transform duration-300", liveSheetSnap === "expanded" && "rotate-180")}
+            aria-hidden
+          />
+        </button>
+
+        {liveSheetSnap === "peek" ? (
+          <div className="border-b border-white/10 px-4 pb-3 pt-0">
+            <div className="flex items-end justify-center gap-3">
+              <div className="min-w-0 flex-1 text-center">
+                <p className="text-lg font-semibold tabular-nums text-white">{formatElapsedStrava(elapsedSec)}</p>
+                <p className="text-[9px] font-medium uppercase tracking-wide text-white/35">Time</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTripPaused(!tripPaused)}
+                className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[#FC4C02] text-white shadow-[0_8px_28px_rgba(252,76,2,0.45)] transition hover:brightness-105 active:scale-[0.98]"
+                aria-label={tripPaused ? "Resume trip" : "Pause trip"}
+              >
+                {tripPaused ? <Play size={28} fill="currentColor" className="ml-0.5" /> : <Pause size={26} fill="currentColor" />}
+              </button>
+              <div className="min-w-0 flex-1 text-center">
+                <p className="text-lg font-semibold tabular-nums text-white">{myDistanceKm.toFixed(1)}</p>
+                <p className="text-[9px] font-medium uppercase tracking-wide text-white/35">km</p>
+              </div>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowSOS(true)}
+                className="inline-flex items-center gap-1 rounded-full border border-red-500/40 bg-red-500/15 px-2.5 py-1 text-[10px] font-bold text-red-300 transition hover:bg-red-500/25"
+              >
+                <AlertTriangle size={12} className="shrink-0" aria-hidden />
+                SOS
+              </button>
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold",
+                  tripPaused
+                    ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                    : "border-red-500/35 bg-red-500/10 text-red-300",
+                )}
+              >
+                <span className={cn("h-1.5 w-1.5 rounded-full", tripPaused ? "bg-amber-400" : "animate-pulse bg-red-400")} />
+                {tripPaused ? "PAUSED" : "LIVE"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowExitConfirm(true)}
+                className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-[10px] font-bold text-red-300 transition hover:bg-red-500/20"
+              >
+                End trip
+              </button>
+            </div>
+            <p className="mt-2 text-center text-[10px] text-white/25">Swipe up for convoy controls</p>
+          </div>
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-0 [scrollbar-gutter:stable]">
+        {/* Status strip */}
+        <div className="mx-3 mt-3 flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/90 px-3 py-2">
+          <Radio size={14} className="shrink-0 text-emerald-400" />
+          <span className="text-xs font-semibold text-white/90">
+            {tripPaused ? "GPS paused" : "Live GPS tracking"}
+          </span>
+          <span className="ml-auto text-[10px] text-white/35">Convoy sync</span>
+        </div>
+
+        {/* Stats row */}
+        <div className="grid grid-cols-3 gap-2 border-b border-white/10 px-4 py-4">
+          <div className="text-center">
+            <p className="text-xl font-semibold tabular-nums tracking-tight text-white">{formatElapsedStrava(elapsedSec)}</p>
+            <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-white/40">Time</p>
+          </div>
+          <div className="text-center">
+            <p className="text-xl font-semibold tabular-nums tracking-tight text-white">{formatPaceMinPerKm(elapsedSec, myDistanceKm)}</p>
+            <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-white/40">Split avg (/km)</p>
+          </div>
+          <div className="text-center">
+            <p className="text-xl font-semibold tabular-nums tracking-tight text-white">{myDistanceKm.toFixed(1)}</p>
+            <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-white/40">Distance (km)</p>
+          </div>
+        </div>
+
+        {/* Primary controls: SOS → Regroup ping → Play/Pause → Add map pin → Line up formation */}
+        <div className="flex items-end justify-between gap-1 px-2 pb-3 pt-1 sm:gap-2 sm:px-4">
+          <button
+            type="button"
+            onClick={() => setShowSOS(true)}
+            className="flex min-w-0 flex-1 flex-col items-center gap-1 text-center touch-manipulation"
+            title="SOS — emergency alert"
+          >
+            <span className="flex h-11 w-11 items-center justify-center rounded-full border border-red-500/45 bg-red-500/15 text-red-300 shadow-inner sm:h-12 sm:w-12">
+              <AlertTriangle size={22} className="sm:h-[24px] sm:w-[24px]" />
+            </span>
+            <span className="max-w-[4.5rem] truncate text-[9px] font-medium leading-tight text-white/50 sm:text-[10px]">SOS</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              socketRef.current?.emit("convoy-action", { kind: "regroup-ping", tripId: id ? Number(id) : 0 });
+            }}
+            className="flex min-w-0 flex-1 flex-col items-center gap-1 text-center touch-manipulation"
+            title="Ping convoy to regroup"
+          >
+            <span className="flex h-11 w-11 items-center justify-center rounded-full border border-amber-500/35 bg-amber-500/10 text-amber-200 shadow-inner sm:h-12 sm:w-12">
+              <BellRing size={21} className="sm:h-[23px] sm:w-[23px]" />
+            </span>
+            <span className="max-w-[4.5rem] truncate text-[9px] font-medium leading-tight text-white/50 sm:text-[10px]">Regroup ping</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setTripPaused(!tripPaused)}
+            className="mx-0.5 flex h-[4.25rem] w-[4.25rem] shrink-0 items-center justify-center rounded-full bg-[#FC4C02] text-white shadow-[0_8px_32px_rgba(252,76,2,0.45)] transition hover:brightness-105 active:scale-[0.98] sm:h-[4.75rem] sm:w-[4.75rem]"
+            aria-label={tripPaused ? "Resume trip" : "Pause trip"}
+          >
+            {tripPaused ? <Play size={32} fill="currentColor" className="ml-0.5 sm:h-9 sm:w-9" /> : <Pause size={30} fill="currentColor" className="sm:h-8 sm:w-8" />}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowAddPin(true)}
+            className="flex min-w-0 flex-1 flex-col items-center gap-1 text-center touch-manipulation"
+            title="Add map pin — parking, fuel, attraction, caution, road quality"
+          >
+            <span className="flex h-11 w-11 items-center justify-center rounded-full border border-violet-500/40 bg-violet-500/10 text-violet-200 shadow-inner sm:h-12 sm:w-12">
+              <MapPin size={20} className="sm:h-[22px] sm:w-[22px]" />
+            </span>
+            <span className="max-w-[4.5rem] text-balance text-[9px] font-medium leading-tight text-white/50 sm:text-[10px]">Add map pin</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              socketRef.current?.emit("convoy-action", { kind: "line-up-formation", tripId: id ? Number(id) : 0 });
+            }}
+            className="flex min-w-0 flex-1 flex-col items-center gap-1 text-center touch-manipulation"
+            title="Ask group to line up in formation"
+          >
+            <span className="flex h-11 w-11 items-center justify-center rounded-full border border-cyan-500/35 bg-cyan-500/10 text-cyan-200 shadow-inner sm:h-12 sm:w-12">
+              <ListOrdered size={20} className="sm:h-[22px] sm:w-[22px]" />
+            </span>
+            <span className="max-w-[4.5rem] truncate text-[9px] font-medium leading-tight text-white/50 sm:text-[10px]">Line up formation</span>
+          </button>
+        </div>
+
+        {/* Secondary row: end trip + live pill */}
+        <div className="flex items-center justify-center gap-2 px-4 pb-3">
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[10px] font-bold",
+              tripPaused
+                ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                : "border-red-500/35 bg-red-500/10 text-red-300",
+            )}
+          >
+            <span className={cn("h-1.5 w-1.5 rounded-full", tripPaused ? "bg-amber-400" : "animate-pulse bg-red-400")} />
+            {tripPaused ? "PAUSED" : "LIVE"}
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowExitConfirm(true)}
+            className="rounded-full border border-red-500/30 bg-red-500/10 px-4 py-1.5 text-[11px] font-bold text-red-300 transition hover:bg-red-500/20"
+          >
+            End trip
+          </button>
+        </div>
+
+        {/* Settings list (Strava-like) */}
+        <div className="mx-3 mb-2 space-y-0 overflow-hidden rounded-2xl border border-white/10 bg-black/40">
+          <button
+            type="button"
+            onClick={() => setStravaShareLive((v) => !v)}
+            className="flex w-full items-center gap-3 border-b border-white/10 px-3 py-3 text-left transition hover:bg-white/[0.04]"
+          >
+            <Users2 size={18} className="shrink-0 text-white/60" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-white/90">Share live location</p>
+              <p className="text-[11px] text-white/35">{stravaShareLive ? "On — friends can follow" : "Off"}</p>
+            </div>
+            <span className={cn("text-[11px] font-bold", stravaShareLive ? "text-emerald-400" : "text-white/30")}>
+              {stravaShareLive ? "On" : "Off"}
+            </span>
+          </button>
+          <div className="flex items-center gap-3 border-b border-white/10 px-3 py-3">
+            <RefreshCw size={18} className="shrink-0 text-white/60" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-white/90">Track laps</p>
+              <p className="text-[11px] text-white/35">Checkpoint lap times</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={stravaTrackLaps}
+              onClick={() => setStravaTrackLaps((v) => !v)}
+              className={cn(
+                "relative h-7 w-12 shrink-0 rounded-full border transition",
+                stravaTrackLaps ? "border-emerald-500/40 bg-emerald-500/25" : "border-white/15 bg-white/[0.06]",
+              )}
+            >
+              <span
+                className={cn(
+                  "absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform",
+                  stravaTrackLaps ? "left-5" : "left-0.5",
+                )}
+              />
+            </button>
+          </div>
+          <button
+            type="button"
+            className="flex w-full items-center gap-3 px-3 py-3 text-left transition hover:bg-white/[0.04]"
+          >
+            <Heart size={18} className="shrink-0 text-white/60" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-white/90">Add a sensor</p>
+              <p className="text-[11px] text-white/35">Heart rate &amp; more</p>
+            </div>
+            <ChevronRight size={16} className="shrink-0 text-white/25" />
+          </button>
+        </div>
+
+        {/* Tabs + scrollable content */}
+        <div className="flex min-h-0 flex-1 flex-col border-t border-white/10">
+          <div className="flex shrink-0 gap-0.5 p-2">
+            {(['members','checkpoints','leaderboard'] as const).map(tab => (
+              <button key={tab} type="button" onClick={() => setLiveTab(tab)}
+                className={cn('flex-1 rounded-lg py-2 text-[10px] font-bold uppercase tracking-wider transition-all capitalize',
                   liveTab===tab ? 'bg-white text-black' : 'text-white/30 hover:text-white hover:bg-white/5')}>
-                {tab === 'leaderboard' ? '🏆' : tab === 'checkpoints' ? '🏁' : tab === 'members' ? '👥' : '💬'}
+                {tab === 'leaderboard' ? 'Podium' : tab === 'checkpoints' ? 'Route' : 'Crew'}
               </button>
             ))}
           </div>
 
-          {/* Chat Tab */}
-          {liveTab === 'chat' && (
-            <>
-              <div className="flex-1 overflow-y-auto p-3 space-y-3">
-                {chatMode === 'admin-only' && (
-                  <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/[0.08] border border-amber-500/15 rounded-xl">
-                    <Lock size={11} className="text-amber-400"/><span className="text-[10px] font-bold text-amber-400">Admin-only chat mode</span>
-                  </div>
-                )}
-                {chat.map(msg => (
-                  <div key={msg.id} className={cn('flex gap-2', msg.sender === user.name && 'flex-row-reverse')}>
-                    <div className="w-7 h-7 rounded-full overflow-hidden bg-white/10 flex-shrink-0">
-                      <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${msg.avatar}`} alt="" className="w-full h-full object-cover"/>
-                    </div>
-                    <div className={cn('max-w-[75%]', msg.sender === user.name && 'items-end flex flex-col')}>
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        <span className={cn('text-[9px] font-bold', msg.role==='organizer'?'text-amber-400':msg.role==='co-admin'?'text-blue-400':msg.role==='moderator'?'text-purple-400':'text-white/30')}>
-                          {msg.sender.split(' ')[0]}
-                        </span>
-                        <span className="text-[8px] text-white/20">{msg.time}</span>
-                      </div>
-                      <div className={cn('px-3 py-2 rounded-2xl text-xs leading-relaxed',
-                        msg.sender === user.name ? 'bg-white text-black rounded-tr-sm' : 'bg-white/[0.06] text-white/80 rounded-tl-sm')}>
-                        {msg.text}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {stickersEnabled && (
-                <div className="px-3 pb-1 flex gap-1 flex-shrink-0">
-                  {['🔥','👍','⚡','🏍️','🎉'].map(s => (
-                    <button key={s} onClick={() => { const m: ChatMessage = { id:Date.now().toString(),sender:user.name,avatar:user.name,text:s,time:new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}),role:'organizer',sticker:s }; setChat(p=>[...p,m]); }} className="w-8 h-8 rounded-lg bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-base hover:bg-white/10 transition-all hover:scale-110">{s}</button>
-                  ))}
-                </div>
-              )}
-              <div className="p-3 border-t border-white/[0.06] flex-shrink-0">
-                <div className="flex gap-2">
-                  <input
-                    type="text" value={chatInput} onChange={e => setChatInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && sendMessage()}
-                    placeholder="Message all riders…"
-                    className="flex-1 bg-white/[0.04] border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-white/25"/>
-                  <button onClick={sendMessage} className="w-9 h-9 bg-white rounded-xl flex items-center justify-center flex-shrink-0 hover:bg-white/90 transition-all">
-                    <Send size={13} className="text-black"/>
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* Members Tab */}
           {liveTab === 'members' && (
-            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-4 pt-1">
               {members.map(m => (
-                <div key={m.id} className="flex items-center gap-3 p-3 bg-white/[0.03] border border-white/[0.06] rounded-xl">
+                <div key={m.id} className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] p-3">
                   <div className="relative flex-shrink-0">
-                    <div className="w-8 h-8 rounded-full overflow-hidden bg-white/10">
-                      <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${m.avatar}`} alt="" className="w-full h-full object-cover"/>
+                    <div className="h-8 w-8 overflow-hidden rounded-full bg-white/10">
+                      <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${m.avatar}`} alt="" className="h-full w-full object-cover"/>
                     </div>
-                    <div className={cn('absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-black', m.status==='arrived'?'bg-emerald-400':m.status==='on-way'?'bg-amber-400':'bg-white/20')}/>
+                    <div className={cn('absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-black', m.status==='arrived'?'bg-emerald-400':m.status==='on-way'?'bg-amber-400':'bg-white/20')}/>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold truncate">{m.name}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-bold">{m.name}</p>
                     <p className="text-[9px] text-white/30">{Math.round(m.speed)} km/h · {m.distanceCovered.toFixed(1)}km</p>
                   </div>
                   <div className="text-right">
@@ -3181,13 +4743,12 @@ const LiveTripPage = ({ user }: { user: User }) => {
             </div>
           )}
 
-          {/* Checkpoints Tab */}
           {liveTab === 'checkpoints' && (
-            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 pb-4 pt-1">
               {checkpoints.map((cp, i) => (
-                <div key={cp.id} className={cn('p-4 rounded-2xl border transition-all', cp.reached ? 'bg-emerald-500/[0.06] border-emerald-500/20' : 'bg-white/[0.02] border-white/[0.06]')}>
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center text-xl border', cp.reached ? 'bg-emerald-500/15 border-emerald-500/25' : 'bg-white/[0.04] border-white/10')}>{cp.badge}</div>
+                <div key={cp.id} className={cn('rounded-2xl border p-4 transition-all', cp.reached ? 'border-emerald-500/20 bg-emerald-500/[0.06]' : 'border-white/[0.06] bg-white/[0.02]')}>
+                  <div className="mb-2 flex items-center gap-3">
+                    <div className={cn('flex h-10 w-10 items-center justify-center rounded-xl border text-xl', cp.reached ? 'border-emerald-500/25 bg-emerald-500/15' : 'border-white/10 bg-white/[0.04]')}>{cp.badge}</div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-bold">{cp.name}</p>
@@ -3197,13 +4758,13 @@ const LiveTripPage = ({ user }: { user: User }) => {
                     </div>
                   </div>
                   {!cp.reached && (
-                    <button onClick={() => setCheckpoints(p => p.map(c => c.id===cp.id ? {...c, reached:true} : c))}
-                      className="w-full py-1.5 rounded-lg bg-white/[0.05] border border-white/10 text-[10px] font-bold text-white/50 hover:text-white hover:border-white/25 transition-all">
+                    <button type="button" onClick={() => setCheckpoints(p => p.map(c => c.id===cp.id ? {...c, reached:true} : c))}
+                      className="w-full rounded-lg border border-white/10 bg-white/[0.05] py-1.5 text-[10px] font-bold text-white/50 transition hover:border-white/25 hover:text-white">
                       ✓ Check In Here
                     </button>
                   )}
                   {cp.reached && (
-                    <div className="flex items-center gap-2 px-2 py-1 bg-emerald-500/[0.08] rounded-lg">
+                    <div className="flex items-center gap-2 rounded-lg bg-emerald-500/[0.08] px-2 py-1">
                       <CheckCircle size={10} className="text-emerald-400"/>
                       <span className="text-[9px] font-bold text-emerald-400">Reached by {members.filter(m=>m.status!=='absent').length} riders</span>
                     </div>
@@ -3213,28 +4774,27 @@ const LiveTripPage = ({ user }: { user: User }) => {
             </div>
           )}
 
-          {/* Leaderboard Tab */}
           {liveTab === 'leaderboard' && (
-            <div className="flex-1 overflow-y-auto p-3">
+            <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-1">
               <div className="space-y-2">
                 {sortedLeaderboard.map((m, i) => (
-                  <div key={m.id} className={cn('flex items-center gap-3 p-3 rounded-xl border transition-all',
-                    i===0 ? 'bg-amber-500/[0.08] border-amber-500/20' : i===1 ? 'bg-white/[0.04] border-white/[0.08]' : i===2 ? 'bg-orange-500/[0.05] border-orange-500/15' : 'bg-white/[0.02] border-white/[0.05]')}>
-                    <div className={cn('w-6 h-6 rounded-full flex items-center justify-center text-xs font-black flex-shrink-0',
+                  <div key={m.id} className={cn('flex items-center gap-3 rounded-xl border p-3 transition-all',
+                    i===0 ? 'border-amber-500/20 bg-amber-500/[0.08]' : i===1 ? 'border-white/[0.08] bg-white/[0.04]' : i===2 ? 'border-orange-500/15 bg-orange-500/[0.05]' : 'border-white/[0.05] bg-white/[0.02]')}>
+                    <div className={cn('flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-black',
                       i===0?'bg-amber-500/25 text-amber-400':i===1?'bg-white/10 text-white/60':i===2?'bg-orange-500/20 text-orange-400':'bg-white/5 text-white/25')}>
                       {i+1}
                     </div>
-                    <div className="w-7 h-7 rounded-full overflow-hidden flex-shrink-0 bg-white/10">
-                      <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${m.avatar}`} alt="" className="w-full h-full object-cover"/>
+                    <div className="h-7 w-7 shrink-0 overflow-hidden rounded-full bg-white/10">
+                      <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${m.avatar}`} alt="" className="h-full w-full object-cover"/>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold truncate">{m.name.split(' ')[0]}</p>
-                      <div className="flex gap-2 mt-0.5">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-bold">{m.name.split(' ')[0]}</p>
+                      <div className="mt-0.5 flex gap-2">
                         <span className="text-[9px] text-white/30">📍{m.distanceCovered.toFixed(1)}km</span>
                         <span className="text-[9px] text-white/30">🏁{m.checkpoints}</span>
                       </div>
                     </div>
-                    <div className="text-right flex-shrink-0">
+                    <div className="shrink-0 text-right">
                       <p className="text-xs font-bold text-amber-400">{m.xpGained}</p>
                       <p className="text-[8px] text-white/20">XP</p>
                     </div>
@@ -3242,18 +4802,20 @@ const LiveTripPage = ({ user }: { user: User }) => {
                 ))}
               </div>
 
-              {/* Carbon savings */}
-              <div className="mt-4 p-4 bg-emerald-500/[0.06] border border-emerald-500/15 rounded-2xl">
-                <div className="flex items-center gap-2 mb-2">
+              <div className="mt-4 rounded-2xl border border-emerald-500/15 bg-emerald-500/[0.06] p-4">
+                <div className="mb-2 flex items-center gap-2">
                   <Leaf size={14} className="text-emerald-400"/>
-                  <p className="text-xs font-bold text-emerald-400">Group Carbon Savings</p>
+                  <p className="text-xs font-bold text-emerald-400">Group carbon savings</p>
                 </div>
                 <p className="text-2xl font-bold text-emerald-400">4.2 kg CO₂</p>
-                <p className="text-[10px] text-white/30 mt-0.5">saved vs solo travel · 🌱 Eco Rider badge incoming</p>
+                <p className="mt-0.5 text-[10px] text-white/30">Saved vs solo travel</p>
               </div>
             </div>
           )}
         </div>
+      </div>
+    </div>
+        )}
       </div>
     </div>
   );
@@ -3287,6 +4849,7 @@ export default function App() {
             email,
             name: displayName,
             role: "user",
+            auth_user_id: authUser.id,
           }),
         });
 
