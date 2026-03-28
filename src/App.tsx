@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useNavigate, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -91,6 +91,30 @@ function generateCouponCode(prefix = 'NOMAD'): string {
 function asNum(v: unknown): number | undefined {
   const n = Number(v);
   return Number.isFinite(n) ? n : undefined;
+}
+
+/** Readable message from a failed fetch (JSON `error`/`details` or short HTML/text). */
+async function readApiErrorMessage(res: Response): Promise<string> {
+  try {
+    const text = (await res.clone().text()).trim();
+    if (text.startsWith("{")) {
+      const j = JSON.parse(text) as {
+        error?: unknown;
+        details?: unknown;
+        hint?: unknown;
+        message?: unknown;
+      };
+      const parts = [j.error, j.details, j.hint, j.message].filter(
+        (x): x is string => typeof x === "string" && x.trim().length > 0,
+      );
+      if (parts.length) return parts.join(" — ");
+    } else if (text.length > 0 && text.length < 600) {
+      return text.replace(/\s+/g, " ").slice(0, 400);
+    }
+  } catch {
+    /* ignore */
+  }
+  return `Request failed (HTTP ${res.status})`;
 }
 
 /** Match server `tripScopeFromDate` — local calendar day, no UTC drift. */
@@ -1491,8 +1515,9 @@ const TripDetailPage = ({user}:{user:User|null}) => {
   const [tripLoading, setTripLoading] = useState(false);
   const trip = dbTrip;
   const [couponInput,setCouponInput]=useState('');
-  const [appliedCoupon,setAppliedCoupon]=useState<{code:string;discount:number}|null>(null);
+  const [appliedCoupon,setAppliedCoupon]=useState<{code:string;discount:number;coupon_id?:number}|null>(null);
   const [couponError,setCouponError]=useState('');
+  const [couponApplying, setCouponApplying] = useState(false);
   const [showBooking,setShowBooking]=useState(false);
   const [booked,setBooked]=useState(false);
   const [bookingStep,setBookingStep]=useState(1);
@@ -1549,21 +1574,48 @@ const TripDetailPage = ({user}:{user:User|null}) => {
     })();
   }, [id]);
 
+  useEffect(() => {
+    setAppliedCoupon(null);
+    setCouponError('');
+  }, [participants]);
+
   if(!trip || tripLoading) return (
     <div className="min-h-dvh bg-black flex items-center justify-center">
       <div className="text-center"><div className="w-10 h-10 border-2 border-white/20 border-t-white rounded-full animate-spin mx-auto mb-4"/><p className="text-white/40">Loading…</p></div>
     </div>
   );
 
-  const VALID_COUPONS: Record<string,number> = {'NOMAD10':10,'EARLYBIRD25':25,'TRAVEL20':20};
-  const applyCoupon = () => {
-    const code = couponInput.trim().toUpperCase();
-    if(VALID_COUPONS[code]) {
-      setAppliedCoupon({code,discount:VALID_COUPONS[code]});
-      setCouponError('');
-    } else {
-      setCouponError('Invalid coupon code');
+  const applyCoupon = async () => {
+    if (!id || trip?.isFree) return;
+    const code = couponInput.trim();
+    if (!code) {
+      setCouponError('Enter a coupon code');
+      return;
+    }
+    setCouponApplying(true);
+    setCouponError('');
+    try {
+      const res = await fetch(`/api/trips/${id}/coupons/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, participants }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body?.valid === false) {
+        setAppliedCoupon(null);
+        setCouponError(typeof body?.error === 'string' ? body.error : 'Invalid coupon code');
+        return;
+      }
+      setAppliedCoupon({
+        code: String(body.code || code).toUpperCase(),
+        discount: Number(body.discount_pct) || 0,
+        coupon_id: typeof body.coupon_id === 'number' ? body.coupon_id : undefined,
+      });
+    } catch {
+      setCouponError('Could not validate coupon');
       setAppliedCoupon(null);
+    } finally {
+      setCouponApplying(false);
     }
   };
 
@@ -1586,6 +1638,8 @@ const TripDetailPage = ({user}:{user:User|null}) => {
         body: JSON.stringify({
           trip_id: Number(id),
           user_id: Number(user.id),
+          participants,
+          ...(appliedCoupon ? { coupon_code: appliedCoupon.code } : {}),
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -1858,11 +1912,18 @@ const TripDetailPage = ({user}:{user:User|null}) => {
                   ):(
                     <div className="flex gap-2">
                       <input type="text" value={couponInput} onChange={e=>{setCouponInput(e.target.value.toUpperCase());setCouponError('');}} placeholder="Enter coupon code" className="flex-1 bg-white/[0.04] border border-white/10 rounded-xl px-3 py-2.5 text-sm font-mono text-white placeholder:text-white/20 focus:outline-none focus:border-white/30 uppercase"/>
-                      <button onClick={applyCoupon} className="px-4 py-2 rounded-xl bg-white/10 border border-white/15 text-xs font-bold text-white hover:bg-white/20 transition-all">Apply</button>
+                      <button
+                        type="button"
+                        disabled={couponApplying}
+                        onClick={() => void applyCoupon()}
+                        className="px-4 py-2 rounded-xl bg-white/10 border border-white/15 text-xs font-bold text-white hover:bg-white/20 transition-all disabled:opacity-50"
+                      >
+                        {couponApplying ? '…' : 'Apply'}
+                      </button>
                     </div>
                   )}
                   {couponError&&<p className="text-xs text-red-400 mt-1 flex items-center gap-1"><AlertCircle size={11}/>{couponError}</p>}
-                  <p className="text-[10px] text-white/20 mt-1.5">Try: NOMAD10, EARLYBIRD25</p>
+                  <p className="text-[10px] text-white/20 mt-1.5">Use a code from the trip organizer&apos;s dashboard.</p>
                 </div>
               )}
 
@@ -1969,20 +2030,15 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
     {id:'Marketplace Listings',icon:ShoppingBag},{id:'Revenue Analytics',icon:BarChart3},
     {id:'Coupons',icon:Tag},{id:'Profile',icon:UserCircle},
   ];
-  /** Sample rows for Revenue Analytics tab only (not organizer trip data). */
-  const REVENUE_SAMPLE=[
-    {id:1,name:'Coastal Bike Expedition',date:'Today, 26 Oct',theme:'Bike Ride',joined:12,max:20,revenue:14400,status:'active',banner:'trip1',privacy:'public' as 'public'|'private'},
-    {id:2,name:'Himalayan Ridge Trek',date:'Fri, 8 Nov',theme:'Trekking',joined:8,max:15,revenue:9600,status:'upcoming',banner:'trip2',privacy:'public' as 'public'|'private'},
-    {id:3,name:'Desert Night Ride',date:'Sat, 15 Nov',theme:'Night Ride',joined:6,max:12,revenue:7200,status:'upcoming',banner:'trip3',privacy:'private' as 'public'|'private'},
-    {id:4,name:'Monsoon Valley Trek',date:'Sun, 5 Oct',theme:'Trekking',joined:18,max:18,revenue:21600,status:'completed',banner:'trip4',privacy:'public' as 'public'|'private'},
-  ];
   const [events,setEvents]=useState<OrgDashEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
-  const [coupons,setCoupons]=useState<CouponType[]>([
-    {id:'1',code:'NOMADLUX10',discount:10,limit:50,used:23,expiry:'Dec 31',active:true,prefix:'NOMAD'},
-    {id:'2',code:'EARLYBIRD25',discount:25,limit:20,used:18,expiry:'Nov 15',active:true,prefix:'EARLY'},
-    {id:'3',code:'WANDERF15',discount:15,limit:100,used:45,expiry:'Jan 31',active:false,prefix:'WANDER'},
-  ]);
+  const [coupons,setCoupons]=useState<CouponType[]>([]);
+  const [couponsFetchError, setCouponsFetchError] = useState<string | null>(null);
+  const [summary,setSummary]=useState({totalRevenue:0,participants:0,eventsHosted:0,successRate:0,activeCoupons:0,expiringCoupons:0});
+  const [revenueRows,setRevenueRows]=useState<{id:number;name:string;participants:number;revenue:number;perPerson:number}[]>([]);
+  const [monthlyRevenue,setMonthlyRevenue]=useState<number[]>(Array.from({length:12},()=>0));
+  const [profile,setProfile]=useState({name:user.name,email:user.email,phone:'',eventsHosted:0,avgRating:null as number|null});
+  const [savingProfile,setSavingProfile]=useState(false);
   const [newCoupon,setNewCoupon]=useState({prefix:'NOMAD',discount:10,limit:50,expiry:''});
   const [genCode,setGenCode]=useState('');
   const cc='bg-white/[0.03] border border-white/10 rounded-2xl hover:border-white/20 transition-colors';
@@ -2028,6 +2084,86 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
       mounted = false;
     };
   }, [user.id]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [summaryRes, revenueRes, monthRes, couponRes, profileRes] = await Promise.all([
+          fetch(`/api/organizers/${user.id}/dashboard-summary`),
+          fetch(`/api/organizers/${user.id}/revenue-by-event`),
+          fetch(`/api/organizers/${user.id}/monthly-revenue`),
+          fetch(`/api/organizers/${user.id}/coupons`),
+          fetch(`/api/organizers/${user.id}/profile`),
+        ]);
+        if (mounted && summaryRes.ok) {
+          const s = await summaryRes.json();
+          setSummary({
+            totalRevenue: Number(s.totalRevenue || 0),
+            participants: Number(s.participants || 0),
+            eventsHosted: Number(s.eventsHosted || 0),
+            successRate: Number(s.successRate || 0),
+            activeCoupons: Number(s.activeCoupons || 0),
+            expiringCoupons: Number(s.expiringCoupons || 0),
+          });
+        }
+        if (mounted && revenueRes.ok) {
+          const rows = await revenueRes.json();
+          setRevenueRows((rows || []).map((r:any)=>({
+            id:Number(r.id),name:String(r.name||'Untitled'),
+            participants:Number(r.participants||0),
+            revenue:Number(r.revenue||0),
+            perPerson:Number(r.perPerson||0),
+          })));
+        }
+        if (mounted && monthRes.ok) {
+          const rows = await monthRes.json();
+          const arr = Array.from({ length: 12 }, () => 0);
+          for (const row of rows || []) {
+            const i = Number((row as any).month);
+            if (Number.isFinite(i) && i >= 0 && i < 12) arr[i] = Number((row as any).revenue || 0);
+          }
+          setMonthlyRevenue(arr);
+        }
+        if (mounted) {
+          if (couponRes.ok) {
+            setCouponsFetchError(null);
+            const rows = await couponRes.json();
+            setCoupons((rows || []).map((c: any) => ({
+              id: String(c.id),
+              code: String(c.code),
+              discount: Number(c.discount_pct || 0),
+              limit: Number(c.usage_limit || 0),
+              used: Number(c.used_count || 0),
+              expiry: c.expiry_date
+                ? new Date(c.expiry_date).toLocaleDateString("en-IN", {
+                    day: "numeric",
+                    month: "short",
+                  })
+                : "No expiry",
+              active: Boolean(c.active),
+              prefix: String(c.prefix || ""),
+            })));
+          } else {
+            setCouponsFetchError(await readApiErrorMessage(couponRes));
+          }
+        }
+        if (mounted && profileRes.ok) {
+          const p = await profileRes.json();
+          setProfile({
+            name: String(p.name || user.name),
+            email: String(p.email || user.email),
+            phone: String(p.phone || ''),
+            eventsHosted: Number(p.events_hosted || 0),
+            avgRating: Number.isFinite(Number(p.avg_rating)) ? Number(p.avg_rating) : null,
+          });
+        }
+      } catch {
+        // keep UI usable with existing loaded state
+      }
+    })();
+    return () => { mounted = false; };
+  }, [user.id, user.name, user.email]);
 
   const renderTab=()=>{
     switch(activeTab){
@@ -2146,7 +2282,7 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
       case'Revenue Analytics':return(
         <div className="space-y-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[{label:'Total Revenue',value:'₹52,800',change:'+12%',up:true,icon:DollarSign},{label:'This Month',value:'₹14,400',change:'+8%',up:true,icon:TrendingUp},{label:'Avg per Event',value:'₹13,200',change:'-3%',up:false,icon:Activity},{label:'Participants',value:'1,240',change:'+5%',up:true,icon:Users2}].map(s=>(
+            {[{label:'Total Revenue',value:`₹${summary.totalRevenue.toLocaleString()}`,change:`${summary.successRate}% success`,up:true,icon:DollarSign},{label:'This Month',value:`₹${(monthlyRevenue[new Date().getMonth()]||0).toLocaleString()}`,change:'live',up:true,icon:TrendingUp},{label:'Avg per Event',value:`₹${Math.round(summary.eventsHosted?summary.totalRevenue/summary.eventsHosted:0).toLocaleString()}`,change:'auto',up:true,icon:Activity},{label:'Participants',value:summary.participants.toLocaleString(),change:'live',up:true,icon:Users2}].map(s=>(
               <div key={s.label} className={cn(cc,'p-5')}>
                 <div className="flex items-center justify-between mb-3"><div className="w-8 h-8 rounded-lg bg-white/[0.06] flex items-center justify-center"><s.icon size={15} className="text-white/50"/></div><span className={cn('flex items-center gap-0.5 text-xs font-bold',s.up?'text-emerald-400':'text-red-400')}>{s.up?<ArrowUpRight size={12}/>:<ArrowDownRight size={12}/>}{s.change}</span></div>
                 <p className="text-2xl font-bold">{s.value}</p><p className="text-[10px] text-white/30 mt-1 uppercase tracking-wider">{s.label}</p>
@@ -2156,11 +2292,11 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
           <div className={cn(cc,'p-6')}>
             <div className="flex items-center justify-between mb-6"><h3 className="font-bold">Revenue by Event</h3><button className="flex items-center gap-1.5 text-xs text-white/40 hover:text-white"><Download size={13}/> Export</button></div>
             <div className="space-y-5">
-              {REVENUE_SAMPLE.map(trip=>(
+              {revenueRows.map(trip=>(
                 <div key={trip.id}>
                   <div className="flex items-center justify-between mb-1.5"><span className="text-sm font-medium text-white/80">{trip.name}</span><span className="text-sm font-bold">₹{trip.revenue.toLocaleString()}</span></div>
-                  <div className="h-1.5 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-white rounded-full" style={{width:`${(trip.revenue/21600)*100}%`}}/></div>
-                  <div className="flex justify-between mt-1"><span className="text-[10px] text-white/30">{trip.joined} participants</span><span className="text-[10px] text-white/30">₹{trip.joined ? Math.round(trip.revenue/trip.joined).toLocaleString() : "0"}/person</span></div>
+                  <div className="h-1.5 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-white rounded-full" style={{width:`${Math.min(100, summary.totalRevenue>0 ? (trip.revenue/summary.totalRevenue)*100 : 0)}%`}}/></div>
+                  <div className="flex justify-between mt-1"><span className="text-[10px] text-white/30">{trip.participants} participants</span><span className="text-[10px] text-white/30">₹{trip.perPerson.toLocaleString()}/person</span></div>
                 </div>
               ))}
             </div>
@@ -2168,12 +2304,15 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
           <div className={cn(cc,'p-6')}>
             <h3 className="font-bold mb-6">Monthly Overview</h3>
             <div className="flex items-end gap-1.5 h-32">
-              {[40,65,45,80,55,90,70,85,60,95,75,100].map((h,i)=>(
+              {monthlyRevenue.map((value,i)=>{
+                const max = Math.max(...monthlyRevenue, 1);
+                const h = Math.max(8, Math.round((value / max) * 100));
+                return (
                 <div key={i} className="flex-1 flex flex-col items-center gap-1">
                   <div className="w-full rounded-t-lg bg-white/20 hover:bg-white/40 transition-colors cursor-pointer" style={{height:`${h}%`}}/>
                   <span className="text-[8px] text-white/20">{CAL_MONTHS[i].slice(0,3)}</span>
                 </div>
-              ))}
+              )})}
             </div>
           </div>
         </div>
@@ -2183,13 +2322,12 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
           <div className={cn(cc,'p-6')}>
             <h3 className="font-bold mb-5 flex items-center gap-2"><Tag size={16} className="text-white/40"/> Generate New Coupon</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-              {[{label:'Code Prefix',key:'prefix',type:'text',max:8},{label:'Discount %',key:'discount',type:'number'},{label:'Usage Limit',key:'limit',type:'number'},{label:'Expiry Date',key:'expiry',type:'text'}].map(f=>(
+              {[{label:'Code Prefix',key:'prefix',type:'text',max:8},{label:'Discount %',key:'discount',type:'number'},{label:'Usage Limit',key:'limit',type:'number'},{label:'Expires',key:'expiry',type:'date'}].map(f=>(
                 <div key={f.key}>
                   <label className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-2 block">{f.label}</label>
                   <input type={f.type} value={(newCoupon as any)[f.key]} maxLength={f.max}
                     onChange={e=>setNewCoupon(p=>({...p,[f.key]:f.key==='prefix'?e.target.value.toUpperCase():f.key==='expiry'?e.target.value:Math.max(1,parseInt(e.target.value)||1)}))}
-                    placeholder={f.key==='expiry'?'Dec 31, 2025':undefined}
-                    className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-2 text-sm font-bold text-white focus:outline-none focus:border-white/30 font-mono"/>
+                    className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-2 text-sm font-bold text-white focus:outline-none focus:border-white/30 font-mono scheme-dark"/>
                 </div>
               ))}
             </div>
@@ -2202,13 +2340,18 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
             <div className="flex gap-3">
               <button type="button" onClick={()=>setGenCode(generateCouponCode(newCoupon.prefix))} className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-white/15 text-sm font-semibold text-white/70 hover:text-white hover:border-white/40 bg-white/[0.03] transition-all"><RefreshCw size={14}/> {genCode?'Regenerate':'Generate Code'}</button>
               {genCode&&(
-                <button type="button" onClick={()=>{setCoupons(p=>[...p,{id:Date.now().toString(),code:genCode,discount:newCoupon.discount,limit:newCoupon.limit,used:0,expiry:newCoupon.expiry||'No expiry',active:true,prefix:newCoupon.prefix}]);setGenCode('');setNewCoupon({prefix:'NOMAD',discount:10,limit:50,expiry:''});}} className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white text-black text-sm font-bold hover:bg-white/90 transition-all"><Check size={14}/> Save Coupon</button>
+                <button type="button" onClick={async()=>{try{const res=await fetch(`/api/organizers/${user.id}/coupons`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:genCode,prefix:newCoupon.prefix,discount_pct:newCoupon.discount,usage_limit:newCoupon.limit,expiry_date:newCoupon.expiry||null})});if(!res.ok){alert(await readApiErrorMessage(res));return;}const body=await res.json();setCoupons(p=>[{id:String(body.id),code:String(body.code),discount:Number(body.discount_pct||newCoupon.discount),limit:Number(body.usage_limit||newCoupon.limit),used:Number(body.used_count||0),expiry:body.expiry_date?new Date(body.expiry_date).toLocaleDateString('en-IN',{day:'numeric',month:'short'}):'No expiry',active:Boolean(body.active),prefix:String(body.prefix||newCoupon.prefix)},...p]);setSummary(s=>({...s,activeCoupons:s.activeCoupons+1}));setGenCode('');setNewCoupon({prefix:'NOMAD',discount:10,limit:50,expiry:''});setCouponsFetchError(null);}catch{alert('Could not reach the server. Use npm run dev on port 3000.')}}} className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white text-black text-sm font-bold hover:bg-white/90 transition-all"><Check size={14}/> Save Coupon</button>
               )}
             </div>
           </div>
           <div>
+            {couponsFetchError && (
+              <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                {couponsFetchError}
+              </div>
+            )}
             <p className="text-[10px] font-bold text-white/30 uppercase tracking-widest mb-4">All Coupons ({coupons.length})</p>
-            <div className="space-y-3">{coupons.map(c=><CouponCard key={c.id} coupon={c} onDelete={()=>setCoupons(p=>p.filter(x=>x.id!==c.id))} onToggle={()=>setCoupons(p=>p.map(x=>x.id===c.id?{...x,active:!x.active}:x))}/>)}</div>
+            <div className="space-y-3">{coupons.map(c=><CouponCard key={c.id} coupon={c} onDelete={async()=>{try{await fetch(`/api/organizers/${user.id}/coupons/${c.id}`,{method:'DELETE'});}catch{}setCoupons(p=>p.filter(x=>x.id!==c.id));}} onToggle={async()=>{const next=!c.active;try{const res=await fetch(`/api/organizers/${user.id}/coupons/${c.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:next})});if(!res.ok)return;}catch{return;}setCoupons(p=>p.map(x=>x.id===c.id?{...x,active:next}:x));}}/>)}</div>
           </div>
         </div>
       );
@@ -2219,16 +2362,16 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
               <div className="w-20 h-20 rounded-2xl overflow-hidden bg-white/10 border border-white/20"><img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.name}`} alt="" className="w-full h-full object-cover"/></div>
               <button className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-white text-black flex items-center justify-center"><Camera size={11}/></button>
             </div>
-            <div><h3 className="font-bold text-lg">{user.name}</h3><p className="text-white/40 text-sm">Verified Organizer</p><div className="flex items-center gap-1 mt-1"><Star size={12} className="text-amber-400 fill-amber-400"/><span className="text-xs font-bold text-amber-400">4.8</span><span className="text-xs text-white/30 ml-1">· 42 events hosted</span></div></div>
+            <div><h3 className="font-bold text-lg">{profile.name}</h3><p className="text-white/40 text-sm">Verified Organizer</p><div className="flex items-center gap-1 mt-1"><Star size={12} className="text-amber-400 fill-amber-400"/><span className="text-xs font-bold text-amber-400">{profile.avgRating ?? '--'}</span><span className="text-xs text-white/30 ml-1">· {profile.eventsHosted} events hosted</span></div></div>
           </div>
-          {[{label:'Full Name',value:user.name,icon:UserCircle},{label:'Email',value:user.email||'organizer@nomad.com',icon:Mail},{label:'Phone',value:'+91 98765 43210',icon:Settings}].map(f=>(
+          {[{label:'Full Name',key:'name',value:profile.name,icon:UserCircle},{label:'Email',key:'email',value:profile.email||'organizer@nomad.com',icon:Mail},{label:'Phone',key:'phone',value:profile.phone||'+91 00000 00000',icon:Settings}].map(f=>(
             <div key={f.label} className={cn(cc,'p-5 flex items-center gap-4')}>
               <div className="w-9 h-9 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center"><f.icon size={16} className="text-white/40"/></div>
-              <div className="flex-1"><p className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-0.5">{f.label}</p><p className="text-sm font-semibold">{f.value}</p></div>
+              <div className="flex-1"><p className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-0.5">{f.label}</p><input value={f.value} onChange={e=>setProfile(p=>({...p,[f.key]:e.target.value}))} className="w-full bg-transparent text-sm font-semibold focus:outline-none"/></div>
               <button className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/[0.04] border border-white/[0.08] text-white/40 hover:text-white hover:bg-white/10 transition-all"><Edit2 size={13}/></button>
             </div>
           ))}
-          <button className="w-full py-3 rounded-2xl border border-white/10 text-sm font-semibold text-white/50 hover:text-white hover:border-white/30 transition-all">Save Changes</button>
+          <button disabled={savingProfile} onClick={async()=>{try{setSavingProfile(true);const res=await fetch(`/api/organizers/${user.id}/profile`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:profile.name,email:profile.email,phone:profile.phone})});const body=await res.json().catch(()=>({}));if(!res.ok){alert(body.error||'Failed to save profile');return;}setProfile(p=>({...p,name:body.name??p.name,email:body.email??p.email,phone:body.phone??p.phone}));}catch{alert('Failed to save profile');}finally{setSavingProfile(false);}}} className="w-full py-3 rounded-2xl border border-white/10 text-sm font-semibold text-white/50 hover:text-white hover:border-white/30 transition-all">{savingProfile?'Saving...':'Save Changes'}</button>
           <button onClick={onLogout} className="w-full py-3 rounded-2xl border border-red-500/20 text-sm font-semibold text-red-400 hover:bg-red-500/10 transition-all flex items-center justify-center gap-2"><LogOut size={14}/> Sign Out</button>
         </div>
       );
@@ -2257,7 +2400,7 @@ const OrganizerDashboard = ({user,onLogout}:{user:User;onLogout:()=>void}) => {
         <main className="flex-1 lg:ml-64 p-6 lg:p-10 min-h-dvh">
           {activeTab!=='Create Event'&&(
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-              {[{label:'Total Revenue',value:'₹52,800',trend:'+12%',icon:DollarSign},{label:'Participants',value:'1,240',trend:'+5%',icon:Users},{label:'Events Hosted',value:'42',trend:'98% success',icon:Calendar},{label:'Active Coupons',value:'8',trend:'3 expiring',icon:Tag}].map(s=>(
+              {[{label:'Total Revenue',value:`₹${summary.totalRevenue.toLocaleString()}`,trend:'live',icon:DollarSign},{label:'Participants',value:summary.participants.toLocaleString(),trend:'live',icon:Users},{label:'Events Hosted',value:String(summary.eventsHosted),trend:`${summary.successRate}% success`,icon:Calendar},{label:'Active Coupons',value:String(summary.activeCoupons),trend:`${summary.expiringCoupons} expiring`,icon:Tag}].map(s=>(
                 <div key={s.label} className="bg-white/[0.03] border border-white/10 rounded-2xl p-4 hover:border-white/20 transition-colors">
                   <div className="flex items-center justify-between mb-2"><s.icon size={15} className="text-white/30"/><span className="text-[10px] font-bold text-emerald-400">{s.trend}</span></div>
                   <p className="text-xl font-bold">{s.value}</p><p className="text-[10px] text-white/30 mt-0.5 uppercase tracking-wider">{s.label}</p>
@@ -2390,8 +2533,9 @@ const CreateEventPage = ({user}:{user:User}) => {
   const bannerRef=useRef<HTMLInputElement>(null);
   const galleryRef=useRef<HTMLInputElement>(null);
   const [coupons,setCoupons]=useState<CouponType[]>([]);
-  const [couponForm,setCouponForm]=useState({prefix:'EVENT',discount:10,limit:50});
+  const [couponForm,setCouponForm]=useState({prefix:'EVENT',discount:10,limit:50,expiry:''});
   const [couponCode,setCouponCode]=useState('');
+  const [couponAttachLoading, setCouponAttachLoading] = useState(false);
   const [inviteInput,setInviteInput]=useState('');
   const [invites,setInvites]=useState<InviteType[]>([]);
   const [activePicker,setActivePicker]=useState<string|null>(null);
@@ -2738,17 +2882,76 @@ const CreateEventPage = ({user}:{user:User}) => {
             <div className={cn(cc,'overflow-hidden')}>
               <SH label="Coupon Generator" section="coupons" icon={Tag}/>
               <AnimatePresence>{sections.coupons&&(<motion.div initial={{height:0}} animate={{height:'auto'}} exit={{height:0}} className="overflow-hidden"><div className="px-5 pb-5 pt-1 space-y-4">
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   <div><label className="text-[10px] font-bold text-white/30 uppercase tracking-wider mb-1.5 block">Prefix</label><input type="text" value={couponForm.prefix} onChange={e=>setCouponForm(p=>({...p,prefix:e.target.value.toUpperCase()}))} maxLength={8} className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-2 text-sm font-mono font-bold text-white focus:outline-none focus:border-white/30"/></div>
                   <div><label className="text-[10px] font-bold text-white/30 uppercase tracking-wider mb-1.5 block">Discount %</label><input type="number" value={couponForm.discount} onChange={e=>setCouponForm(p=>({...p,discount:Math.min(100,Math.max(1,parseInt(e.target.value)||1))}))} className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-2 text-sm font-bold text-white focus:outline-none focus:border-white/30"/></div>
                   <div><label className="text-[10px] font-bold text-white/30 uppercase tracking-wider mb-1.5 block">Usage Limit</label><input type="number" value={couponForm.limit} onChange={e=>setCouponForm(p=>({...p,limit:Math.max(1,parseInt(e.target.value)||1)}))} className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-2 text-sm font-bold text-white focus:outline-none focus:border-white/30"/></div>
+                  <div><label className="text-[10px] font-bold text-white/30 uppercase tracking-wider mb-1.5 block">Expires</label><input type="date" value={couponForm.expiry} onChange={e=>setCouponForm(p=>({...p,expiry:e.target.value}))} className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-2 text-sm font-bold text-white scheme-dark focus:outline-none focus:border-white/30"/></div>
                 </div>
                 {couponCode&&(<motion.div initial={{opacity:0,y:4}} animate={{opacity:1,y:0}} className="p-3 bg-white/5 border border-white/15 rounded-xl flex items-center justify-between"><span className="font-mono font-bold tracking-widest text-white">{couponCode}</span><button type="button" onClick={()=>navigator.clipboard.writeText(couponCode)} className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/50 hover:text-white transition-all"><Copy size={13}/></button></motion.div>)}
                 <div className="flex gap-2">
                   <button type="button" onClick={()=>setCouponCode(generateCouponCode(couponForm.prefix))} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/15 text-xs font-semibold text-white/60 hover:text-white hover:border-white/40 bg-white/[0.03] transition-all"><RefreshCw size={12}/> {couponCode?'New Code':'Generate'}</button>
-                  {couponCode&&<button type="button" onClick={()=>{setCoupons(p=>[...p,{id:Date.now().toString(),code:couponCode,discount:couponForm.discount,limit:couponForm.limit,used:0,expiry:'Event end',active:true,prefix:couponForm.prefix}]);setCouponCode('');}} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white text-black text-xs font-bold hover:bg-white/90 transition-all"><Check size={12}/> Attach</button>}
+                  {couponCode&&(
+                    <button
+                      type="button"
+                      disabled={couponAttachLoading}
+                      onClick={async () => {
+                        setCouponAttachLoading(true);
+                        try {
+                          const res = await fetch(`/api/organizers/${user.id}/coupons`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              code: couponCode,
+                              prefix: couponForm.prefix,
+                              discount_pct: couponForm.discount,
+                              usage_limit: couponForm.limit,
+                              expiry_date: couponForm.expiry || null,
+                            }),
+                          });
+                          if (!res.ok) {
+                            alert(await readApiErrorMessage(res));
+                            return;
+                          }
+                          const body = await res.json();
+                          setCoupons((p) => [
+                            {
+                              id: String(body.id),
+                              code: String(body.code),
+                              discount: Number(body.discount_pct ?? couponForm.discount),
+                              limit: Number(body.usage_limit ?? couponForm.limit),
+                              used: Number(body.used_count ?? 0),
+                              expiry: body.expiry_date
+                                ? new Date(body.expiry_date).toLocaleDateString("en-IN", {
+                                    day: "numeric",
+                                    month: "short",
+                                  })
+                                : "No expiry",
+                              active: Boolean(body.active),
+                              prefix: String(body.prefix ?? couponForm.prefix),
+                            },
+                            ...p,
+                          ]);
+                          setCouponCode("");
+                        } catch {
+                          alert(
+                            "Could not reach the server. Use npm run dev on port 3000 so /api works.",
+                          );
+                        } finally {
+                          setCouponAttachLoading(false);
+                        }
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white text-black text-xs font-bold hover:bg-white/90 transition-all disabled:opacity-50"
+                    >
+                      {couponAttachLoading ? "…" : (
+                        <>
+                          <Check size={12} /> Attach
+                        </>
+                      )}
+                    </button>
+                  )}
                 </div>
-                {coupons.length>0&&(<div className="space-y-2 pt-2 border-t border-white/[0.06]"><p className="text-[10px] font-bold text-white/30 uppercase tracking-widest">{coupons.length} coupon{coupons.length>1?'s':''} attached</p>{coupons.map(c=><CouponCard key={c.id} coupon={c} onDelete={()=>setCoupons(p=>p.filter(x=>x.id!==c.id))}/>)}</div>)}
+                {coupons.length>0&&(<div className="space-y-2 pt-2 border-t border-white/[0.06]"><p className="text-[10px] font-bold text-white/30 uppercase tracking-widest">{coupons.length} coupon{coupons.length>1?'s':''} attached</p>{coupons.map(c=><CouponCard key={c.id} coupon={c} onDelete={async()=>{if(/^\d+$/.test(c.id)){try{await fetch(`/api/organizers/${user.id}/coupons/${c.id}`,{method:'DELETE'});}catch{}}setCoupons(p=>p.filter(x=>x.id!==c.id));}}/>)}</div>)}
               </div></motion.div>)}</AnimatePresence>
             </div>
             {/* TRIP TAGS */}
@@ -2940,6 +3143,9 @@ const MOCK_MAP_PINS: MapPin[] = [
 
 const WEATHER: WeatherAlert = { type:'clear',message:'Clear skies, 28°C — Perfect riding weather!',severity:'low' };
 
+/** Vertical swipe distance (px) to expand/collapse live bottom sheet */
+const LIVE_SHEET_SWIPE_PX = 52;
+
 // Trip stats for post-trip
 type TripStats = { distanceCovered: number; duration: string; carbonSaved: number; checkpointsReached: number; totalXP: number; avgSpeed: number };
 
@@ -2958,7 +3164,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
   });
 
   // ─── WAITING ROOM STATE ────────────────────────────────────
-  const [members, setMembers] = useState<LiveMember[]>(MOCK_MEMBERS);
+  const [members, setMembers] = useState<LiveMember[]>([]);
   const [chatMode, setChatMode] = useState<ChatMode>('all');
   const [stickersEnabled, setStickersEnabled] = useState(true);
   const [videoCallActive, setVideoCallActive] = useState(false);
@@ -2981,8 +3187,8 @@ const LiveTripPage = ({ user }: { user: User }) => {
   const [attendanceTab, setAttendanceTab] = useState<'all' | 'arrived' | 'pending'>('all');
 
   // ─── LIVE MAP STATE ────────────────────────────────────────
-  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>(MOCK_CHECKPOINTS);
-  const [mapPins, setMapPins] = useState<MapPin[]>(MOCK_MAP_PINS);
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
+  const [mapPins, setMapPins] = useState<MapPin[]>([]);
   const [showSOS, setShowSOS] = useState(false);
   const [showAddPin, setShowAddPin] = useState(false);
   const [newPinType, setNewPinType] = useState<MapPin['type']>('parking');
@@ -2998,6 +3204,48 @@ const LiveTripPage = ({ user }: { user: User }) => {
   const [stravaTrackLaps, setStravaTrackLaps] = useState(false);
   /** Peek = map-first driving view; expanded = full convoy controls (Google Maps–style sheet). */
   const [liveSheetSnap, setLiveSheetSnap] = useState<"peek" | "expanded">("peek");
+
+  const sheetHandlePtr = useRef<{ y: number; pid: number | null }>({ y: 0, pid: null });
+  const peekSwipePtr = useRef<{ y: number; pid: number | null }>({ y: 0, pid: null });
+
+  const onSheetHandlePointerDown = useCallback((e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    sheetHandlePtr.current = { y: e.clientY, pid: e.pointerId };
+  }, []);
+
+  const onSheetHandlePointerUp = useCallback((e: React.PointerEvent) => {
+    if (sheetHandlePtr.current.pid !== e.pointerId) return;
+    const dy = e.clientY - sheetHandlePtr.current.y;
+    sheetHandlePtr.current.pid = null;
+    const thr = LIVE_SHEET_SWIPE_PX;
+    if (Math.abs(dy) < thr) {
+      setLiveSheetSnap((s) => (s === "peek" ? "expanded" : "peek"));
+    } else if (dy < -thr) {
+      setLiveSheetSnap("expanded");
+    } else if (dy > thr) {
+      setLiveSheetSnap("peek");
+    }
+  }, []);
+
+  const onSheetHandlePointerCancel = useCallback(() => {
+    sheetHandlePtr.current.pid = null;
+  }, []);
+
+  const onPeekSwipePointerDown = useCallback((e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    peekSwipePtr.current = { y: e.clientY, pid: e.pointerId };
+  }, []);
+
+  const onPeekSwipePointerUp = useCallback((e: React.PointerEvent) => {
+    if (peekSwipePtr.current.pid !== e.pointerId) return;
+    const dy = e.clientY - peekSwipePtr.current.y;
+    peekSwipePtr.current.pid = null;
+    if (dy < -LIVE_SHEET_SWIPE_PX) setLiveSheetSnap("expanded");
+  }, []);
+
+  const onPeekSwipePointerCancel = useCallback(() => {
+    peekSwipePtr.current.pid = null;
+  }, []);
 
   // ─── POST-TRIP STATE ───────────────────────────────────────
   const [postRating, setPostRating] = useState(0);
@@ -3266,6 +3514,25 @@ const LiveTripPage = ({ user }: { user: User }) => {
     })();
   }, [id, user.id]);
 
+  useEffect(() => {
+    if (!id || accessDenied) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/trips/${id}/live-state?user_id=${encodeURIComponent(user.id)}`);
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) return;
+        const serverMembers = Array.isArray(body.members) ? body.members : [];
+        const serverCheckpoints = Array.isArray(body.checkpoints) ? body.checkpoints : [];
+        const serverPins = Array.isArray(body.mapPins) ? body.mapPins : [];
+        if (serverMembers.length > 0) setMembers(serverMembers);
+        setCheckpoints(serverCheckpoints);
+        setMapPins(serverPins);
+      } catch {
+        // Keep UI stable; real-time sockets can still populate movement.
+      }
+    })();
+  }, [id, user.id, accessDenied]);
+
 
   // Timer for live phase
   useEffect(() => {
@@ -3273,20 +3540,6 @@ const LiveTripPage = ({ user }: { user: User }) => {
     const t = setInterval(() => setElapsedSec(s => s + 1), 1000);
     return () => clearInterval(t);
   }, [phase, tripPaused]);
-
-  // Simulate member speed updates
-  useEffect(() => {
-    if (phase !== 'live') return;
-    const t = setInterval(() => {
-      setMembers(prev => prev.map(m => m.status === 'absent' ? m : {
-        ...m,
-        speed: Math.max(0, m.speed + (Math.random() - 0.5) * 8),
-        distanceCovered: m.status === 'arrived' ? m.distanceCovered + Math.random() * 0.05 : m.distanceCovered,
-        xpGained: m.distanceCovered > 0 ? Math.floor(m.distanceCovered * 18) : m.xpGained,
-      }));
-    }, 2000);
-    return () => clearInterval(t);
-  }, [phase]);
 
   const formatTime = (s: number) => `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
   /** Strava-style clock (mm:ss or h:mm:ss). */
@@ -3407,16 +3660,46 @@ const LiveTripPage = ({ user }: { user: User }) => {
     return () => navigator.geolocation.clearWatch(watchId);
   }, [id, phase, user.id]);
 
-  const addPin = () => {
-    if (!newPinLabel.trim()) return;
-    const pin: MapPin = {
-      id: Date.now().toString(), type: newPinType,
-      lat: 18.85 + Math.random() * 0.1, lng: 72.9 + Math.random() * 0.2,
-      label: newPinLabel, addedBy: user.name,
-    };
-    setMapPins(p => [...p, pin]);
-    setNewPinLabel('');
-    setShowAddPin(false);
+  const addPin = async () => {
+    if (!id || !newPinLabel.trim()) return;
+    const lat = localMember?.lat ?? trip?.meetupLat ?? 0;
+    const lng = localMember?.lng ?? trip?.meetupLng ?? 0;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+      alert("Current location unavailable. Move the convoy or allow location first.");
+      return;
+    }
+    try {
+      const res = await fetch(`/api/trips/${id}/map-pins`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: Number(user.id),
+          type: newPinType,
+          label: newPinLabel.trim(),
+          lat,
+          lng,
+          added_by: user.name,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(body.error || "Failed to add map pin");
+        return;
+      }
+      const pin: MapPin = {
+        id: String(body.id ?? Date.now()),
+        type: body.type ?? newPinType,
+        lat: Number(body.lat ?? lat),
+        lng: Number(body.lng ?? lng),
+        label: String(body.label ?? newPinLabel.trim()),
+        addedBy: String(body.addedBy ?? user.name),
+      };
+      setMapPins((p) => [...p, pin]);
+      setNewPinLabel('');
+      setShowAddPin(false);
+    } catch {
+      alert("Failed to add map pin");
+    }
   };
 
   const endTrip = async () => {
@@ -3605,7 +3888,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
           {[
             { icon:'📍',label:'Distance',value:`${tripStats.distanceCovered} km` },
             { icon:'⏱️',label:'Duration',value:tripStats.duration },
-            { icon:'🏁',label:'Checkpoints',value:`${tripStats.checkpointsReached}/${MOCK_CHECKPOINTS.length}` },
+            { icon:'🏁',label:'Checkpoints',value:`${tripStats.checkpointsReached}/${Math.max(checkpoints.length, 1)}` },
             { icon:'⚡',label:'Avg Speed',value:`${tripStats.avgSpeed} km/h` },
             { icon:'🌿',label:'Carbon Saved',value:`${tripStats.carbonSaved} kg CO₂` },
             { icon:'👥',label:'Riders',value:`${arrivedCount} joined` },
@@ -4469,30 +4752,42 @@ const LiveTripPage = ({ user }: { user: User }) => {
         </div>
       </div>
 
-      {/* Bottom sheet — peek (map-first) or expanded; smooth height + inner scroll */}
-      <div
-        className={cn(
-          "relative z-30 flex shrink-0 flex-col overflow-hidden rounded-t-[22px] border border-white/10 border-b-0 bg-[#0c0c0c] shadow-[0_-8px_48px_rgba(0,0,0,0.65)] transition-[max-height] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
-          liveSheetSnap === "peek" ? "max-h-[min(32vh,280px)]" : "max-h-[min(90dvh,920px)]",
-        )}
+      {/* Bottom sheet — peek (map-first) or expanded; spring height + swipe + inner scroll */}
+      <motion.div
+        initial={false}
+        animate={{
+          maxHeight: liveSheetSnap === "peek" ? "min(32vh, 280px)" : "min(90dvh, 920px)",
+        }}
+        transition={{ type: "spring", stiffness: 420, damping: 36, mass: 0.82 }}
+        className="relative z-30 flex shrink-0 flex-col overflow-hidden rounded-t-[22px] border border-white/10 border-b-0 bg-[#0c0c0c] shadow-[0_-8px_48px_rgba(0,0,0,0.65)] will-change-[max-height]"
       >
         <button
           type="button"
-          onClick={() => setLiveSheetSnap((s) => (s === "peek" ? "expanded" : "peek"))}
-          className="flex w-full shrink-0 flex-col items-center gap-0.5 pb-1 pt-2 touch-manipulation"
+          onPointerDown={onSheetHandlePointerDown}
+          onPointerUp={onSheetHandlePointerUp}
+          onPointerCancel={onSheetHandlePointerCancel}
+          className="flex w-full shrink-0 flex-col items-center gap-0.5 pb-1 pt-2 touch-manipulation select-none"
           aria-expanded={liveSheetSnap === "expanded"}
           aria-label={liveSheetSnap === "peek" ? "Expand trip panel" : "Collapse trip panel"}
         >
           <span className="h-1 w-10 rounded-full bg-white/30" />
-          <ChevronUp
-            size={18}
-            className={cn("text-white/40 transition-transform duration-300", liveSheetSnap === "expanded" && "rotate-180")}
+          <motion.span
+            animate={{ rotate: liveSheetSnap === "expanded" ? 180 : 0 }}
+            transition={{ type: "spring", stiffness: 400, damping: 28 }}
+            className="inline-flex text-white/40"
             aria-hidden
-          />
+          >
+            <ChevronUp size={18} />
+          </motion.span>
         </button>
 
         {liveSheetSnap === "peek" ? (
-          <div className="border-b border-white/10 px-4 pb-3 pt-0">
+          <div
+            className="border-b border-white/10 px-4 pb-3 pt-0 touch-pan-y"
+            onPointerDown={onPeekSwipePointerDown}
+            onPointerUp={onPeekSwipePointerUp}
+            onPointerCancel={onPeekSwipePointerCancel}
+          >
             <div className="flex items-end justify-center gap-3">
               <div className="min-w-0 flex-1 text-center">
                 <p className="text-lg font-semibold tabular-nums text-white">{formatElapsedStrava(elapsedSec)}</p>
@@ -4543,7 +4838,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-0 [scrollbar-gutter:stable]">
+            <div className="min-h-0 flex-1 scroll-smooth overflow-y-auto overscroll-y-contain px-0 [scrollbar-gutter:stable]">
         {/* Status strip */}
         <div className="mx-3 mt-3 flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/90 px-3 py-2">
           <Radio size={14} className="shrink-0 text-emerald-400" />
@@ -4816,7 +5111,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
       </div>
     </div>
         )}
-      </div>
+      </motion.div>
     </div>
   );
 };

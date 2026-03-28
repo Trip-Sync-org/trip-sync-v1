@@ -51,6 +51,10 @@ async function startServer() {
     next();
   });
 
+  app.get("/api/health", (_req, res) => {
+    res.json({ ok: true, service: "trip-sync", api: "express" });
+  });
+
   function toFiniteNumber(value: unknown): number | null {
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
@@ -112,6 +116,15 @@ async function startServer() {
     return Boolean(message && /Could not find the table/i.test(message));
   }
 
+  /** Extra hint when PostgREST returns an RLS error (usually wrong API key or RLS enabled with no policy). */
+  function supabaseRlsHint(message?: string): string | undefined {
+    if (!message || !/row-level security/i.test(message)) return undefined;
+    return (
+      "In Supabase SQL Editor run: ALTER TABLE public.organizer_coupons DISABLE ROW LEVEL SECURITY; " +
+      "Also confirm .env has SUPABASE_SERVICE_ROLE_KEY (service_role JWT from Dashboard → Settings → API, not the anon key), then restart npm run dev."
+    );
+  }
+
   async function getUserById(userId: number) {
     if (!Number.isFinite(userId)) return null;
     const { data } = await supabase
@@ -166,14 +179,178 @@ async function startServer() {
     if (!Number.isFinite(tripId)) return null;
     const { data } = await supabase
       .from("trips")
-      .select("id, organizer_id, max_participants, status, date")
+      .select("id, organizer_id, max_participants, status, date, price")
       .eq("id", tripId)
       .single();
     return data ?? null;
   }
 
-  const reviewMemoryStore = new Map<number, any[]>();
+  /** Coerce UI strings (e.g. "Dec 31, 2025") to YYYY-MM-DD for Postgres `date`. */
+  function normalizeCouponExpiryForDb(input: unknown): string | null {
+    if (input == null || input === "") return null;
+    const s = String(input).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const y = new Date().getFullYear();
+    const candidates = [`${s}, ${y}`, `${s} ${y}`, s];
+    for (const c of candidates) {
+      const t = Date.parse(c);
+      if (!Number.isNaN(t)) return new Date(t).toISOString().slice(0, 10);
+    }
+    return null;
+  }
+
+  function isOrganizerCouponRowValidNow(coupon: {
+    active?: boolean | null;
+    expiry_date?: string | null;
+    used_count?: number | null;
+    usage_limit?: number | null;
+  }): boolean {
+    if (!coupon.active) return false;
+    const used = Number(coupon.used_count ?? 0);
+    const limit = Number(coupon.usage_limit ?? 0);
+    if (!Number.isFinite(limit) || limit < 1) return false;
+    if (used >= limit) return false;
+    const exp = coupon.expiry_date;
+    if (exp == null || exp === "") return true;
+    const expDate = parseTripDateLocalOnly(exp);
+    if (!expDate) return true;
+    const today = startOfTodayLocal();
+    return expDate.getTime() >= today.getTime();
+  }
+
+  async function validateOrganizerCouponForTrip(
+    tripId: number,
+    codeRaw: string,
+    participantsIn: number,
+  ): Promise<
+    | {
+        ok: true;
+        coupon: {
+          id: number;
+          code: string;
+          discount_pct: number;
+          used_count: number;
+          usage_limit: number;
+        };
+        base_amount: number;
+        discount_amount: number;
+      }
+    | { ok: false; error: string; status: number }
+  > {
+    const code = String(codeRaw || "").trim().toUpperCase();
+    if (!code) {
+      return { ok: false, error: "Coupon code is required", status: 400 };
+    }
+    const trip = await getTripById(tripId);
+    if (!trip) {
+      return { ok: false, error: "Trip not found", status: 404 };
+    }
+    const price = Number((trip as { price?: unknown }).price ?? 0);
+    const participants = Math.min(50, Math.max(1, Math.floor(Number(participantsIn) || 1)));
+    const baseAmount = Math.round(price * participants);
+    if (price <= 0 || baseAmount <= 0) {
+      return { ok: false, error: "Coupons apply to paid trips only", status: 400 };
+    }
+
+    const { data: coupon, error } = await supabase
+      .from("organizer_coupons")
+      .select(
+        "id, code, organizer_id, discount_pct, usage_limit, used_count, expiry_date, active",
+      )
+      .eq("organizer_id", Number((trip as { organizer_id?: unknown }).organizer_id))
+      .eq("code", code)
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingTableError(error.message)) {
+        return {
+          ok: false,
+          error:
+            "Coupon system is not configured. Run the organizer_coupons SQL migration in Supabase.",
+          status: 503,
+        };
+      }
+      console.error("coupon lookup:", error.message);
+      return { ok: false, error: "Failed to validate coupon", status: 500 };
+    }
+    if (!coupon) {
+      return { ok: false, error: "Invalid or expired coupon", status: 400 };
+    }
+    if (!isOrganizerCouponRowValidNow(coupon)) {
+      return { ok: false, error: "Invalid or expired coupon", status: 400 };
+    }
+    const pct = Number((coupon as { discount_pct?: unknown }).discount_pct ?? 0);
+    const discountAmount = Math.round((baseAmount * pct) / 100);
+    return {
+      ok: true,
+      coupon: {
+        id: Number((coupon as { id?: unknown }).id),
+        code: String((coupon as { code?: unknown }).code),
+        discount_pct: pct,
+        used_count: Number((coupon as { used_count?: unknown }).used_count ?? 0),
+        usage_limit: Number((coupon as { usage_limit?: unknown }).usage_limit ?? 0),
+      },
+      base_amount: baseAmount,
+      discount_amount: discountAmount,
+    };
+  }
+
+  async function incrementOrganizerCouponUsage(couponId: number): Promise<boolean> {
+    const { data, error } = await supabase.rpc("increment_organizer_coupon_usage", {
+      p_coupon_id: couponId,
+    });
+    if (!error && data === true) return true;
+    if (
+      error &&
+      /does not exist|schema cache|function public\.increment_organizer_coupon_usage/i.test(
+        String(error.message),
+      )
+    ) {
+      const { data: row } = await supabase
+        .from("organizer_coupons")
+        .select("used_count, usage_limit, active, expiry_date")
+        .eq("id", couponId)
+        .single();
+      if (!row || !isOrganizerCouponRowValidNow(row)) return false;
+      const prev = Number((row as { used_count?: unknown }).used_count ?? 0);
+      const { error: upErr } = await supabase
+        .from("organizer_coupons")
+        .update({ used_count: prev + 1 })
+        .eq("id", couponId)
+        .eq("used_count", prev);
+      return !upErr;
+    }
+    if (error) console.warn("incrementOrganizerCouponUsage rpc:", error.message);
+    return false;
+  }
+
+  async function assertOrganizerAccess(organizerId: number) {
+    const actor = await getUserById(organizerId);
+    if (!actor) return { ok: false as const, status: 404, error: "User not found" };
+    if (actor.role !== "organizer") {
+      return { ok: false as const, status: 403, error: "Only organizers are allowed" };
+    }
+    return { ok: true as const };
+  }
+
   let hasTripReviewsTable: boolean | null = null;
+  let hasTripMapPinsTable: boolean | null = null;
+
+  function toMemberRole(role: unknown): "organizer" | "co-admin" | "moderator" | "member" {
+    const r = String(role || "").toLowerCase();
+    if (r === "organizer") return "organizer";
+    if (r === "co-admin") return "co-admin";
+    if (r === "moderator") return "moderator";
+    return "member";
+  }
+
+  function toPinType(type: unknown): "parking" | "fuel" | "attraction" | "hazard" | "road-damage" {
+    const t = String(type || "").toLowerCase();
+    if (t === "parking" || t === "fuel" || t === "attraction" || t === "hazard" || t === "road-damage") {
+      return t;
+    }
+    return "hazard";
+  }
 
   // Mapbox API proxy routes
   app.get("/api/maps/geocode", async (req, res) => {
@@ -597,12 +774,9 @@ async function startServer() {
         hasTripReviewsTable = true;
       }
     }
-    const fallbackReviews = reviewMemoryStore.get(tripId) ?? [];
     const reviews = reviewError
-      ? isMissingTableError(reviewError.message)
-        ? fallbackReviews
-        : []
-      : dbReviews ?? fallbackReviews;
+      ? []
+      : dbReviews ?? [];
 
     if (reviewError && !isMissingTableError(reviewError.message)) {
       console.error("Supabase get reviews error:", reviewError.message);
@@ -737,11 +911,34 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  /** Validate an organizer coupon against a trip (same organizer as the trip). */
+  app.post("/api/trips/:tripId/coupons/validate", async (req, res) => {
+    const tripId = Number(req.params.tripId);
+    if (!Number.isFinite(tripId)) {
+      return res.status(400).json({ valid: false, error: "Invalid trip id" });
+    }
+    const code = req.body?.code;
+    const participants = Number(req.body?.participants ?? 1);
+    const v = await validateOrganizerCouponForTrip(tripId, code, participants);
+    if (v.ok === false) {
+      return res.status(v.status).json({ valid: false, error: v.error });
+    }
+    return res.json({
+      valid: true,
+      coupon_id: v.coupon.id,
+      code: v.coupon.code,
+      discount_pct: v.coupon.discount_pct,
+      base_amount: v.base_amount,
+      discount_amount: v.discount_amount,
+    });
+  });
+
   // Bookings API (Supabase)
   app.post("/api/bookings", async (req, res) => {
-    const { trip_id, user_id } = req.body;
+    const { trip_id, user_id, coupon_code, participants: participantsBody } = req.body;
     const tripId = Number(trip_id);
     const userId = await resolveUserNumericId(user_id, "user");
+    const participants = Math.min(50, Math.max(1, Math.floor(Number(participantsBody) || 1)));
 
     if (!Number.isFinite(tripId) || !Number.isFinite(userId ?? NaN)) {
       return res.status(400).json({ error: "trip_id and user_id are required" });
@@ -782,23 +979,75 @@ async function startServer() {
       return res.status(400).json({ error: "Trip is full" });
     }
 
-    const { data, error } = await supabase
+    let couponValidated: Awaited<ReturnType<typeof validateOrganizerCouponForTrip>> | null =
+      null;
+    const rawCode = typeof coupon_code === "string" ? coupon_code.trim() : "";
+    if (rawCode) {
+      const v = await validateOrganizerCouponForTrip(tripId, rawCode, participants);
+      if (v.ok === false) {
+        return res.status(v.status).json({ error: v.error });
+      }
+      couponValidated = v;
+    }
+
+    const insertPayload: Record<string, unknown> = {
+      trip_id: tripId,
+      user_id: Number(userId),
+      status: "confirmed",
+      payment_status: "paid",
+    };
+    if (couponValidated && couponValidated.ok === true) {
+      insertPayload.coupon_id = couponValidated.coupon.id;
+      insertPayload.discount_amount = couponValidated.discount_amount;
+    }
+
+    let { data, error } = await supabase
       .from("bookings")
-      .insert({
-        trip_id: tripId,
-        user_id: Number(userId),
-        status: "confirmed",
-        payment_status: "paid",
-      })
+      .insert(insertPayload)
       .select()
       .single();
+
+    if (
+      error &&
+      couponValidated &&
+      couponValidated.ok === true &&
+      /coupon_id|discount_amount|column|schema/i.test(String(error.message))
+    ) {
+      const retry = await supabase
+        .from("bookings")
+        .insert({
+          trip_id: tripId,
+          user_id: Number(userId),
+          status: "confirmed",
+          payment_status: "paid",
+        })
+        .select()
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error || !data) {
       console.error("Supabase create booking error:", error?.message);
       return res.status(400).json({ error: "Failed to create booking" });
     }
 
-    res.json({ id: data.id });
+    if (couponValidated && couponValidated.ok === true) {
+      const ok = await incrementOrganizerCouponUsage(couponValidated.coupon.id);
+      if (!ok) {
+        console.warn(
+          "Booking created but coupon usage was not incremented (id:",
+          couponValidated.coupon.id,
+          ")",
+        );
+      }
+    }
+
+    res.json({
+      id: data.id,
+      discount_amount:
+        couponValidated && couponValidated.ok === true ? couponValidated.discount_amount : 0,
+    });
   });
 
   app.get("/api/users/:id/bookings", async (req, res) => {
@@ -904,6 +1153,356 @@ async function startServer() {
     return res.json(mapped);
   });
 
+  app.get("/api/organizers/:id/dashboard-summary", async (req, res) => {
+    const organizerId = await resolveUserNumericId(req.params.id, "organizer");
+    if (!Number.isFinite(organizerId ?? NaN)) {
+      return res.status(400).json({ error: "Invalid organizer id" });
+    }
+    const access = await assertOrganizerAccess(Number(organizerId));
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    const { data: trips, error: tripsError } = await supabase
+      .from("trips")
+      .select("id, status, date, max_participants, price")
+      .eq("organizer_id", Number(organizerId));
+    if (tripsError) {
+      console.error("dashboard-summary trips:", tripsError.message);
+      return res.status(500).json({ error: "Failed to fetch summary" });
+    }
+
+    const tripIds = (trips ?? []).map((t: any) => Number(t.id)).filter(Number.isFinite);
+    const { data: bookings, error: bookingsError } = await supabase
+      .from("bookings")
+      .select("trip_id, status, payment_status")
+      .in("trip_id", tripIds.length ? tripIds : [-1]);
+    if (bookingsError) {
+      console.error("dashboard-summary bookings:", bookingsError.message);
+      return res.status(500).json({ error: "Failed to fetch summary" });
+    }
+
+    const joinedByTrip = new Map<number, number>();
+    for (const b of bookings ?? []) {
+      const id = Number((b as any).trip_id);
+      joinedByTrip.set(id, (joinedByTrip.get(id) ?? 0) + 1);
+    }
+
+    const totals = {
+      totalRevenue: 0,
+      participants: 0,
+      eventsHosted: (trips ?? []).length,
+      successRate: 0,
+      activeCoupons: 0,
+      expiringCoupons: 0,
+    };
+    let completedCount = 0;
+    for (const t of trips ?? []) {
+      const joined = joinedByTrip.get(Number((t as any).id)) ?? 0;
+      const price = Number((t as any).price ?? 0);
+      totals.participants += joined;
+      totals.totalRevenue += Math.max(0, price) * joined;
+      if (String((t as any).status || "").toLowerCase() === "completed") completedCount += 1;
+    }
+    totals.successRate =
+      totals.eventsHosted > 0 ? Math.round((completedCount / totals.eventsHosted) * 100) : 0;
+
+    const now = new Date();
+    const soon = new Date(now.getTime() + 1000 * 60 * 60 * 24 * 7);
+    const { data: coupons, error: couponsErr } = await supabase
+      .from("organizer_coupons")
+      .select("id, active, expiry_date")
+      .eq("organizer_id", Number(organizerId));
+    if (!couponsErr) {
+      totals.activeCoupons = (coupons ?? []).filter((c: any) => Boolean(c.active)).length;
+      totals.expiringCoupons = (coupons ?? []).filter((c: any) => {
+        const exp = Date.parse(String(c.expiry_date || ""));
+        return Boolean(c.active) && Number.isFinite(exp) && exp >= now.getTime() && exp <= soon.getTime();
+      }).length;
+    }
+
+    return res.json(totals);
+  });
+
+  app.get("/api/organizers/:id/revenue-by-event", async (req, res) => {
+    const organizerId = await resolveUserNumericId(req.params.id, "organizer");
+    if (!Number.isFinite(organizerId ?? NaN)) {
+      return res.status(400).json({ error: "Invalid organizer id" });
+    }
+    const access = await assertOrganizerAccess(Number(organizerId));
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    const { data: trips, error } = await supabase
+      .from("trips")
+      .select("id, name, date, status, price")
+      .eq("organizer_id", Number(organizerId))
+      .order("date", { ascending: false });
+    if (error) {
+      console.error("revenue-by-event trips:", error.message);
+      return res.status(500).json({ error: "Failed to fetch revenue data" });
+    }
+
+    const out = await Promise.all(
+      (trips ?? []).map(async (t: any) => {
+        const { count: joinedCount } = await supabase
+          .from("bookings")
+          .select("*", { count: "exact", head: true })
+          .eq("trip_id", Number(t.id));
+        const joined = Number(joinedCount ?? 0);
+        const price = Number(t.price ?? 0);
+        const revenue = Math.max(0, price) * joined;
+        return {
+          id: Number(t.id),
+          name: String(t.name || "Untitled Event"),
+          participants: joined,
+          revenue,
+          perPerson: joined > 0 ? Math.round(revenue / joined) : 0,
+          status: String(t.status || "upcoming"),
+          date: t.date,
+        };
+      }),
+    );
+    return res.json(out);
+  });
+
+  app.get("/api/organizers/:id/monthly-revenue", async (req, res) => {
+    const organizerId = await resolveUserNumericId(req.params.id, "organizer");
+    if (!Number.isFinite(organizerId ?? NaN)) {
+      return res.status(400).json({ error: "Invalid organizer id" });
+    }
+    const access = await assertOrganizerAccess(Number(organizerId));
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    const { data: trips, error } = await supabase
+      .from("trips")
+      .select("id, date, price")
+      .eq("organizer_id", Number(organizerId));
+    if (error) {
+      console.error("monthly-revenue trips:", error.message);
+      return res.status(500).json({ error: "Failed to fetch monthly revenue" });
+    }
+
+    const monthTotals = Array.from({ length: 12 }, (_, i) => ({ month: i, revenue: 0 }));
+    for (const t of trips ?? []) {
+      const d = parseTripDateLocalOnly((t as any).date);
+      if (!d) continue;
+      const month = d.getMonth();
+      const { count: joinedCount } = await supabase
+        .from("bookings")
+        .select("*", { count: "exact", head: true })
+        .eq("trip_id", Number((t as any).id));
+      const revenue = Number((t as any).price ?? 0) * Number(joinedCount ?? 0);
+      monthTotals[month].revenue += Math.max(0, revenue);
+    }
+    return res.json(monthTotals);
+  });
+
+  app.get("/api/organizers/:id/profile", async (req, res) => {
+    const organizerId = await resolveUserNumericId(req.params.id, "organizer");
+    if (!Number.isFinite(organizerId ?? NaN)) {
+      return res.status(400).json({ error: "Invalid organizer id" });
+    }
+    const access = await assertOrganizerAccess(Number(organizerId));
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    const { data: organizer, error: orgError } = await supabase
+      .from("users")
+      .select("id, name, email, phone")
+      .eq("id", Number(organizerId))
+      .single();
+    if (orgError || !organizer) {
+      return res.status(404).json({ error: "Organizer profile not found" });
+    }
+
+    const { data: trips } = await supabase
+      .from("trips")
+      .select("id")
+      .eq("organizer_id", Number(organizerId));
+    const hosted = Number((trips ?? []).length);
+
+    const tripIds = (trips ?? []).map((t: any) => Number(t.id)).filter(Number.isFinite);
+    const { data: reviews } = await supabase
+      .from("trip_reviews")
+      .select("rating")
+      .in("trip_id", tripIds.length ? tripIds : [-1]);
+    const ratings = (reviews ?? []).map((r: any) => Number(r.rating)).filter(Number.isFinite);
+    const avgRating =
+      ratings.length > 0
+        ? Number((ratings.reduce((a: number, b: number) => a + b, 0) / ratings.length).toFixed(1))
+        : null;
+
+    return res.json({
+      id: Number(organizer.id),
+      name: organizer.name,
+      email: organizer.email,
+      phone: (organizer as any).phone ?? "",
+      events_hosted: hosted,
+      avg_rating: avgRating,
+    });
+  });
+
+  app.patch("/api/organizers/:id/profile", async (req, res) => {
+    const organizerId = await resolveUserNumericId(req.params.id, "organizer");
+    if (!Number.isFinite(organizerId ?? NaN)) {
+      return res.status(400).json({ error: "Invalid organizer id" });
+    }
+    const access = await assertOrganizerAccess(Number(organizerId));
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    const patch: Record<string, unknown> = {};
+    if (typeof req.body?.name === "string" && req.body.name.trim()) patch.name = req.body.name.trim();
+    if (typeof req.body?.phone === "string") patch.phone = req.body.phone.trim();
+    if (typeof req.body?.email === "string" && req.body.email.trim()) patch.email = req.body.email.trim();
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ error: "No profile fields provided" });
+    }
+
+    const { data, error } = await supabase
+      .from("users")
+      .update(patch)
+      .eq("id", Number(organizerId))
+      .select("id, name, email, phone")
+      .single();
+    if (error || !data) {
+      console.error("update organizer profile:", error?.message);
+      return res.status(400).json({ error: "Failed to update profile" });
+    }
+    return res.json(data);
+  });
+
+  app.get("/api/organizers/:id/coupons", async (req, res) => {
+    const organizerId = await resolveUserNumericId(req.params.id, "organizer");
+    if (!Number.isFinite(organizerId ?? NaN)) {
+      return res.status(400).json({ error: "Invalid organizer id" });
+    }
+    const access = await assertOrganizerAccess(Number(organizerId));
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    const { data, error } = await supabase
+      .from("organizer_coupons")
+      .select("id, code, discount_pct, usage_limit, used_count, expiry_date, active, prefix")
+      .eq("organizer_id", Number(organizerId))
+      .order("created_at", { ascending: false });
+    if (error) {
+      if (isMissingTableError(error.message)) {
+        return res.json([]);
+      }
+      console.error("organizer coupons read:", error.message);
+      return res.status(500).json({ error: "Failed to fetch coupons" });
+    }
+    return res.json(data ?? []);
+  });
+
+  app.post("/api/organizers/:id/coupons", async (req, res) => {
+    const organizerId = await resolveUserNumericId(req.params.id, "organizer");
+    if (!Number.isFinite(organizerId ?? NaN)) {
+      return res.status(400).json({ error: "Invalid organizer id" });
+    }
+    const access = await assertOrganizerAccess(Number(organizerId));
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    const code = String(req.body?.code || "").trim().toUpperCase();
+    const prefix = String(req.body?.prefix || "").trim().toUpperCase();
+    const discountPct = Number(req.body?.discount_pct);
+    const usageLimit = Number(req.body?.usage_limit);
+    const expiryRaw = String(req.body?.expiry_date || "").trim();
+    if (!code) return res.status(400).json({ error: "Coupon code is required" });
+    if (!Number.isFinite(discountPct) || discountPct < 1 || discountPct > 100) {
+      return res.status(400).json({ error: "discount_pct must be between 1 and 100" });
+    }
+    if (!Number.isFinite(usageLimit) || usageLimit < 1) {
+      return res.status(400).json({ error: "usage_limit must be at least 1" });
+    }
+    const expiryNormalized = normalizeCouponExpiryForDb(expiryRaw);
+    if (expiryRaw && !expiryNormalized) {
+      return res.status(400).json({ error: "Invalid expiry_date — use YYYY-MM-DD or e.g. Dec 31, 2026" });
+    }
+
+    const { data, error } = await supabase
+      .from("organizer_coupons")
+      .insert({
+        organizer_id: Number(organizerId),
+        code,
+        prefix,
+        discount_pct: discountPct,
+        usage_limit: usageLimit,
+        used_count: 0,
+        expiry_date: expiryNormalized,
+        active: true,
+      })
+      .select("id, code, discount_pct, usage_limit, used_count, expiry_date, active, prefix")
+      .single();
+    if (error || !data) {
+      console.error("organizer coupon create:", error?.message, error?.code, error?.details);
+      const rlsHint = supabaseRlsHint(error?.message);
+      return res.status(400).json({
+        error: "Failed to create coupon",
+        details: error?.message ?? null,
+        code: error?.code ?? null,
+        hint: rlsHint ?? (error as { hint?: string })?.hint ?? null,
+      });
+    }
+    return res.json(data);
+  });
+
+  app.patch("/api/organizers/:id/coupons/:couponId", async (req, res) => {
+    const organizerId = await resolveUserNumericId(req.params.id, "organizer");
+    const couponId = Number(req.params.couponId);
+    if (!Number.isFinite(organizerId ?? NaN) || !Number.isFinite(couponId)) {
+      return res.status(400).json({ error: "Invalid organizer/coupon id" });
+    }
+    const access = await assertOrganizerAccess(Number(organizerId));
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    const patch: Record<string, unknown> = {};
+    if (typeof req.body?.active === "boolean") patch.active = req.body.active;
+    if (typeof req.body?.usage_limit === "number") patch.usage_limit = req.body.usage_limit;
+    if (typeof req.body?.discount_pct === "number") patch.discount_pct = req.body.discount_pct;
+    if (typeof req.body?.expiry_date === "string") {
+      const raw = req.body.expiry_date.trim();
+      if (!raw) {
+        patch.expiry_date = null;
+      } else {
+        const n = normalizeCouponExpiryForDb(raw);
+        if (!n) return res.status(400).json({ error: "Invalid expiry_date" });
+        patch.expiry_date = n;
+      }
+    }
+    if (Object.keys(patch).length === 0) return res.status(400).json({ error: "No updates provided" });
+
+    const { data, error } = await supabase
+      .from("organizer_coupons")
+      .update(patch)
+      .eq("id", couponId)
+      .eq("organizer_id", Number(organizerId))
+      .select("id, code, discount_pct, usage_limit, used_count, expiry_date, active, prefix")
+      .single();
+    if (error || !data) {
+      console.error("organizer coupon patch:", error?.message);
+      return res.status(400).json({ error: "Failed to update coupon" });
+    }
+    return res.json(data);
+  });
+
+  app.delete("/api/organizers/:id/coupons/:couponId", async (req, res) => {
+    const organizerId = await resolveUserNumericId(req.params.id, "organizer");
+    const couponId = Number(req.params.couponId);
+    if (!Number.isFinite(organizerId ?? NaN) || !Number.isFinite(couponId)) {
+      return res.status(400).json({ error: "Invalid organizer/coupon id" });
+    }
+    const access = await assertOrganizerAccess(Number(organizerId));
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    const { error } = await supabase
+      .from("organizer_coupons")
+      .delete()
+      .eq("id", couponId)
+      .eq("organizer_id", Number(organizerId));
+    if (error) {
+      console.error("organizer coupon delete:", error.message);
+      return res.status(400).json({ error: "Failed to delete coupon" });
+    }
+    return res.json({ success: true });
+  });
+
   app.get("/api/trips/:id/live-access", async (req, res) => {
     const tripId = Number(req.params.id);
     const userId = Number(req.query.user_id);
@@ -942,6 +1541,216 @@ async function startServer() {
     return res.json({ allowed: true, reason: "booked" });
   });
 
+  app.get("/api/trips/:id/live-state", async (req, res) => {
+    const tripId = Number(req.params.id);
+    const userId = Number(req.query.user_id);
+    if (!Number.isFinite(tripId) || !Number.isFinite(userId)) {
+      return res.status(400).json({ error: "trip id and user id are required" });
+    }
+
+    const trip = await getTripById(tripId);
+    if (!trip) return res.status(404).json({ error: "Trip not found" });
+
+    const actor = await getUserById(userId);
+    if (!actor) return res.status(404).json({ error: "User not found" });
+
+    const isOrganizer = actor.role === "organizer" && Number(trip.organizer_id) === userId;
+    if (!isOrganizer) {
+      const { data: booking } = await supabase
+        .from("bookings")
+        .select("id")
+        .eq("trip_id", tripId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!booking) return res.status(403).json({ error: "Book the trip before going live" });
+    }
+
+    const { data: organizerRow } = await supabase
+      .from("users")
+      .select("id, name, role")
+      .eq("id", Number(trip.organizer_id))
+      .maybeSingle();
+
+    const { data: bookings } = await supabase
+      .from("bookings")
+      .select("user_id, status")
+      .eq("trip_id", tripId);
+
+    const participantIds = Array.from(
+      new Set([
+        Number(trip.organizer_id),
+        ...((bookings ?? []).map((b: any) => Number(b.user_id)).filter(Number.isFinite)),
+      ]),
+    );
+
+    const { data: users } = await supabase
+      .from("users")
+      .select("id, name, role")
+      .in("id", participantIds.length ? participantIds : [-1]);
+
+    const { data: locations, error: locErr } = await supabase
+      .from("trip_participant_locations")
+      .select("user_id, lat, lng, speed_mps")
+      .eq("trip_id", tripId);
+    if (locErr && !isMissingTableError(locErr.message)) {
+      console.warn("trip_participant_locations read:", locErr.message);
+    }
+
+    const usersById = new Map<number, any>((users ?? []).map((u: any) => [Number(u.id), u]));
+    if (organizerRow && !usersById.has(Number(organizerRow.id))) {
+      usersById.set(Number(organizerRow.id), organizerRow);
+    }
+    const locByUserId = new Map<number, any>(
+      (locations ?? []).map((l: any) => [Number(l.user_id), l]),
+    );
+
+    const members = Array.from(usersById.values()).map((u: any) => {
+      const numericId = Number(u.id);
+      const loc = locByUserId.get(numericId);
+      const isTripOwner = numericId === Number(trip.organizer_id);
+      const booking = (bookings ?? []).find((b: any) => Number(b.user_id) === numericId);
+
+      const status =
+        isTripOwner || loc
+          ? "arrived"
+          : String(booking?.status || "").toLowerCase() === "cancelled"
+            ? "absent"
+            : "on-way";
+      const speedMps = Number(loc?.speed_mps);
+      const speedKmh = Number.isFinite(speedMps) ? speedMps * 3.6 : 0;
+
+      return {
+        id: `m${numericId}`,
+        userId: numericId,
+        name: String(u.name || `User ${numericId}`),
+        avatar: String(u.name || `user-${numericId}`).toLowerCase().replace(/\s+/g, "-"),
+        status,
+        role: isTripOwner ? "organizer" : toMemberRole(u.role),
+        muted: false,
+        blocked: false,
+        speed: Number(speedKmh.toFixed(1)),
+        distanceCovered: 0,
+        checkpoints: 0,
+        xpGained: 0,
+        lat: Number(loc?.lat) || Number((trip as any).meetup_lat) || 0,
+        lng: Number(loc?.lng) || Number((trip as any).meetup_lng) || 0,
+      };
+    });
+
+    const { data: checkpointsRaw, error: cpErr } = await supabase
+      .from("checkpoints")
+      .select("*")
+      .eq("trip_id", tripId)
+      .order("id", { ascending: true });
+    if (cpErr) {
+      console.error("Supabase checkpoints error:", cpErr.message);
+      return res.status(500).json({ error: "Failed to fetch checkpoints" });
+    }
+    const badges = ["🚀", "🛣️", "🏔️", "🏖️", "📍", "🎯", "🏁"];
+    const checkpoints = (checkpointsRaw ?? []).map((cp: any, i: number) => ({
+      id: String(cp.id),
+      name: String(cp.name || `Checkpoint ${i + 1}`),
+      lat: Number(cp.lat) || 0,
+      lng: Number(cp.lng) || 0,
+      reached: Boolean(cp.reached ?? cp.is_reached ?? cp.completed_at),
+      badge: String(cp.badge || badges[i % badges.length]),
+      xp: Number(cp.xp ?? 50),
+    }));
+
+    let mapPins: any[] = [];
+    if (hasTripMapPinsTable !== false) {
+      const { data: pinsRaw, error: pinsErr } = await supabase
+        .from("trip_map_pins")
+        .select("id, type, lat, lng, label, added_by")
+        .eq("trip_id", tripId)
+        .order("created_at", { ascending: true });
+      if (pinsErr) {
+        if (isMissingTableError(pinsErr.message)) {
+          hasTripMapPinsTable = false;
+        } else {
+          console.warn("trip_map_pins read:", pinsErr.message);
+        }
+      } else {
+        hasTripMapPinsTable = true;
+        mapPins = (pinsRaw ?? []).map((p: any) => ({
+          id: String(p.id),
+          type: toPinType(p.type),
+          lat: Number(p.lat) || 0,
+          lng: Number(p.lng) || 0,
+          label: String(p.label || "Map pin"),
+          addedBy: String(p.added_by || "Rider"),
+        }));
+      }
+    }
+
+    return res.json({ members, checkpoints, mapPins });
+  });
+
+  app.post("/api/trips/:id/map-pins", async (req, res) => {
+    const tripId = Number(req.params.id);
+    const { user_id, type, label, lat, lng } = req.body ?? {};
+    const userId = Number(user_id);
+    const latNum = toFiniteNumber(lat);
+    const lngNum = toFiniteNumber(lng);
+    if (!Number.isFinite(tripId) || !Number.isFinite(userId)) {
+      return res.status(400).json({ error: "trip id and user id are required" });
+    }
+    if (!String(label || "").trim()) {
+      return res.status(400).json({ error: "Pin label is required" });
+    }
+    if (latNum == null || lngNum == null || !isValidLatLng(latNum, lngNum)) {
+      return res.status(400).json({ error: "Valid lat/lng required" });
+    }
+
+    const trip = await getTripById(tripId);
+    if (!trip) return res.status(404).json({ error: "Trip not found" });
+    const actor = await getUserById(userId);
+    if (!actor) return res.status(404).json({ error: "User not found" });
+
+    const isTripOrganizer = actor.role === "organizer" && Number(trip.organizer_id) === userId;
+    if (!isTripOrganizer) {
+      const { data: booking } = await supabase
+        .from("bookings")
+        .select("id")
+        .eq("trip_id", tripId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!booking) return res.status(403).json({ error: "Only participants can add pins" });
+    }
+
+    const row = {
+      trip_id: tripId,
+      user_id: userId,
+      type: toPinType(type),
+      label: String(label).trim(),
+      lat: latNum,
+      lng: lngNum,
+      added_by: req.body?.added_by ? String(req.body.added_by) : undefined,
+    };
+    const { data, error } = await supabase.from("trip_map_pins").insert(row).select("*").single();
+    if (error || !data) {
+      if (error && isMissingTableError(error.message)) {
+        hasTripMapPinsTable = false;
+        return res.status(500).json({
+          error:
+            "trip_map_pins table is missing. Create it in Supabase to enable persisted map pins.",
+        });
+      }
+      console.error("Supabase map pin insert error:", error?.message);
+      return res.status(400).json({ error: "Failed to add map pin" });
+    }
+    hasTripMapPinsTable = true;
+
+    return res.json({
+      id: String(data.id),
+      type: toPinType(data.type),
+      lat: Number(data.lat) || 0,
+      lng: Number(data.lng) || 0,
+      label: String(data.label || "Map pin"),
+      addedBy: String(data.added_by || req.body?.added_by || "Rider"),
+    });
+  });
+
   app.get("/api/trips/:id/reviews", async (req, res) => {
     const tripId = Number(req.params.id);
     if (!Number.isFinite(tripId)) {
@@ -949,7 +1758,9 @@ async function startServer() {
     }
 
     if (hasTripReviewsTable === false) {
-      return res.json(reviewMemoryStore.get(tripId) ?? []);
+      return res.status(500).json({
+        error: "trip_reviews table is missing. Please create it in Supabase.",
+      });
     }
 
     const { data, error } = await supabase
@@ -961,7 +1772,9 @@ async function startServer() {
     if (error) {
       if (isMissingTableError(error.message)) {
         hasTripReviewsTable = false;
-        return res.json(reviewMemoryStore.get(tripId) ?? []);
+        return res.status(500).json({
+          error: "trip_reviews table is missing. Please create it in Supabase.",
+        });
       }
       console.error("Supabase get reviews error:", error.message);
       return res.status(500).json({ error: "Failed to fetch reviews" });
@@ -1014,13 +1827,9 @@ async function startServer() {
     };
 
     if (hasTripReviewsTable === false) {
-      const next = {
-        id: `mem-${Date.now()}`,
-        ...payload,
-      };
-      const prev = reviewMemoryStore.get(tripId) ?? [];
-      reviewMemoryStore.set(tripId, [next, ...prev]);
-      return res.json(next);
+      return res.status(500).json({
+        error: "trip_reviews table is missing. Please create it in Supabase.",
+      });
     }
 
     const { data, error } = await supabase
@@ -1032,13 +1841,9 @@ async function startServer() {
     if (error) {
       if (isMissingTableError(error.message)) {
         hasTripReviewsTable = false;
-        const next = {
-          id: `mem-${Date.now()}`,
-          ...payload,
-        };
-        const prev = reviewMemoryStore.get(tripId) ?? [];
-        reviewMemoryStore.set(tripId, [next, ...prev]);
-        return res.json(next);
+        return res.status(500).json({
+          error: "trip_reviews table is missing. Please create it in Supabase.",
+        });
       }
       console.error("Supabase create review error:", error.message);
       return res.status(400).json({ error: "Failed to submit review" });
@@ -1170,7 +1975,14 @@ async function startServer() {
       },
       appType: "spa",
     });
-    app.use(vite.middlewares);
+    // Vite's dev middleware must not handle `/api/*` — otherwise POST /api/... can 404 before Express routes run.
+    app.use((req, res, next) => {
+      const p = req.originalUrl.split("?")[0] || req.path || "";
+      if (p.startsWith("/api")) {
+        return next();
+      }
+      return vite.middlewares(req, res, next);
+    });
   } else {
     app.use(express.static(path.resolve(__dirname, "dist")));
     app.get("*", (req, res) => {

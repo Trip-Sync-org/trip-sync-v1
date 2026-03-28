@@ -26,11 +26,17 @@ function projectRefFromSupabaseUrl(url: string): string | null {
 
 function assertServiceRoleJwt(key: string) {
   const payload = decodeJwtPayload(key);
-  if (!payload?.role) return;
-  if (payload.role === "anon" || payload.role === "authenticated") {
+  if (!payload?.role) {
     throw new Error(
-      `[Supabase] SUPABASE_SERVICE_ROLE_KEY must be the service_role secret from Dashboard → Settings → API, not the ${payload.role} key. ` +
-        `Using the anon key causes RLS errors on inserts.`
+      "[Supabase] SUPABASE_SERVICE_ROLE_KEY must be a valid JWT from Dashboard → Settings → API (service_role). " +
+        "Decoded token had no role claim — check for a copy/paste error or wrong key.",
+    );
+  }
+  if (payload.role !== "service_role") {
+    throw new Error(
+      `[Supabase] SUPABASE_SERVICE_ROLE_KEY must be the service_role secret (JWT role must be "service_role"; got "${payload.role}"). ` +
+        `The anon key triggers Row Level Security errors on server inserts. ` +
+        `Copy the service_role key from Supabase Dashboard → Settings → API.`,
     );
   }
 }
