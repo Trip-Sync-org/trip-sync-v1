@@ -18,6 +18,7 @@ import {
   Percent as PercentIcon, CheckCircle, AlertCircle, Info,
   ThumbsUp, MessageCircle, CornerDownRight, Send, Menu,
   Crosshair, Play, Pause, Radio, BellRing, ListOrdered, Sun, Moon,
+  Minus, Expand,
 } from 'lucide-react';
 import { signInWithGoogle } from "./lib/auth";
 import { supabase } from "./lib/supabaseClient";
@@ -25,6 +26,7 @@ import MapboxRouteMap from "./components/MapboxRouteMap";
 import LiveTripMap, {
   readLiveMapStoredTheme,
   type LiveTripMapRef,
+  type LiveUserGeo,
   type MapTheme,
 } from "./components/LiveTripMap";
 import { io } from "socket.io-client";
@@ -3200,6 +3202,14 @@ const LiveTripPage = ({ user }: { user: User }) => {
   const socketRef = useRef<ReturnType<typeof io> | null>(null);
   const liveMapRef = useRef<LiveTripMapRef>(null);
   const [liveMapTheme, setLiveMapTheme] = useState<MapTheme>(() => readLiveMapStoredTheme());
+  /** When true, 6:00–19:00 → light map, else dark (until user picks manual theme). */
+  const [liveMapThemeAuto, setLiveMapThemeAuto] = useState(true);
+  const [myGeo, setMyGeo] = useState<LiveUserGeo | null>(null);
+  const lastMapGeoEmitRef = useRef(0);
+  const [heatmapLiveOn, setHeatmapLiveOn] = useState(false);
+  const [trafficLiveOn, setTrafficLiveOn] = useState(false);
+  const [mapBearingHud, setMapBearingHud] = useState(0);
+  const didFitConvoyOnLiveRef = useRef(false);
   const [stravaShareLive, setStravaShareLive] = useState(false);
   const [stravaTrackLaps, setStravaTrackLaps] = useState(false);
   /** Peek = map-first driving view; expanded = full convoy controls (Google Maps–style sheet). */
@@ -3651,6 +3661,19 @@ const LiveTripPage = ({ user }: { user: User }) => {
           heading: position.coords.heading,
           recordedAt: new Date(position.timestamp).toISOString(),
         });
+        const now = Date.now();
+        if (now - lastMapGeoEmitRef.current >= 1000) {
+          lastMapGeoEmitRef.current = now;
+          let h = position.coords.heading;
+          if (h != null && !Number.isNaN(h) && h < 0) h = h + 360;
+          setMyGeo({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracyM: position.coords.accuracy ?? undefined,
+            headingDeg: h ?? null,
+            speedMps: position.coords.speed ?? null,
+          });
+        }
       },
       () => {
         // silently ignore permission/position errors
@@ -3659,6 +3682,39 @@ const LiveTripPage = ({ user }: { user: User }) => {
     );
     return () => navigator.geolocation.clearWatch(watchId);
   }, [id, phase, user.id]);
+
+  useEffect(() => {
+    if (!liveMapThemeAuto || phase !== "live") return;
+    const apply = () => {
+      const h = new Date().getHours();
+      const light = h >= 6 && h < 19;
+      setLiveMapTheme(light ? "light" : "dark");
+    };
+    apply();
+    const t = window.setInterval(apply, 60_000);
+    return () => clearInterval(t);
+  }, [liveMapThemeAuto, phase]);
+
+  useEffect(() => {
+    if (phase !== "live") {
+      didFitConvoyOnLiveRef.current = false;
+      return;
+    }
+    if (didFitConvoyOnLiveRef.current) return;
+    const timer = window.setTimeout(() => {
+      liveMapRef.current?.fitConvoy();
+      didFitConvoyOnLiveRef.current = true;
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [phase, id]);
+
+  useEffect(() => {
+    if (phase !== "live") return;
+    const timer = window.setInterval(() => {
+      setMapBearingHud(liveMapRef.current?.getBearing() ?? 0);
+    }, 400);
+    return () => clearInterval(timer);
+  }, [phase]);
 
   const addPin = async () => {
     if (!id || !newPinLabel.trim()) return;
@@ -4510,6 +4566,16 @@ const LiveTripPage = ({ user }: { user: User }) => {
             mapTheme={liveMapTheme}
             onMapThemeChange={setLiveMapTheme}
             className="absolute inset-0 z-0"
+            userGeo={myGeo}
+            showUserLocation
+            heatmapVisible={heatmapLiveOn}
+            heatmapPoints={members
+              .filter((m) => m.status !== "absent" && Number.isFinite(m.lat) && Number.isFinite(m.lng))
+              .map((m) => ({
+                lat: m.lat,
+                lng: m.lng,
+                weight: Math.min(6, 1 + m.speed / 25),
+              }))}
             start={
               trip?.meetupLat != null && trip?.meetupLng != null
                 ? { lat: trip.meetupLat, lng: trip.meetupLng }
@@ -4554,17 +4620,65 @@ const LiveTripPage = ({ user }: { user: User }) => {
               </button>
               <button
                 type="button"
-                className="max-w-[min(100%,15rem)] truncate rounded-full border border-amber-500/35 bg-black/45 px-3 py-2 text-left text-[10px] font-semibold leading-snug text-white/85 shadow backdrop-blur-md transition hover:border-amber-400/50 sm:max-w-[20rem]"
+                onClick={() => setHeatmapLiveOn((v) => !v)}
+                className={cn(
+                  "max-w-[min(100%,15rem)] truncate rounded-full border px-3 py-2 text-left text-[10px] font-semibold leading-snug shadow backdrop-blur-md transition sm:max-w-[20rem]",
+                  heatmapLiveOn
+                    ? "border-amber-400/70 bg-amber-500/25 text-white"
+                    : "border-amber-500/35 bg-black/45 text-white/85 hover:border-amber-400/50",
+                )}
               >
                 <span className="mr-1" aria-hidden>🔥</span>
-                Weekly heatmap — tap to explore popular routes
+                Weekly heatmap — {heatmapLiveOn ? "on" : "tap to show"} popular routes
               </button>
               <div className="h-11 w-11 shrink-0" aria-hidden />
             </div>
           </div>
 
-          {/* Map controls (Strava-style, right column) — basemap theme is on the left */}
+          {/* Map controls — Google Maps–style stack */}
           <div className="pointer-events-auto absolute right-3 top-[36%] z-20 flex -translate-y-1/2 flex-col gap-2 md:right-5">
+            {Math.abs(mapBearingHud) > 4 && (
+              <button
+                type="button"
+                onClick={() => liveMapRef.current?.resetNorth()}
+                className="flex h-11 w-11 items-center justify-center rounded-full border border-white/18 bg-black/60 text-white shadow-lg backdrop-blur-md transition hover:bg-black/70 active:scale-95"
+                title="Reset to north"
+              >
+                <Compass size={18} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => liveMapRef.current?.zoomBy(1)}
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-white/18 bg-black/60 text-white shadow-lg backdrop-blur-md transition hover:bg-black/70 active:scale-95"
+              title="Zoom in"
+            >
+              <Plus size={18} strokeWidth={2.25} />
+            </button>
+            <button
+              type="button"
+              onClick={() => liveMapRef.current?.zoomBy(-1)}
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-white/18 bg-black/60 text-white shadow-lg backdrop-blur-md transition hover:bg-black/70 active:scale-95"
+              title="Zoom out"
+            >
+              <Minus size={18} strokeWidth={2.25} />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                liveMapRef.current?.toggleTraffic();
+                setTrafficLiveOn((v) => !v);
+              }}
+              className={cn(
+                "flex h-11 w-11 items-center justify-center rounded-full border text-[9px] font-black shadow-lg backdrop-blur-md transition active:scale-95",
+                trafficLiveOn
+                  ? "border-emerald-400/50 bg-emerald-500/25 text-emerald-100"
+                  : "border-white/18 bg-black/60 text-white hover:bg-black/70",
+              )}
+              title="Traffic"
+            >
+              <span aria-hidden>T</span>
+            </button>
             <button
               type="button"
               onClick={() => liveMapRef.current?.togglePitch()}
@@ -4575,15 +4689,33 @@ const LiveTripPage = ({ user }: { user: User }) => {
             </button>
             <button
               type="button"
+              onClick={() => liveMapRef.current?.toggleHeadingUp()}
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-white/18 bg-black/60 text-white shadow-lg backdrop-blur-md transition hover:bg-black/70 active:scale-95"
+              title="Toggle heading-up navigation"
+            >
+              <Navigation size={18} />
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 if (navigator.geolocation) {
                   navigator.geolocation.getCurrentPosition(
-                    (pos) =>
-                      liveMapRef.current?.flyTo({
+                    (pos) => {
+                      let h = pos.coords.heading;
+                      if (h != null && !Number.isNaN(h) && h < 0) h = h + 360;
+                      setMyGeo({
                         lat: pos.coords.latitude,
                         lng: pos.coords.longitude,
-                        zoom: 15,
-                      }),
+                        accuracyM: pos.coords.accuracy ?? undefined,
+                        headingDeg: h ?? null,
+                        speedMps: pos.coords.speed ?? null,
+                      });
+                      lastMapGeoEmitRef.current = Date.now();
+                      liveMapRef.current?.recenterOnUser({
+                        lat: pos.coords.latitude,
+                        lng: pos.coords.longitude,
+                      });
+                    },
                     () => {
                       if (trip?.meetupLat != null && trip?.meetupLng != null) {
                         liveMapRef.current?.flyTo({
@@ -4600,10 +4732,58 @@ const LiveTripPage = ({ user }: { user: User }) => {
                 }
               }}
               className="flex h-11 w-11 items-center justify-center rounded-full border border-white/18 bg-black/60 text-white shadow-lg backdrop-blur-md transition hover:bg-black/70 active:scale-95"
-              title="Locate me"
+              title="Recenter on my location"
             >
               <Crosshair size={18} />
             </button>
+            <button
+              type="button"
+              onClick={() => liveMapRef.current?.fitConvoy()}
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-cyan-400/35 bg-black/60 text-cyan-200 shadow-lg backdrop-blur-md transition hover:bg-black/70 active:scale-95"
+              title="Fit route & convoy"
+            >
+              <Expand size={18} />
+            </button>
+          </div>
+
+          {/* Speed pill — Google Maps style */}
+          {myGeo && Number.isFinite(myGeo.lat) && (
+            <div className="pointer-events-none absolute bottom-[max(5.5rem,env(safe-area-inset-bottom))] left-3 z-20 sm:bottom-28">
+              <div
+                className={cn(
+                  "pointer-events-auto rounded-full border px-3 py-2 font-mono text-sm font-bold shadow-lg backdrop-blur-md",
+                  (() => {
+                    const kmh = Math.max(0, (myGeo.speedMps ?? 0) * 3.6);
+                    if (kmh < 45) return "border-emerald-500/40 bg-black/70 text-emerald-200";
+                    if (kmh < 85) return "border-amber-500/40 bg-black/70 text-amber-200";
+                    return "border-red-500/45 bg-black/70 text-red-200";
+                  })(),
+                )}
+              >
+                {Math.round(Math.max(0, (myGeo.speedMps ?? 0) * 3.6))}{" "}
+                <span className="text-[10px] font-semibold opacity-75">km/h</span>
+              </div>
+            </div>
+          )}
+
+          {/* Trip stats — elapsed + local distance */}
+          <div className="pointer-events-none absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 z-20 flex justify-center sm:left-auto sm:right-4 sm:bottom-4">
+            <div className="pointer-events-auto flex gap-3 rounded-2xl border border-white/12 bg-black/65 px-4 py-2 text-[10px] text-white/80 shadow-lg backdrop-blur-md">
+              <span>
+                <span className="text-white/40">Time </span>
+                <span className="font-mono font-semibold text-white">
+                  {String(Math.floor(elapsedSec / 3600)).padStart(2, "0")}:
+                  {String(Math.floor((elapsedSec % 3600) / 60)).padStart(2, "0")}
+                </span>
+              </span>
+              <span className="text-white/25">|</span>
+              <span>
+                <span className="text-white/40">You </span>
+                <span className="font-mono font-semibold text-white">
+                  {(localMember?.distanceCovered ?? 0).toFixed(1)} km
+                </span>
+              </span>
+            </div>
           </div>
 
           {mapSelected && (() => {
@@ -4661,7 +4841,10 @@ const LiveTripPage = ({ user }: { user: User }) => {
             <div className="flex flex-col overflow-hidden rounded-2xl border border-white/18 bg-black/60 shadow-lg backdrop-blur-md">
               <button
                 type="button"
-                onClick={() => setLiveMapTheme("dark")}
+                onClick={() => {
+                  setLiveMapThemeAuto(false);
+                  setLiveMapTheme("dark");
+                }}
                 aria-pressed={liveMapTheme === "dark"}
                 title="Dark map"
                 className={cn(
@@ -4676,7 +4859,10 @@ const LiveTripPage = ({ user }: { user: User }) => {
               <div className="h-px bg-white/12" aria-hidden />
               <button
                 type="button"
-                onClick={() => setLiveMapTheme("light")}
+                onClick={() => {
+                  setLiveMapThemeAuto(false);
+                  setLiveMapTheme("light");
+                }}
                 aria-pressed={liveMapTheme === "light"}
                 title="Light map"
                 className={cn(

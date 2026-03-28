@@ -68,3 +68,63 @@
 }
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+
+/* Live trip map — Google-style user location */
+@keyframes live-map-user-pulse {
+  0% {
+    transform: scale(0.65);
+    opacity: 0.55;
+  }
+  70% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.live-map-user-marker-inner {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.live-map-user-pulse-ring {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: rgba(66, 133, 244, 0.35);
+  animation: live-map-user-pulse 2.4s ease-out infinite;
+}
+
+.live-map-user-core {
+  position: relative;
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #1a73e8;
+  border: 3px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.live-map-user-cone {
+  position: absolute;
+  z-index: 1;
+  width: 0;
+  height: 0;
+  border-left: 14px solid transparent;
+  border-right: 14px solid transparent;
+  border-bottom: 36px solid rgba(66, 133, 244, 0.45);
+  transform-origin: 50% 100%;
+  bottom: 22px;
+  left: 50%;
+  margin-left: -14px;
+  filter: drop-shadow(0 0 2px rgba(26, 115, 232, 0.4));
+}

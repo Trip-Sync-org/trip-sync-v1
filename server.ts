@@ -382,6 +382,35 @@ async function startServer() {
     }
   });
 
+  /** Reverse geocode (lat/lng → place). Used by mobile “current location”. */
+  app.get("/api/maps/reverse", async (req, res) => {
+    if (!mapboxSecretToken) {
+      return res.status(500).json({ error: "MAPBOX_SECRET_TOKEN is missing" });
+    }
+
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ error: "lat and lng are required" });
+    }
+
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?limit=1&access_token=${mapboxSecretToken}`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        const body = await response.text();
+        console.error("Mapbox reverse geocode error:", response.status, body);
+        return res.status(502).json({ error: "Mapbox reverse geocoding failed" });
+      }
+      const data = await response.json();
+      return res.json(data);
+    } catch (error) {
+      console.error("Mapbox reverse geocode request failed:", error);
+      return res.status(500).json({ error: "Reverse geocoding request failed" });
+    }
+  });
+
   app.post("/api/maps/route", async (req, res) => {
     if (!mapboxSecretToken) {
       return res.status(500).json({ error: "MAPBOX_SECRET_TOKEN is missing" });
@@ -788,6 +817,82 @@ async function startServer() {
       reviews,
       checkpoints: checkpoints ?? [],
     });
+  });
+
+  /**
+   * Turn-by-turn style driving polyline (meetup/start → end) via OSRM public demo.
+   * For production, swap to Mapbox Directions, Valhalla, or self-hosted OSRM.
+   */
+  app.get("/api/trips/:id/driving-route", async (req, res) => {
+    const tripId = Number(req.params.id);
+    if (!Number.isFinite(tripId)) {
+      return res.status(400).json({ error: "Invalid trip id" });
+    }
+    const { data: trip, error } = await supabase
+      .from("trips")
+      .select("meetup_lat, meetup_lng, start_lat, start_lng, end_lat, end_lng")
+      .eq("id", tripId)
+      .maybeSingle();
+    if (error || !trip) {
+      return res.status(404).json({ error: "Trip not found" });
+    }
+    const row = trip as Record<string, unknown>;
+    const sLat = toFiniteNumber(row.meetup_lat) ?? toFiniteNumber(row.start_lat);
+    const sLng = toFiniteNumber(row.meetup_lng) ?? toFiniteNumber(row.start_lng);
+    const eLat = toFiniteNumber(row.end_lat);
+    const eLng = toFiniteNumber(row.end_lng);
+
+    const start = sLat != null && sLng != null ? { lat: sLat, lng: sLng } : null;
+    const end = eLat != null && eLng != null ? { lat: eLat, lng: eLng } : null;
+
+    if (!start || !end || !isValidLatLng(start.lat, start.lng) || !isValidLatLng(end.lat, end.lng)) {
+      return res.json({
+        coordinates: [] as { latitude: number; longitude: number }[],
+        start,
+        end,
+        distanceMeters: null as number | null,
+        durationSeconds: null as number | null,
+        message: "Add meetup and end locations to the trip to compute the convoy route.",
+      });
+    }
+
+    try {
+      const url = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`;
+      const r = await fetch(url);
+      if (!r.ok) {
+        return res.json({
+          coordinates: [],
+          start,
+          end,
+          distanceMeters: null,
+          durationSeconds: null,
+          message: "Routing service returned an error.",
+        });
+      }
+      const j = (await r.json()) as {
+        routes?: Array<{
+          distance?: number;
+          duration?: number;
+          geometry?: { coordinates?: [number, number][] };
+        }>;
+      };
+      const route = j.routes?.[0];
+      const rawCoords = route?.geometry?.coordinates;
+      const coordinates = Array.isArray(rawCoords)
+        ? rawCoords.map(([lng, lat]) => ({ latitude: lat, longitude: lng }))
+        : [];
+      return res.json({
+        coordinates,
+        start,
+        end,
+        distanceMeters: route?.distance ?? null,
+        durationSeconds: route?.duration != null ? Math.round(route.duration) : null,
+        provider: "osrm",
+      });
+    } catch (e) {
+      console.error("driving-route:", e);
+      return res.status(500).json({ error: "Failed to compute route" });
+    }
   });
 
   app.post("/api/trips", async (req, res) => {
@@ -1895,6 +2000,100 @@ async function startServer() {
     res.json(data);
   });
 
+  /** Community-discovered places (used on live trip + create event checkpoint picker). */
+  app.get("/api/nearby-attractions", async (_req, res) => {
+    try {
+      const { data, error } = await supabase
+        .from("nearby_attractions")
+        .select("id, name, description, lat, lng, created_at, created_by")
+        .order("created_at", { ascending: false })
+        .limit(300);
+      if (error) {
+        if (isMissingTableError(error.message)) {
+          return res.json({ attractions: [] });
+        }
+        console.error("nearby_attractions list:", error.message);
+        return res.status(500).json({ error: "Failed to list attractions" });
+      }
+      return res.json({ attractions: data ?? [] });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Failed to list attractions" });
+    }
+  });
+
+  app.post("/api/nearby-attractions", async (req, res) => {
+    const { name, description, lat, lng, user_id } = req.body ?? {};
+    if (!String(name || "").trim()) {
+      return res.status(400).json({ error: "name is required" });
+    }
+    const latNum = toFiniteNumber(lat);
+    const lngNum = toFiniteNumber(lng);
+    if (latNum === null || lngNum === null || !isValidLatLng(latNum, lngNum)) {
+      return res.status(400).json({ error: "valid lat and lng are required" });
+    }
+    const uid = Number(user_id);
+    const { data, error } = await supabase
+      .from("nearby_attractions")
+      .insert({
+        name: String(name).trim().slice(0, 200),
+        description: String(description ?? "").trim().slice(0, 2000) || null,
+        lat: latNum,
+        lng: lngNum,
+        created_by: Number.isFinite(uid) ? uid : null,
+      })
+      .select()
+      .single();
+    if (error) {
+      if (isMissingTableError(error.message)) {
+        return res.status(503).json({
+          error: "Database table missing — run sql/nearby_attractions_schema.sql in Supabase SQL editor.",
+        });
+      }
+      console.error("nearby_attractions insert:", error.message);
+      return res.status(400).json({ error: error.message || "Failed to save attraction" });
+    }
+    return res.json(data);
+  });
+
+  /** Bulk set checkpoints when creating/editing a trip (organizer only). */
+  app.post("/api/trips/:id/checkpoints", async (req, res) => {
+    const tripId = Number(req.params.id);
+    const { user_id, checkpoints: cps } = req.body ?? {};
+    const userId = Number(user_id);
+    if (!Number.isFinite(tripId) || !Number.isFinite(userId)) {
+      return res.status(400).json({ error: "trip id and user_id are required" });
+    }
+    const actor = await getUserById(userId);
+    if (!actor || actor.role !== "organizer") {
+      return res.status(403).json({ error: "Only organizers can add checkpoints" });
+    }
+    const trip = await getTripById(tripId);
+    if (!trip) return res.status(404).json({ error: "Trip not found" });
+    if (Number(trip.organizer_id) !== userId) {
+      return res.status(403).json({ error: "You can only edit your own trip" });
+    }
+    const badges = ["🚀", "🛣️", "🏔️", "🏖️", "📍", "🎯", "🏁"];
+    const list = Array.isArray(cps) ? cps : [];
+    const rows = list.map((cp: Record<string, unknown>, i: number) => ({
+      trip_id: tripId,
+      name: String(cp.name ?? `Checkpoint ${i + 1}`).slice(0, 200),
+      lat: Number(cp.lat) || 0,
+      lng: Number(cp.lng) || 0,
+      xp: Number(cp.xp ?? 50),
+      badge: String(cp.badge ?? badges[i % badges.length]),
+    }));
+    if (rows.length === 0) {
+      return res.json({ ok: true, inserted: 0 });
+    }
+    const { error } = await supabase.from("checkpoints").insert(rows);
+    if (error) {
+      console.error("checkpoints bulk insert:", error.message);
+      return res.status(400).json({ error: error.message || "Failed to insert checkpoints" });
+    }
+    return res.json({ ok: true, inserted: rows.length });
+  });
+
   // Real-time Socket Logic
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
@@ -1902,6 +2101,19 @@ async function startServer() {
     socket.on("join-trip", (tripId) => {
       socket.join(`trip-${tripId}`);
       console.log(`Socket ${socket.id} joined trip-${tripId}`);
+    });
+
+    socket.on("convoy-action", (payload: { kind?: string; tripId?: number; userId?: number }) => {
+      const tripIdNum = Number(payload?.tripId);
+      const kind = String(payload?.kind || "").trim();
+      if (!Number.isFinite(tripIdNum) || !kind) return;
+      const uid = toFiniteNumber(payload?.userId);
+      io.to(`trip-${tripIdNum}`).emit("convoy-action", {
+        kind,
+        tripId: tripIdNum,
+        userId: uid,
+        at: new Date().toISOString(),
+      });
     });
 
     socket.on("update-location", async ({ tripId, userId, lat, lng, accuracy, speed, heading, recordedAt }) => {

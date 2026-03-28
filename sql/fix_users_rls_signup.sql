@@ -1,0 +1,56 @@
+-- =============================================================================
+-- Fix: "new row violates row-level security policy for table users"
+-- Run in: Supabase Dashboard → SQL Editor (for project Trip-Sync uses).
+-- =============================================================================
+--
+-- WHY THIS HAPPENS
+-- 1) public.users has RLS ON and no policy allows INSERT for the role your
+--    API uses; or
+-- 2) The Express server is not using SUPABASE_SERVICE_ROLE_KEY (service_role).
+--    The anon key is subject to RLS and will fail inserts.
+--
+-- BEST FIX (no SQL): Repo root `.env`
+--   SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+--   SUPABASE_SERVICE_ROLE_KEY=<service_role JWT from Dashboard → Settings → API>
+-- Use the "service_role" secret, NOT the "anon" key. Restart `npm run dev`.
+--
+-- =============================================================================
+-- OPTIONAL: See current policies
+-- =============================================================================
+-- SELECT tablename, policyname, cmd, roles, qual, with_check
+-- FROM pg_policies
+-- WHERE schemaname = 'public' AND tablename = 'users';
+
+-- =============================================================================
+-- OPTION A — Development: disable RLS on public.users (fastest unblock)
+-- WARNING: Anyone with anon key could read/write if you expose the table;
+--          your app should only talk to public.users via your API.
+-- =============================================================================
+ALTER TABLE public.users DISABLE ROW LEVEL SECURITY;
+
+-- To turn RLS back on later after adding proper policies:
+-- ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+
+-- =============================================================================
+-- OPTION B — Keep RLS enabled: allow INSERT for signup traffic
+-- Use if you cannot use service_role on the server (not recommended long-term).
+-- Tighten this policy in production (e.g. match auth.uid() to a column).
+-- =============================================================================
+-- ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+--
+-- DROP POLICY IF EXISTS "users_allow_insert_signup" ON public.users;
+-- CREATE POLICY "users_allow_insert_signup"
+-- ON public.users
+-- FOR INSERT
+-- TO anon, authenticated
+-- WITH CHECK (true);
+--
+-- NOTE: Allowing anon INSERT is risky if clients can hit PostgREST directly.
+-- Prefer OPTION A for local dev or fix service_role (see top).
+
+-- =============================================================================
+-- OPTION C — Service role should bypass RLS in Supabase; if errors persist,
+-- double-check the JWT role:
+--   SELECT auth.jwt() ->> 'role';   -- run as the key you use in API
+-- Expected for server: "service_role"
+-- =============================================================================

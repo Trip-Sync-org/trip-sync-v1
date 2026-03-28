@@ -8,6 +8,7 @@ import {
   useImperativeHandle,
 } from "react";
 import mapboxgl from "mapbox-gl";
+import { bearing as turfBearing, circle as turfCircle } from "@turf/turf";
 
 type LngLat = { lat: number; lng: number };
 
@@ -38,9 +39,29 @@ function readStoredMapTheme(): MapTheme {
   return readLiveMapStoredTheme();
 }
 
+export type LiveUserGeo = {
+  lat: number;
+  lng: number;
+  accuracyM?: number;
+  /** Degrees 0–360, clockwise from north */
+  headingDeg?: number | null;
+  /** m/s from Geolocation API */
+  speedMps?: number | null;
+};
+
 export type LiveTripMapRef = {
   flyTo: (opts: { lat: number; lng: number; zoom?: number }) => void;
   togglePitch: () => void;
+  /** Fit route geometry + all convoy riders + pins/checkpoints */
+  fitConvoy: () => void;
+  recenterOnUser: (at?: { lat: number; lng: number }) => void;
+  toggleHeadingUp: () => void;
+  toggleTraffic: () => void;
+  setTrafficVisible: (visible: boolean) => void;
+  zoomBy: (delta: number) => void;
+  resetNorth: () => void;
+  getBearing: () => number;
+  getFollowUser: () => boolean;
 };
 
 export type LiveMapRider = {
@@ -90,6 +111,13 @@ type Props = {
   /** Controlled basemap theme (optional). */
   mapTheme?: MapTheme;
   onMapThemeChange?: (t: MapTheme) => void;
+  /** Throttled local GPS fix for Google-style user dot + accuracy ring */
+  userGeo?: LiveUserGeo | null;
+  /** When false, skip user location overlay */
+  showUserLocation?: boolean;
+  /** Weekly heatmap overlay */
+  heatmapVisible?: boolean;
+  heatmapPoints?: { lat: number; lng: number; weight?: number }[];
 };
 
 function valid(p?: LngLat | null): p is LngLat {
@@ -98,9 +126,23 @@ function valid(p?: LngLat | null): p is LngLat {
 
 const ROUTE_SOURCE = "live-trip-route-src";
 const ROUTE_LAYER = "live-trip-route-layer";
-const ROUTE_GLOW_LAYER = "live-trip-route-glow";
+const ROUTE_CASING_LAYER = "live-trip-route-casing";
 const TRAILS_SOURCE = "live-rider-trails-src";
 const TRAILS_LAYER = "live-rider-trails-layer";
+const USER_ACCURACY_SOURCE = "live-user-accuracy-src";
+const USER_ACCURACY_LAYER = "live-user-accuracy-fill";
+const TRAFFIC_SOURCE_ID = "mapbox-traffic-v1";
+const TRAFFIC_LAYER_ID = "live-traffic-congestion";
+const HEATMAP_SOURCE = "live-heatmap-src";
+const HEATMAP_LAYER = "live-heatmap-layer";
+const DEM_SOURCE = "mapbox-dem";
+const GOOGLE_BLUE = "#4285F4";
+
+function lineStringCoords(geom: { type: string; coordinates: unknown }): [number, number][] {
+  if (geom.type === "LineString") return geom.coordinates as [number, number][];
+  if (geom.type === "MultiLineString") return (geom.coordinates as [number, number][][]).flat();
+  return [];
+}
 
 /** Rank colors — arcade racing palette */
 const RANK_COLORS = ["#fde047", "#94a3b8", "#fb923c", "#22d3ee", "#a78bfa", "#f472b6", "#4ade80", "#fbbf24"];
@@ -150,12 +192,31 @@ const LiveTripMap = forwardRef<LiveTripMapRef, Props>(function LiveTripMap(
     minimalChrome = false,
     mapTheme: mapThemeProp,
     onMapThemeChange,
+    userGeo = null,
+    showUserLocation = false,
+    heatmapVisible = false,
+    heatmapPoints = [],
   },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const pitchTiltRef = useRef(0);
+  const routeCoordsRef = useRef<[number, number][]>([]);
+  const trafficLayersAddedRef = useRef(false);
+  const userMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const followUserRef = useRef(true);
+  const headingUpRef = useRef(true);
+  const trafficVisibleRef = useRef(false);
+  const displayLngLatRef = useRef<{ lng: number; lat: number } | null>(null);
+  const targetLngLatRef = useRef<{ lng: number; lat: number } | null>(null);
+  const lastGpsRef = useRef<{ lng: number; lat: number } | null>(null);
+  const priorGpsRef = useRef<{ lng: number; lat: number } | null>(null);
+  const userGeoRef = useRef<LiveUserGeo | null | undefined>(null);
+  const rafFollowRef = useRef<number | null>(null);
+  const lastFollowTickRef = useRef(0);
+  const anchorStartRef = useRef<mapboxgl.Marker | null>(null);
+  const anchorEndRef = useRef<mapboxgl.Marker | null>(null);
   const riderMarkersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
   const pinMarkersRef = useRef<mapboxgl.Marker[]>([]);
   const cpMarkersRef = useRef<mapboxgl.Marker[]>([]);
@@ -186,6 +247,9 @@ const LiveTripMap = forwardRef<LiveTripMapRef, Props>(function LiveTripMap(
     selectedRef.current = selectedRiderId;
     onSelectRef.current = onSelectRider;
   });
+  useLayoutEffect(() => {
+    userGeoRef.current = userGeo ?? null;
+  }, [userGeo]);
 
   /** Fit map to route anchors and static overlays (not every rider GPS tick). */
   const fitToAnchors = useCallback(
@@ -210,6 +274,34 @@ const LiveTripMap = forwardRef<LiveTripMapRef, Props>(function LiveTripMap(
     [start, end, pins, checkpoints],
   );
 
+  /** Fit computed route polyline + convoy riders + pins/checkpoints (Google “expand” / overview). */
+  const fitConvoy = useCallback(() => {
+    const map = mapRef.current;
+    if (!map?.loaded()) return;
+    const coords: [number, number][] = [];
+    routeCoordsRef.current.forEach((c) => coords.push(c));
+    if (valid(start)) coords.push([start.lng, start.lat]);
+    if (valid(end)) coords.push([end.lng, end.lat]);
+    riders.forEach((r) => {
+      if (Number.isFinite(r.lat) && Number.isFinite(r.lng)) coords.push([r.lng, r.lat]);
+    });
+    pins.forEach((p) => {
+      if (Number.isFinite(p.lat) && Number.isFinite(p.lng)) coords.push([p.lng, p.lat]);
+    });
+    checkpoints.forEach((c) => {
+      if (Number.isFinite(c.lat) && Number.isFinite(c.lng)) coords.push([c.lng, c.lat]);
+    });
+    if (coords.length === 0) return;
+    const b = new mapboxgl.LngLatBounds(coords[0], coords[0]);
+    coords.forEach((c) => b.extend(c));
+    map.fitBounds(b, {
+      padding: { top: 96, bottom: 112, left: 72, right: 72 },
+      maxZoom: 15,
+      duration: 950,
+      easing: (t) => 1 - Math.pow(1 - t, 2),
+    });
+  }, [start, end, riders, pins, checkpoints]);
+
   // Map instance
   useEffect(() => {
     if (!containerRef.current || !MAPBOX_PUBLIC_TOKEN) return;
@@ -222,9 +314,21 @@ const LiveTripMap = forwardRef<LiveTripMapRef, Props>(function LiveTripMap(
       zoom: valid(start) ? 12 : 4,
       attributionControl: true,
       failIfMajorPerformanceCaveat: false,
+      maxPitch: 85,
+      pitch: 0,
+      bearing: 0,
+      // @ts-expect-error Mapbox GL v3 terrain rendering hint
+      optimizeForTerrain: true,
     });
-    map.addControl(new mapboxgl.NavigationControl(), "top-right");
     mapRef.current = map;
+
+    map.dragRotate.enable();
+    map.touchZoomRotate.enableRotation();
+    try {
+      map.touchPitch.enable();
+    } catch {
+      /* optional in some builds */
+    }
 
     let styleRetried = false;
     map.on("error", (e: { error?: Error }) => {
@@ -241,6 +345,23 @@ const LiveTripMap = forwardRef<LiveTripMapRef, Props>(function LiveTripMap(
 
     const onMapLoad = () => {
       setStyleEpoch((n) => n + 1);
+      try {
+        if (!map.getSource(DEM_SOURCE)) {
+          map.addSource(DEM_SOURCE, {
+            type: "raster-dem",
+            url: "mapbox://mapbox.mapbox-terrain-dem-v1",
+            tileSize: 512,
+            maxzoom: 14,
+          });
+          map.setTerrain({ source: DEM_SOURCE, exaggeration: 1.12 });
+        }
+      } catch {
+        /* terrain unavailable in some environments */
+      }
+
+      const layers = map.getStyle().layers ?? [];
+      const beforeSymbol = layers.find((l) => l.type === "symbol")?.id;
+
       if (!map.getSource(TRAILS_SOURCE)) {
         map.addSource(TRAILS_SOURCE, {
           type: "geojson",
@@ -258,6 +379,54 @@ const LiveTripMap = forwardRef<LiveTripMapRef, Props>(function LiveTripMap(
           },
         });
       }
+
+      if (!map.getSource(USER_ACCURACY_SOURCE)) {
+        map.addSource(USER_ACCURACY_SOURCE, {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+        map.addLayer(
+          {
+            id: USER_ACCURACY_LAYER,
+            type: "fill",
+            source: USER_ACCURACY_SOURCE,
+            paint: {
+              "fill-color": GOOGLE_BLUE,
+              "fill-opacity": 0.14,
+            },
+          },
+          beforeSymbol,
+        );
+      }
+
+      try {
+        if (!map.getLayer("live-3d-buildings")) {
+          map.addLayer(
+            {
+              id: "live-3d-buildings",
+              source: "composite",
+              "source-layer": "building",
+              filter: ["==", ["get", "extrude"], "true"],
+              type: "fill-extrusion",
+              minzoom: 15,
+              paint: {
+                "fill-extrusion-color": "#c4c9d4",
+                "fill-extrusion-height": ["coalesce", ["get", "height"], 0],
+                "fill-extrusion-base": ["coalesce", ["get", "min_height"], 0],
+                "fill-extrusion-opacity": 0.72,
+              },
+            },
+            beforeSymbol,
+          );
+        }
+      } catch {
+        /* building layer may not apply to all styles */
+      }
+
+      map.on("dragstart", () => {
+        followUserRef.current = false;
+      });
+
       requestAnimationFrame(() => {
         map.resize();
         requestAnimationFrame(() => map.resize());
@@ -307,7 +476,7 @@ const LiveTripMap = forwardRef<LiveTripMapRef, Props>(function LiveTripMap(
     const cleanupRoute = () => {
       try {
         if (map.getLayer(ROUTE_LAYER)) map.removeLayer(ROUTE_LAYER);
-        if (map.getLayer(ROUTE_GLOW_LAYER)) map.removeLayer(ROUTE_GLOW_LAYER);
+        if (map.getLayer(ROUTE_CASING_LAYER)) map.removeLayer(ROUTE_CASING_LAYER);
         if (map.getSource(ROUTE_SOURCE)) map.removeSource(ROUTE_SOURCE);
       } catch {
         /* strict mode teardown */
@@ -317,6 +486,7 @@ const LiveTripMap = forwardRef<LiveTripMapRef, Props>(function LiveTripMap(
     const apply = () => {
       if (!valid(start) || !valid(end)) {
         cleanupRoute();
+        routeCoordsRef.current = [];
         return;
       }
 
@@ -336,28 +506,29 @@ const LiveTripMap = forwardRef<LiveTripMapRef, Props>(function LiveTripMap(
             return;
           }
           const data = await response.json();
-          const geometry = data?.routes?.[0]?.geometry;
+          const geometry = data?.routes?.[0]?.geometry as { type: string; coordinates: unknown } | undefined;
           if (!geometry) {
             cleanupRoute();
+            routeCoordsRef.current = [];
             return;
           }
 
           const add = () => {
             cleanupRoute();
+            routeCoordsRef.current = lineStringCoords(geometry);
             map.addSource(ROUTE_SOURCE, {
               type: "geojson",
-              data: { type: "Feature", geometry, properties: {} },
+              data: { type: "Feature", geometry: geometry as never, properties: {} },
             });
             map.addLayer({
-              id: ROUTE_GLOW_LAYER,
+              id: ROUTE_CASING_LAYER,
               type: "line",
               source: ROUTE_SOURCE,
               layout: { "line-join": "round", "line-cap": "round" },
               paint: {
-                "line-color": "#22d3ee",
-                "line-width": 12,
-                "line-opacity": 0.28,
-                "line-blur": 3,
+                "line-color": "#ffffff",
+                "line-width": 9,
+                "line-opacity": 0.95,
               },
             });
             map.addLayer({
@@ -366,9 +537,9 @@ const LiveTripMap = forwardRef<LiveTripMapRef, Props>(function LiveTripMap(
               source: ROUTE_SOURCE,
               layout: { "line-join": "round", "line-cap": "round" },
               paint: {
-                "line-color": "#67e8f9",
-                "line-width": 3,
-                "line-opacity": 0.95,
+                "line-color": GOOGLE_BLUE,
+                "line-width": 5,
+                "line-opacity": 1,
               },
             });
           };
@@ -548,6 +719,269 @@ const LiveTripMap = forwardRef<LiveTripMapRef, Props>(function LiveTripMap(
     });
   }, [mapReady, pins, checkpoints, styleEpoch]);
 
+  // Start / end pins (Google-style green / red)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !map.loaded()) return;
+
+    anchorStartRef.current?.remove();
+    anchorEndRef.current?.remove();
+    anchorStartRef.current = null;
+    anchorEndRef.current = null;
+
+    if (valid(start)) {
+      const el = document.createElement("div");
+      el.innerHTML =
+        '<div style="width:28px;height:28px;border-radius:999px;background:#22c55e;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.35);" title="Start"></div>';
+      anchorStartRef.current = new mapboxgl.Marker({ element: el, anchor: "bottom" })
+        .setLngLat([start.lng, start.lat])
+        .addTo(map);
+    }
+    if (valid(end)) {
+      const el = document.createElement("div");
+      el.innerHTML =
+        '<div style="width:28px;height:28px;border-radius:999px;background:#ea4335;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.35);" title="Destination"></div>';
+      anchorEndRef.current = new mapboxgl.Marker({ element: el, anchor: "bottom" })
+        .setLngLat([end.lng, end.lat])
+        .addTo(map);
+    }
+  }, [mapReady, start?.lat, start?.lng, end?.lat, end?.lng, styleEpoch]);
+
+  const ensureTrafficLayers = useCallback((map: mapboxgl.Map) => {
+    if (trafficLayersAddedRef.current || !map.loaded()) return;
+    try {
+      if (!map.getSource(TRAFFIC_SOURCE_ID)) {
+        map.addSource(TRAFFIC_SOURCE_ID, {
+          type: "vector",
+          url: "mapbox://mapbox.mapbox-traffic-v1",
+        });
+      }
+      if (!map.getLayer(TRAFFIC_LAYER_ID)) {
+        map.addLayer({
+          id: TRAFFIC_LAYER_ID,
+          type: "line",
+          source: TRAFFIC_SOURCE_ID,
+          "source-layer": "traffic",
+          paint: {
+            "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.2, 14, 3.5, 18, 6],
+            "line-color": [
+              "match",
+              ["get", "congestion"],
+              "low",
+              "#34a853",
+              "moderate",
+              "#fbbc04",
+              "heavy",
+              "#fa903e",
+              "severe",
+              "#ea4335",
+              "#34a853",
+            ],
+            "line-opacity": 0.92,
+          },
+        });
+      }
+      trafficLayersAddedRef.current = true;
+    } catch {
+      /* traffic source may fail without token */
+    }
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !map.loaded()) return;
+    ensureTrafficLayers(map);
+    if (map.getLayer(TRAFFIC_LAYER_ID)) {
+      map.setLayoutProperty(TRAFFIC_LAYER_ID, "visibility", trafficVisibleRef.current ? "visible" : "none");
+    }
+  }, [mapReady, styleEpoch, ensureTrafficLayers]);
+
+  // Weekly heatmap (trip history points — warm ramp)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !map.loaded()) return;
+
+    if (!heatmapVisible) {
+      if (map.getLayer(HEATMAP_LAYER)) map.setLayoutProperty(HEATMAP_LAYER, "visibility", "none");
+      return;
+    }
+
+    const features = heatmapPoints.map((p, i) => ({
+      type: "Feature" as const,
+      properties: { w: p.weight ?? 1 },
+      geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
+    }));
+
+    if (!map.getSource(HEATMAP_SOURCE)) {
+      map.addSource(HEATMAP_SOURCE, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features },
+      });
+      map.addLayer({
+        id: HEATMAP_LAYER,
+        type: "heatmap",
+        source: HEATMAP_SOURCE,
+        paint: {
+          "heatmap-weight": ["interpolate", ["linear"], ["get", "w"], 0, 0, 6, 1],
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 10, 1, 15, 3],
+          "heatmap-color": [
+            "interpolate",
+            ["linear"],
+            ["heatmap-density"],
+            0,
+            "rgba(33,102,172,0)",
+            0.25,
+            "rgb(103,169,207)",
+            0.5,
+            "rgb(209,229,240)",
+            0.7,
+            "rgb(253,219,199)",
+            0.85,
+            "rgb(239,138,98)",
+            1,
+            "rgb(178,24,43)",
+          ],
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 10, 12, 15, 25],
+          "heatmap-opacity": 0.78,
+        },
+      });
+    } else {
+      const src = map.getSource(HEATMAP_SOURCE) as mapboxgl.GeoJSONSource;
+      src.setData({ type: "FeatureCollection", features });
+      map.setLayoutProperty(HEATMAP_LAYER, "visibility", "visible");
+    }
+  }, [mapReady, heatmapVisible, heatmapPoints, styleEpoch]);
+
+  // Throttled GPS fixes from parent (~1 Hz) — chain prior → last for bearing fallback
+  useEffect(() => {
+    if (!userGeo || !Number.isFinite(userGeo.lat) || !Number.isFinite(userGeo.lng)) return;
+    priorGpsRef.current = lastGpsRef.current;
+    lastGpsRef.current = { lng: userGeo.lng, lat: userGeo.lat };
+    targetLngLatRef.current = lastGpsRef.current;
+    if (!displayLngLatRef.current) displayLngLatRef.current = { ...lastGpsRef.current };
+  }, [userGeo]);
+
+  // Google-style user dot, accuracy polygon, heading cone, smooth follow + heading-up
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !map.loaded() || !showUserLocation) {
+      if (userMarkerRef.current) {
+        userMarkerRef.current.remove();
+        userMarkerRef.current = null;
+      }
+      displayLngLatRef.current = null;
+      targetLngLatRef.current = null;
+      if (rafFollowRef.current != null) {
+        cancelAnimationFrame(rafFollowRef.current);
+        rafFollowRef.current = null;
+      }
+      return;
+    }
+
+    const ensureMarker = () => {
+      if (userMarkerRef.current || !userGeoRef.current) return;
+      const wrap = document.createElement("div");
+      wrap.className = "live-map-user-marker-inner";
+      wrap.innerHTML = `
+        <div class="live-map-user-pulse-ring" aria-hidden="true"></div>
+        <div class="live-map-user-cone" data-cone="1" style="opacity:0"></div>
+        <div class="live-map-user-core" aria-hidden="true"></div>
+      `;
+      userMarkerRef.current = new mapboxgl.Marker({ element: wrap, anchor: "center" }).addTo(map);
+    };
+
+    let cancelled = false;
+
+    const tick = () => {
+      if (cancelled || !mapRef.current) return;
+      ensureMarker();
+      if (!userGeoRef.current) {
+        rafFollowRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      const cur = displayLngLatRef.current;
+      const tgt = targetLngLatRef.current;
+      if (cur && tgt) {
+        const t = 0.22;
+        const lng = cur.lng + (tgt.lng - cur.lng) * t;
+        const lat = cur.lat + (tgt.lat - cur.lat) * t;
+        displayLngLatRef.current = { lng, lat };
+      }
+
+      if (displayLngLatRef.current && userMarkerRef.current) {
+        userMarkerRef.current.setLngLat([displayLngLatRef.current.lng, displayLngLatRef.current.lat]);
+      }
+
+      const g = userGeoRef.current;
+      if (g && Number.isFinite(g.lat) && map.getSource(USER_ACCURACY_SOURCE)) {
+        const acc = Math.min(Math.max(g.accuracyM ?? 32, 10), 400);
+        const km = acc / 1000;
+        const poly = turfCircle([g.lng, g.lat], km, { steps: 64, units: "kilometers" });
+        (map.getSource(USER_ACCURACY_SOURCE) as mapboxgl.GeoJSONSource).setData(poly as never);
+      }
+
+      if (g && displayLngLatRef.current && followUserRef.current) {
+        const now = performance.now();
+        if (now - lastFollowTickRef.current > 180) {
+          lastFollowTickRef.current = now;
+          let bearing: number | undefined;
+          if (headingUpRef.current) {
+            let h = g.headingDeg ?? null;
+            if (h == null || Number.isNaN(h)) {
+              const prev = priorGpsRef.current;
+              if (prev && lastGpsRef.current && (g.speedMps ?? 0) > 1.5) {
+                const b = turfBearing([prev.lng, prev.lat], [lastGpsRef.current.lng, lastGpsRef.current.lat]);
+                h = b < 0 ? b + 360 : b;
+              }
+            } else if (h < 0) {
+              h = h + 360;
+            }
+            if (h != null && !Number.isNaN(h)) bearing = h;
+          }
+          const navPitch = pitchTiltRef.current > 20 ? pitchTiltRef.current : 52;
+          map.easeTo({
+            center: [displayLngLatRef.current.lng, displayLngLatRef.current.lat],
+            bearing: bearing ?? map.getBearing(),
+            pitch: headingUpRef.current ? navPitch : map.getPitch(),
+            duration: 220,
+            easing: (x) => x,
+            essential: true,
+          });
+        }
+      }
+
+      if (g && userMarkerRef.current) {
+        const cone = userMarkerRef.current.getElement().querySelector("[data-cone]") as HTMLElement | null;
+        const fast = (g.speedMps ?? 0) > 1.4;
+        if (cone) {
+          cone.style.opacity = fast ? "1" : "0";
+          let rot = 0;
+          if (g.headingDeg != null && !Number.isNaN(g.headingDeg)) {
+            rot = g.headingDeg - map.getBearing();
+          } else if (priorGpsRef.current && lastGpsRef.current && (g.speedMps ?? 0) > 1.5) {
+            const b = turfBearing(
+              [priorGpsRef.current.lng, priorGpsRef.current.lat],
+              [lastGpsRef.current.lng, lastGpsRef.current.lat],
+            );
+            rot = b - map.getBearing();
+          }
+          cone.style.transform = `rotate(${rot}deg)`;
+        }
+      }
+
+      rafFollowRef.current = requestAnimationFrame(tick);
+    };
+
+    rafFollowRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      cancelled = true;
+      if (rafFollowRef.current != null) cancelAnimationFrame(rafFollowRef.current);
+      rafFollowRef.current = null;
+    };
+  }, [mapReady, showUserLocation, styleEpoch]);
+
   const rankedHud = rankRiders(riders);
   const isDarkBasemap = mapTheme === "dark";
 
@@ -561,17 +995,66 @@ const LiveTripMap = forwardRef<LiveTripMapRef, Props>(function LiveTripMap(
       flyTo: ({ lat, lng, zoom = 14 }) => {
         const map = mapRef.current;
         if (!map || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
-        map.flyTo({ center: [lng, lat], zoom, duration: 1100 });
+        map.flyTo({ center: [lng, lat], zoom, duration: 1100, essential: true });
       },
       togglePitch: () => {
         const map = mapRef.current;
         if (!map) return;
-        const next = pitchTiltRef.current > 25 ? 0 : 60;
+        const next = pitchTiltRef.current > 25 ? 0 : 56;
         pitchTiltRef.current = next;
-        map.easeTo({ pitch: next, duration: 650 });
+        map.easeTo({ pitch: next, duration: 650, essential: true });
       },
+      fitConvoy,
+      recenterOnUser: (at?: { lat: number; lng: number }) => {
+        followUserRef.current = true;
+        headingUpRef.current = true;
+        const map = mapRef.current;
+        if (!map) return;
+        const g = at ?? userGeoRef.current;
+        if (!g || !Number.isFinite(g.lat)) return;
+        map.easeTo({
+          center: [g.lng, g.lat],
+          zoom: Math.max(map.getZoom(), 15),
+          pitch: pitchTiltRef.current > 20 ? pitchTiltRef.current : 52,
+          duration: 600,
+          essential: true,
+        });
+      },
+      toggleHeadingUp: () => {
+        headingUpRef.current = !headingUpRef.current;
+      },
+      toggleTraffic: () => {
+        const map = mapRef.current;
+        if (!map?.loaded()) return;
+        ensureTrafficLayers(map);
+        trafficVisibleRef.current = !trafficVisibleRef.current;
+        if (map.getLayer(TRAFFIC_LAYER_ID)) {
+          map.setLayoutProperty(TRAFFIC_LAYER_ID, "visibility", trafficVisibleRef.current ? "visible" : "none");
+        }
+      },
+      setTrafficVisible: (visible: boolean) => {
+        const map = mapRef.current;
+        if (!map?.loaded()) return;
+        ensureTrafficLayers(map);
+        trafficVisibleRef.current = visible;
+        if (map.getLayer(TRAFFIC_LAYER_ID)) {
+          map.setLayoutProperty(TRAFFIC_LAYER_ID, "visibility", visible ? "visible" : "none");
+        }
+      },
+      zoomBy: (delta: number) => {
+        const map = mapRef.current;
+        if (!map) return;
+        map.easeTo({ zoom: map.getZoom() + delta, duration: 280, essential: true });
+      },
+      resetNorth: () => {
+        const map = mapRef.current;
+        if (!map) return;
+        map.easeTo({ bearing: 0, duration: 450, essential: true });
+      },
+      getBearing: () => mapRef.current?.getBearing() ?? 0,
+      getFollowUser: () => followUserRef.current,
     }),
-    [],
+    [fitConvoy, ensureTrafficLayers],
   );
 
   if (!MAPBOX_PUBLIC_TOKEN) {
