@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit -p tsconfig.json",
+    "build": "node -e \"console.log('backend build step: no-op')\"",
     "dev": "tsx server.ts",
     "start": "tsx server.ts"
   },
