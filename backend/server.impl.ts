@@ -1,7 +1,6 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
@@ -2249,6 +2248,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
 
   // Vite middleware for development
   if (shouldListen && process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     // Bind HMR to the same HTTP server so phones on Wi‑Fi use the LAN IP (not localhost).
     // Without this, @vite/client tries ws://localhost and the app fails to load on mobile.
     const vite = await createViteServer({
