@@ -2327,9 +2327,6 @@ export async function getServerApp(): Promise<express.Express> {
   return appInitPromise;
 }
 
-if (!isVercelRuntime) {
-  startServer({ listen: true }).catch((error) => {
-    console.error("Server bootstrap failed:", error);
-    process.exit(1);
-  });
+export async function startLocalServer(): Promise<void> {
+  await startServer({ listen: true });
 }
