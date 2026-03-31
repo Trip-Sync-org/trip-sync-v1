@@ -22,13 +22,13 @@ import {
 } from 'lucide-react';
 import { signInWithGoogle } from "./lib/auth";
 import { supabase } from "./lib/supabaseClient";
-import MapboxRouteMap from "./components/MapboxRouteMap";
+import RoutePreviewMap from "./components/RoutePreviewMap";
 import LiveTripMap, {
   readLiveMapStoredTheme,
   type LiveTripMapRef,
   type LiveUserGeo,
   type MapTheme,
-} from "./components/LiveTripMap";
+} from "./components/LiveTripMapNoProvider";
 import { io } from "socket.io-client";
 
 // ─── UTILS ──────────────────────────────────────────────────
@@ -1772,7 +1772,7 @@ const TripDetailPage = ({user}:{user:User|null}) => {
                 </div>}
               </div>
               <div className="rounded-2xl overflow-hidden border border-white/10 h-52 bg-[#0a0a0a] relative">
-                <MapboxRouteMap
+                <RoutePreviewMap
                   className="h-52"
                   start={trip.meetupLat !== undefined && trip.meetupLng !== undefined ? { lat: trip.meetupLat, lng: trip.meetupLng } : null}
                   end={trip.endLat !== undefined && trip.endLng !== undefined ? { lat: trip.endLat, lng: trip.endLng } : null}
@@ -2833,7 +2833,7 @@ const CreateEventPage = ({user}:{user:User}) => {
                     )}
                   </div>
                 </div>
-                <MapboxRouteMap className="h-44 rounded-2xl overflow-hidden border border-white/10" start={startCoords} end={endCoords} />
+                <RoutePreviewMap className="h-44 rounded-2xl overflow-hidden border border-white/10" start={startCoords} end={endCoords} />
                 {startCoords && (
                   <div className="px-3 py-2 bg-black/70 backdrop-blur-sm rounded-xl border border-white/10">
                     <p className="text-xs font-semibold text-white/80 flex items-center gap-1.5">
@@ -3212,7 +3212,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
   const didFitConvoyOnLiveRef = useRef(false);
   const [stravaShareLive, setStravaShareLive] = useState(false);
   const [stravaTrackLaps, setStravaTrackLaps] = useState(false);
-  /** Peek = map-first driving view; expanded = full convoy controls (Google Maps–style sheet). */
+  /** Peek = map-first driving view; expanded = full convoy controls. */
   const [liveSheetSnap, setLiveSheetSnap] = useState<"peek" | "expanded">("peek");
 
   const sheetHandlePtr = useRef<{ y: number; pid: number | null }>({ y: 0, pid: null });
@@ -4635,7 +4635,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
             </div>
           </div>
 
-          {/* Map controls — Google Maps–style stack */}
+          {/* Map controls stack */}
           <div className="pointer-events-auto absolute right-3 top-[36%] z-20 flex -translate-y-1/2 flex-col gap-2 md:right-5">
             {Math.abs(mapBearingHud) > 4 && (
               <button
@@ -4746,7 +4746,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
             </button>
           </div>
 
-          {/* Speed pill — Google Maps style */}
+          {/* Speed pill */}
           {myGeo && Number.isFinite(myGeo.lat) && (
             <div className="pointer-events-none absolute bottom-[max(5.5rem,env(safe-area-inset-bottom))] left-3 z-20 sm:bottom-28">
               <div

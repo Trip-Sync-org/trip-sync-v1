@@ -1,0 +1,10 @@
+{
+  "name": "trip-sync-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx server.ts",
+    "start": "tsx server.ts"
+  }
+}
+
