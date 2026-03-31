@@ -41,12 +41,16 @@ type StartServerOptions = {
 async function startServer(options: StartServerOptions = {}): Promise<express.Express> {
   const shouldListen = options.listen ?? !isVercelRuntime;
   let supabase: ReturnType<typeof createSupabaseServerClient>;
-  const httpServer = createServer(app);
-  const io = new Server(httpServer, {
-    cors: {
-      origin: "*",
-    },
-  });
+  let httpServer: ReturnType<typeof createServer> | null = null;
+  let io: Server | null = null;
+  if (shouldListen) {
+    httpServer = createServer(app);
+    io = new Server(httpServer, {
+      cors: {
+        origin: "*",
+      },
+    });
+  }
 
   app.use(express.json());
 
@@ -2171,7 +2175,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
   });
 
   // Real-time Socket Logic
-  if (shouldListen) {
+  if (shouldListen && io) {
     io.on("connection", (socket) => {
       console.log("User connected:", socket.id);
 
@@ -2248,6 +2252,9 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
 
   // Vite middleware for development
   if (shouldListen && process.env.NODE_ENV !== "production") {
+    if (!httpServer) {
+      throw new Error("HTTP server missing in listen mode");
+    }
     const { createServer: createViteServer } = await import("vite");
     // Bind HMR to the same HTTP server so phones on Wi‑Fi use the LAN IP (not localhost).
     // Without this, @vite/client tries ws://localhost and the app fails to load on mobile.
@@ -2282,6 +2289,9 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
   }
 
   if (shouldListen) {
+    if (!httpServer) {
+      throw new Error("HTTP server missing in listen mode");
+    }
     const PORT = 3000;
     httpServer.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on http://localhost:${PORT}`);
