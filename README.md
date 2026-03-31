@@ -57,10 +57,15 @@ For stricter uptime, also configure an external uptime monitor/cron to hit `/api
 - Frontend project (Vercel):
   - Root Directory: `frontend`
   - Uses `frontend/package.json`, `frontend/vite.config.ts`, `frontend/index.html`, `frontend/vercel.json`
+  - Build Command: `npm run build`
+  - Output Directory: `dist`
 - Backend project (separate):
   - Root Directory: `backend`
   - Uses `backend/package.json`, `backend/server.ts`, `backend/api/index.ts`, `backend/vercel.json`
+  - Build Command: `npm run build`
+  - Output Directory: _(leave empty)_
   - Set backend env vars (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) in backend host
+  - Serves API routes through `/api/*` via `backend/vercel.json`
 
 ## React Native (Expo SDK 54)
 

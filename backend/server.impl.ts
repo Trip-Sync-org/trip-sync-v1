@@ -2250,9 +2250,9 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       return vite.middlewares(req, res, next);
     });
   } else if (shouldListen) {
-    app.use(express.static(path.resolve(repoRoot, "dist")));
+    app.use(express.static(path.resolve(repoRoot, "frontend", "dist")));
     app.get("*", (req, res) => {
-      res.sendFile(path.resolve(repoRoot, "dist", "index.html"));
+      res.sendFile(path.resolve(repoRoot, "frontend", "dist", "index.html"));
     });
   }
 

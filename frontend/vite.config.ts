@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
     root: path.resolve(__dirname),
     plugins: [react(), tailwindcss()],
     build: {
-      outDir: path.resolve(__dirname, "..", "dist"),
+      outDir: "dist",
       emptyOutDir: true,
     },
     define: {
