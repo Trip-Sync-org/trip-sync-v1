@@ -7,7 +7,6 @@ import {
   Easing,
   Image,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,7 +14,6 @@ import {
   TextInput,
   View,
 } from "react-native";
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE, type LatLng } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { io, type Socket } from "socket.io-client";
@@ -26,14 +24,14 @@ import { API_BASE_URL } from "../config";
 import { apiFetch, readApiErrorMessage } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { normalizeTripFromApi, type Trip } from "../lib/tripNormalize";
-import { googleMapStyleDark, googleMapStyleLight } from "../lib/mapStyles";
 import { fetchWeatherNow, type WeatherNow } from "../lib/weather";
 import { useAppTheme } from "../context/ThemeContext";
 import { colors } from "../theme";
+import { LiveMapView, type UserGeo } from "../components/LiveMapView";
 
 type Props = NativeStackScreenProps<RootStackParamList, "LiveTrip">;
 
-type MemberRole = "organizer" | "co-admin" | "moderator" | "member";
+type MemberRole = "organizer" | "admin" | "co-admin" | "moderator" | "member";
 type MemberStatus = "arrived" | "on-way" | "absent";
 type VoiceMode = "open" | "controlled";
 
@@ -107,6 +105,7 @@ function formatPaceMinPerKm(elapsedSec: number, distKm: number): string {
 
 function roleBadgeStyle(role: MemberRole) {
   switch (role) {
+    case "admin":
     case "organizer":
       return { color: "#fbbf24", borderColor: "rgba(251,191,36,0.35)", bg: "rgba(251,191,36,0.12)" };
     case "co-admin":
@@ -118,13 +117,27 @@ function roleBadgeStyle(role: MemberRole) {
   }
 }
 
+function normalizeRole(role: unknown): MemberRole {
+  const r = String(role ?? "").toLowerCase();
+  if (r === "admin") return "organizer";
+  if (r === "organizer" || r === "co-admin" || r === "moderator" || r === "member") {
+    return r;
+  }
+  return "member";
+}
+
+function toNum(v: unknown): number | null {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 const SOS_REASONS = ["Medical emergency", "Vehicle issue", "Lost from group", "Road hazard", "Other"];
 
 /** Distinct pin colors so riders read like a racing grid. */
 const RIDER_PIN_COLORS = ["#22c55e", "#3b82f6", "#f97316", "#a855f7", "#ec4899", "#14b8a6", "#eab308", "#ef4444"];
 
 type DrivingRoutePayload = {
-  coordinates: LatLng[];
+  coordinates: { latitude: number; longitude: number }[];
   start: { lat: number; lng: number } | null;
   end: { lat: number; lng: number } | null;
   distanceMeters?: number | null;
@@ -159,10 +172,12 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const [elapsedSec, setElapsedSec] = useState(0);
   const [sheetExpanded, setSheetExpanded] = useState(false);
   const [endingTrip, setEndingTrip] = useState(false);
+  const [tripStarted, setTripStarted] = useState(false);
   const [posTick, setPosTick] = useState(0);
   const [currentSpeedKmh, setCurrentSpeedKmh] = useState(0);
   const [weather, setWeather] = useState<WeatherNow | null>(null);
   const [weatherLoading, setWeatherLoading] = useState(false);
+  const [mapDiag, setMapDiag] = useState<string | null>(null);
   const [showSosModal, setShowSosModal] = useState(false);
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinType, setPinType] = useState<"parking" | "fuel" | "attraction" | "hazard" | "road-damage">("parking");
@@ -172,9 +187,12 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const [attrDesc, setAttrDesc] = useState("");
 
   const socketRef = useRef<Socket | null>(null);
-  const mapRef = useRef<MapView | null>(null);
+  const [mapFitTick, setMapFitTick] = useState(0);
+  const [mapRecenterPoint, setMapRecenterPoint] = useState<{ lat: number; lng: number } | null>(null);
+  const [userGeo, setUserGeo] = useState<UserGeo | null>(null);
   const convoyFitDoneRef = useRef(false);
   const lastPosRef = useRef<{ lat: number; lng: number } | null>(null);
+  const lastLocTsRef = useRef<number | null>(null);
   const [myDistanceKm, setMyDistanceKm] = useState(0);
   const sheetHeightAnim = useRef(new Animated.Value(200)).current;
 
@@ -185,9 +203,12 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const localRole = localMember?.role ?? "member";
   const canModerateVoice =
     localRole === "organizer" ||
+    localRole === "admin" ||
     localRole === "co-admin" ||
     localRole === "moderator" ||
     user?.role === "organizer";
+  const isOrganizer =
+    user?.role === "organizer" || localRole === "organizer" || localRole === "admin";
   const localMuted = localMember?.muted ?? true;
   const localAllowedInControlled =
     voiceMode !== "controlled" ||
@@ -210,7 +231,12 @@ export function LiveTripScreen({ route, navigation }: Props) {
           return;
         }
         const raw = (await res.json()) as Record<string, unknown>;
-        if (!cancelled) setTrip(normalizeTripFromApi(raw));
+        if (!cancelled) {
+          const nextTrip = normalizeTripFromApi(raw);
+          setTrip(nextTrip);
+          const st = String(nextTrip.status ?? "").toLowerCase();
+          setTripStarted(st === "live" || st === "active" || st === "started" || st === "ongoing");
+        }
       } catch {
         if (!cancelled) setTrip(null);
       } finally {
@@ -231,12 +257,20 @@ export function LiveTripScreen({ route, navigation }: Props) {
         const res = await apiFetch(
           `/api/trips/${id}/live-access?user_id=${encodeURIComponent(user.id)}`,
         );
-        const body = (await res.json().catch(() => ({}))) as { allowed?: boolean; error?: string };
+        const body = (await res.json().catch(() => ({}))) as {
+          allowed?: boolean;
+          error?: string;
+          trip_started?: boolean;
+          can_start?: boolean;
+        };
         if (!res.ok || body.allowed !== true) {
           if (!cancelled) setAccessDenied(body.error || "You do not have permission to access this trip live room.");
           return;
         }
-        if (!cancelled) setAccessDenied("");
+        if (!cancelled) {
+          setAccessDenied("");
+          if (typeof body.trip_started === "boolean") setTripStarted(body.trip_started);
+        }
       } catch {
         if (!cancelled) setAccessDenied("Could not validate live access right now.");
       } finally {
@@ -247,6 +281,39 @@ export function LiveTripScreen({ route, navigation }: Props) {
       cancelled = true;
     };
   }, [id, user?.id]);
+
+  // Waiting-room live gate sync: non-organizers auto-unlock when organizer starts.
+  useEffect(() => {
+    if (!user?.id || accessDenied || phase !== "waiting" || isOrganizer) return;
+    let cancelled = false;
+
+    const refreshLiveAccess = async () => {
+      try {
+        const res = await apiFetch(
+          `/api/trips/${id}/live-access?user_id=${encodeURIComponent(user.id)}`,
+        );
+        const body = (await res.json().catch(() => ({}))) as {
+          allowed?: boolean;
+          trip_started?: boolean;
+        };
+        if (!cancelled && res.ok && body.allowed === true && typeof body.trip_started === "boolean") {
+          setTripStarted(body.trip_started);
+        }
+      } catch {
+        // keep UI stable; next poll will retry
+      }
+    };
+
+    void refreshLiveAccess();
+    const t = setInterval(() => {
+      void refreshLiveAccess();
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [id, user?.id, accessDenied, phase, isOrganizer]);
 
   useEffect(() => {
     if (!user?.id || accessDenied) return;
@@ -263,7 +330,12 @@ export function LiveTripScreen({ route, navigation }: Props) {
         };
         if (!res.ok) return;
         if (Array.isArray(body.members) && body.members.length > 0 && !cancelled) {
-          setMembers(body.members);
+          setMembers(
+            body.members.map((m) => ({
+              ...m,
+              role: normalizeRole(m.role),
+            })),
+          );
         }
         if (Array.isArray(body.checkpoints) && !cancelled) setCheckpoints(body.checkpoints);
         if (Array.isArray(body.mapPins) && !cancelled) setMapPins(body.mapPins);
@@ -308,18 +380,40 @@ export function LiveTripScreen({ route, navigation }: Props) {
           payload.speed != null && Number.isFinite(payload.speed)
             ? Number((payload.speed * 3.6).toFixed(1))
             : undefined;
-        setMembers((prev) =>
-          prev.map((m) =>
-            Number(m.id.replace("m", "")) === payload.userId
-              ? {
-                  ...m,
-                  lat: payload.lat,
-                  lng: payload.lng,
-                  ...(kmh != null ? { speed: kmh } : {}),
-                }
-              : m,
-          ),
-        );
+        setMembers((prev) => {
+          const idx = prev.findIndex((m) => Number(m.id.replace("m", "")) === payload.userId);
+          if (idx >= 0) {
+            const next = [...prev];
+            const cur = next[idx];
+            next[idx] = {
+              ...cur,
+              lat: payload.lat,
+              lng: payload.lng,
+              status: cur.status === "absent" ? "on-way" : cur.status,
+              ...(kmh != null ? { speed: kmh } : {}),
+            };
+            return next;
+          }
+          return [
+            ...prev,
+            {
+              id: `m${payload.userId}`,
+              userId: payload.userId,
+              name: `Member ${payload.userId}`,
+              avatar: `member-${payload.userId}`,
+              status: "on-way",
+              role: "member",
+              muted: true,
+              blocked: false,
+              speed: kmh ?? 0,
+              distanceCovered: 0,
+              checkpoints: 0,
+              xpGained: 0,
+              lat: payload.lat,
+              lng: payload.lng,
+            },
+          ];
+        });
       },
     );
 
@@ -329,6 +423,11 @@ export function LiveTripScreen({ route, navigation }: Props) {
         const k = String(payload?.kind || "");
         if (k === "regroup-ping") {
           Alert.alert("Regroup ping", "The convoy asked everyone to regroup at the meetup corridor.");
+        } else if (k === "trip-started") {
+          setTripStarted(true);
+          if (!isOrganizer && phase === "waiting") {
+            Alert.alert("Trip started", "Organizer started the trip. You can now join live.");
+          }
         } else if (k === "line-up-formation") {
           Alert.alert("Formation", "Line up — match speed and spacing with the group.");
         } else if (k.startsWith("sos")) {
@@ -343,7 +442,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [tripIdNum]);
+  }, [tripIdNum, isOrganizer, phase]);
 
   useEffect(() => {
     if (phase !== "live" || !user?.id) return;
@@ -361,6 +460,30 @@ export function LiveTripScreen({ route, navigation }: Props) {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") return;
 
+      // Bootstrap an immediate fix so map pins/camera appear without waiting for watch callback.
+      try {
+        const first = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+        const { latitude, longitude, accuracy, speed, heading } = first.coords;
+        const lat = latitude;
+        const lng = longitude;
+        let hDeg: number | null = heading ?? null;
+        if (hDeg != null && Number.isFinite(hDeg) && hDeg < 0) hDeg = hDeg + 360;
+        setUserGeo({
+          lat,
+          lng,
+          accuracyM: accuracy ?? undefined,
+          headingDeg: hDeg,
+          speedMps: speed ?? null,
+        });
+        setMapRecenterPoint({ lat, lng });
+        lastPosRef.current = { lat, lng };
+        lastLocTsRef.current = first.timestamp;
+      } catch {
+        // watcher below can still provide the first fix
+      }
+
       sub = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
@@ -371,15 +494,46 @@ export function LiveTripScreen({ route, navigation }: Props) {
           const { latitude, longitude, accuracy, speed, heading } = loc.coords;
           const lat = latitude;
           const lng = longitude;
-          if (speed != null && Number.isFinite(speed)) {
-            setCurrentSpeedKmh(Math.max(0, Math.round(speed * 3.6)));
+          let speedKmh = 0;
+          if (speed != null && Number.isFinite(speed) && speed >= 0) {
+            speedKmh = Math.max(0, speed * 3.6);
           }
           if (lastPosRef.current) {
             const d = haversineKm(lastPosRef.current, { lat, lng });
             if (d > 0.001 && d < 5) setMyDistanceKm((x) => x + d);
+            if (speedKmh < 0.5 && lastLocTsRef.current != null) {
+              const dtSec = Math.max(0.1, (loc.timestamp - lastLocTsRef.current) / 1000);
+              speedKmh = (d / dtSec) * 3600;
+            }
           }
+          setCurrentSpeedKmh(Math.max(0, Math.round(speedKmh)));
           lastPosRef.current = { lat, lng };
+          lastLocTsRef.current = loc.timestamp;
+          setMapRecenterPoint({ lat, lng });
+          let hDeg: number | null = heading ?? null;
+          if (hDeg != null && Number.isFinite(hDeg) && hDeg < 0) hDeg = hDeg + 360;
+          setUserGeo({
+            lat,
+            lng,
+            accuracyM: accuracy ?? undefined,
+            headingDeg: hDeg,
+            speedMps: speed ?? null,
+          });
           setPosTick((x) => x + 1);
+
+          setMembers((prev) =>
+            prev.map((m) =>
+              localMemberId && m.id === localMemberId
+                ? {
+                    ...m,
+                    lat,
+                    lng,
+                    speed: Math.max(0, Math.round(speedKmh)),
+                    status: m.status === "absent" ? "on-way" : m.status,
+                  }
+                : m,
+            ),
+          );
 
           socketRef.current?.emit("update-location", {
             tripId: tripIdNum,
@@ -398,7 +552,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
     return () => {
       sub?.remove();
     };
-  }, [phase, tripIdNum, user?.id]);
+  }, [phase, tripIdNum, user?.id, localMemberId]);
 
   const hWin = Dimensions.get("window").height;
   const peekH = 200;
@@ -497,16 +651,39 @@ export function LiveTripScreen({ route, navigation }: Props) {
     }
   };
 
-  const mapRegion = useMemo(() => {
-    const lat0 = trip?.meetupLat ?? members[0]?.lat ?? 19.07;
-    const lng0 = trip?.meetupLng ?? members[0]?.lng ?? 72.87;
-    return {
-      latitude: lat0,
-      longitude: lng0,
-      latitudeDelta: 0.08,
-      longitudeDelta: 0.08,
-    };
-  }, [trip?.meetupLat, trip?.meetupLng, members]);
+  const startTripLive = useCallback(async () => {
+    if (!user?.id) return;
+    if (!isOrganizer && !tripStarted) {
+      Alert.alert("Trip not started", "Wait for organizer to start the trip.");
+      return;
+    }
+    if (!isOrganizer && tripStarted) {
+      setPhase("live");
+      return;
+    }
+    try {
+      const res = await apiFetch(`/api/trips/${id}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "active",
+          user_id: Number(user.id),
+        }),
+      });
+      if (!res.ok) {
+        Alert.alert("Start trip", await readApiErrorMessage(res));
+        return;
+      }
+      setTripStarted(true);
+      socketRef.current?.emit("convoy-action", {
+        kind: "trip-started",
+        tripId: tripIdNum,
+        userId: Number(user.id),
+      });
+      setPhase("live");
+    } catch {
+      Alert.alert("Start trip", "Could not start trip right now.");
+    }
+  }, [id, isOrganizer, tripIdNum, tripStarted, user?.id]);
 
   const nextCheckpointInfo = useMemo(() => {
     if (!checkpoints.length) return null;
@@ -554,32 +731,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
   }, [navigation]);
 
   const fitConvoy = useCallback(() => {
-    if (!mapRef.current) return;
-    const pts: LatLng[] = [];
-    const dr = drivingRoute;
-    if (dr?.coordinates?.length) {
-      dr.coordinates.forEach((c) =>
-        pts.push({ latitude: c.latitude, longitude: c.longitude }),
-      );
-    }
-    if (dr?.start) pts.push({ latitude: dr.start.lat, longitude: dr.start.lng });
-    if (dr?.end) pts.push({ latitude: dr.end.lat, longitude: dr.end.lng });
-    members
-      .filter((m) => m.status !== "absent" && m.lat !== 0 && m.lng !== 0)
-      .forEach((m) => pts.push({ latitude: m.lat, longitude: m.lng }));
-    if (
-      pts.length === 0 &&
-      trip?.meetupLat != null &&
-      trip?.meetupLng != null
-    ) {
-      pts.push({ latitude: trip.meetupLat, longitude: trip.meetupLng });
-    }
-    if (pts.length < 1) return;
-    mapRef.current.fitToCoordinates(pts, {
-      edgePadding: { top: 120, right: 52, bottom: 260, left: 52 },
-      animated: true,
-    });
-  }, [drivingRoute, members, trip?.meetupLat, trip?.meetupLng]);
+    setMapFitTick((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     convoyFitDoneRef.current = false;
@@ -730,6 +883,75 @@ export function LiveTripScreen({ route, navigation }: Props) {
     }
   }, [attrDesc, attrName, user?.id]);
 
+  // Keep map camera target synced while in live mode.
+  useEffect(() => {
+    if (phase !== "live") return;
+    const fallbackStart =
+      drivingRoute?.start ??
+      (trip?.meetupLat != null && trip?.meetupLng != null
+        ? { lat: trip.meetupLat, lng: trip.meetupLng }
+        : null);
+    const effective =
+      userGeo ??
+      (lastPosRef.current
+        ? {
+            lat: lastPosRef.current.lat,
+            lng: lastPosRef.current.lng,
+          }
+        : null);
+    if (effective) {
+      setMapRecenterPoint({ lat: effective.lat, lng: effective.lng });
+    } else if (fallbackStart) {
+      setMapRecenterPoint({ lat: fallbackStart.lat, lng: fallbackStart.lng });
+    }
+  }, [
+    phase,
+    userGeo?.lat,
+    userGeo?.lng,
+    drivingRoute?.start?.lat,
+    drivingRoute?.start?.lng,
+    trip?.meetupLat,
+    trip?.meetupLng,
+  ]);
+
+  // Auto-fit whenever meaningful map data appears/changes in live mode.
+  useEffect(() => {
+    if (phase !== "live") return;
+    const routeCount = drivingRoute?.coordinates?.length ?? 0;
+    const hasStart =
+      (drivingRoute?.start != null &&
+        Number.isFinite(Number(drivingRoute.start.lat)) &&
+        Number.isFinite(Number(drivingRoute.start.lng))) ||
+      (trip?.meetupLat != null && trip?.meetupLng != null);
+    const hasEnd =
+      (drivingRoute?.end != null &&
+        Number.isFinite(Number(drivingRoute.end.lat)) &&
+        Number.isFinite(Number(drivingRoute.end.lng))) ||
+      (trip?.endLat != null && trip?.endLng != null);
+    const memberCount = members.filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng) && m.lat !== 0 && m.lng !== 0).length;
+    const pinCount = mapPins.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)).length;
+    const hasUser = !!userGeo || !!lastPosRef.current;
+    const hasData = routeCount > 0 || hasStart || hasEnd || memberCount > 0 || pinCount > 0 || hasUser;
+    if (!hasData) return;
+    setMapFitTick((n) => n + 1);
+  }, [
+    phase,
+    drivingRoute?.coordinates?.length,
+    drivingRoute?.start?.lat,
+    drivingRoute?.start?.lng,
+    drivingRoute?.end?.lat,
+    drivingRoute?.end?.lng,
+    trip?.meetupLat,
+    trip?.meetupLng,
+    trip?.endLat,
+    trip?.endLng,
+    members,
+    mapPins,
+    userGeo?.lat,
+    userGeo?.lng,
+    posTick,
+  ]);
+
   if (accessChecking) {
     return (
       <View style={[styles.centered, { paddingTop: insets.top }]}>
@@ -797,7 +1019,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
             <View style={styles.pausedBanner}>
               <Ionicons name="pause-circle" size={18} color="#fbbf24" />
               <Text style={styles.pausedBannerText}>
-                Trip paused — you are back in the waiting room. Resume to return to the live map.
+                Trip paused - you are back in the waiting room. Resume to return to live tracking.
               </Text>
             </View>
           ) : null}
@@ -1014,7 +1236,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
               .map((member) => {
                 const rs = roleBadgeStyle(member.role);
                 const roleLabel =
-                  member.role === "organizer"
+                  member.role === "organizer" || member.role === "admin"
                     ? "Admin"
                     : member.role === "co-admin"
                       ? "Co-Admin"
@@ -1078,7 +1300,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
                                 </Pressable>
                                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>
                                   <View style={styles.row}>
-                                    {(["member", "moderator", "co-admin"] as MemberRole[]).map((r) => (
+                                    {(["member", "moderator", "co-admin"] as const).map((r) => (
                                       <Pressable
                                         key={r}
                                         onPress={() => assignRole(member.id, r)}
@@ -1126,13 +1348,23 @@ export function LiveTripScreen({ route, navigation }: Props) {
               <Text style={styles.beginBtnText}>Resume trip</Text>
             </Pressable>
           ) : (
-            <Pressable style={styles.beginBtn} onPress={() => setPhase("live")}>
-              <Ionicons name="navigate" size={18} color="#000" />
-              <Text style={styles.beginBtnText}>Begin Journey</Text>
+            <Pressable
+              style={[styles.beginBtn, !isOrganizer && !tripStarted && { opacity: 0.45 }]}
+              onPress={() => void startTripLive()}
+              disabled={!isOrganizer && !tripStarted}
+            >
+              <Ionicons name={isOrganizer ? "navigate" : "play"} size={18} color="#000" />
+              <Text style={styles.beginBtnText}>
+                {isOrganizer ? "Start trip & go live" : tripStarted ? "Join Live Journey" : "Waiting for organizer"}
+              </Text>
             </Pressable>
           )}
           <Text style={styles.beginHint}>
-            {arrivedCount}/{totalCount} members ready
+            {isOrganizer
+              ? `${arrivedCount}/${totalCount} members ready`
+              : tripStarted
+                ? "Organizer started this trip, you can now go live."
+                : "Organizer must start trip before anyone can go live."}
           </Text>
         </View>
 
@@ -1158,93 +1390,92 @@ export function LiveTripScreen({ route, navigation }: Props) {
 
   /* ─── LIVE PHASE ─── */
   const h = Dimensions.get("window").height;
-  const mapCustomStyle =
-    Platform.OS === "android"
-      ? ((mode === "dark" ? googleMapStyleDark : googleMapStyleLight) as never)
-      : undefined;
+  const liveRoutePointsRaw =
+    drivingRoute?.coordinates
+      ?.map((c) => {
+        const lat = toNum(c.latitude);
+        const lng = toNum(c.longitude);
+        if (lat == null || lng == null) return null;
+        return { lat, lng };
+      })
+      .filter((x): x is { lat: number; lng: number } => x != null) ?? [];
+  const startPoint =
+    (drivingRoute?.start && toNum(drivingRoute.start.lat) != null && toNum(drivingRoute.start.lng) != null
+      ? { lat: Number(drivingRoute.start.lat), lng: Number(drivingRoute.start.lng) }
+      : null) ??
+    (toNum(trip?.meetupLat) != null && toNum(trip?.meetupLng) != null
+      ? { lat: Number(trip?.meetupLat), lng: Number(trip?.meetupLng) }
+      : null);
+  const endPoint =
+    (drivingRoute?.end && toNum(drivingRoute.end.lat) != null && toNum(drivingRoute.end.lng) != null
+      ? { lat: Number(drivingRoute.end.lat), lng: Number(drivingRoute.end.lng) }
+      : null) ??
+    (toNum(trip?.endLat) != null && toNum(trip?.endLng) != null
+      ? { lat: Number(trip?.endLat), lng: Number(trip?.endLng) }
+      : null);
+  const liveRoutePoints =
+    liveRoutePointsRaw.length >= 2
+      ? liveRoutePointsRaw
+      : startPoint && endPoint
+        ? [startPoint, endPoint]
+        : [];
+  const mapMembers = members
+    .filter(
+      (m) =>
+        m.lat !== 0 &&
+        m.lng !== 0 &&
+        Number.isFinite(m.lat) &&
+        Number.isFinite(m.lng) &&
+        (localMemberId ? m.id !== localMemberId : true),
+    )
+    .map((m, i) => ({
+      id: m.id,
+      name: m.name,
+      lat: m.lat,
+      lng: m.lng,
+      speed: m.speed,
+      color: RIDER_PIN_COLORS[i % RIDER_PIN_COLORS.length],
+    }));
+  const mapOverlayPins = mapPins.map((p) => ({ id: p.id, label: p.label, lat: p.lat, lng: p.lng }));
+  const effectiveUserGeo =
+    userGeo ??
+    (lastPosRef.current
+      ? {
+          lat: lastPosRef.current.lat,
+          lng: lastPosRef.current.lng,
+          accuracyM: undefined,
+          headingDeg: null,
+          speedMps: null,
+        }
+      : null);
 
   return (
     <View style={styles.liveRoot}>
-      <MapView
-        ref={mapRef}
-        style={StyleSheet.absoluteFill}
-        provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
-        customMapStyle={mapCustomStyle}
-        initialRegion={mapRegion}
-        showsUserLocation
-        showsMyLocationButton={false}
-        showsCompass
-        mapPadding={{ top: 0, right: 0, bottom: sheetExpanded ? Math.min(expandH, 400) : peekH, left: 0 }}
-      >
-        {drivingRoute != null && drivingRoute.coordinates.length >= 2 ? (
-          <Polyline
-            coordinates={drivingRoute.coordinates}
-            strokeColor="#38bdf8"
-            strokeWidth={5}
-            lineCap="round"
-            lineJoin="round"
-          />
-        ) : null}
-        {drivingRoute?.start != null ? (
-          <Marker
-            coordinate={{
-              latitude: drivingRoute.start.lat,
-              longitude: drivingRoute.start.lng,
-            }}
-            title="Start"
-            description="Meetup / route start"
-            pinColor="#22c55e"
-          />
-        ) : trip?.meetupLat != null && trip?.meetupLng != null ? (
-          <Marker
-            coordinate={{ latitude: trip.meetupLat, longitude: trip.meetupLng }}
-            title="Start"
-            pinColor="#22c55e"
-          />
-        ) : null}
-        {drivingRoute?.end != null ? (
-          <Marker
-            coordinate={{
-              latitude: drivingRoute.end.lat,
-              longitude: drivingRoute.end.lng,
-            }}
-            title="Destination"
-            description="Trip end"
-            pinColor="#ef4444"
-          />
-        ) : trip?.endLat != null && trip?.endLng != null ? (
-          <Marker
-            coordinate={{ latitude: trip.endLat, longitude: trip.endLng }}
-            title="Destination"
-            pinColor="#ef4444"
-          />
-        ) : null}
-        {members
-          .filter((m) => m.status !== "absent" && m.lat !== 0 && m.lng !== 0)
-          .map((m, i) => (
-            <Marker
-              key={m.id}
-              coordinate={{ latitude: m.lat, longitude: m.lng }}
-              title={m.name}
-              description={`${Math.round(m.speed)} km/h · in convoy`}
-              pinColor={RIDER_PIN_COLORS[i % RIDER_PIN_COLORS.length]}
-            />
-          ))}
-        {mapPins.map((p) => (
-          <Marker
-            key={`pin-${p.id}`}
-            coordinate={{ latitude: p.lat, longitude: p.lng }}
-            title={p.label}
-            pinColor="#a78bfa"
-          />
-        ))}
-      </MapView>
+      <LiveMapView
+        dark={mode === "dark"}
+        route={liveRoutePoints}
+        start={startPoint}
+        end={endPoint}
+        members={mapMembers}
+        pins={mapOverlayPins}
+        fitTick={mapFitTick}
+        recenterPoint={mapRecenterPoint}
+        userGeo={effectiveUserGeo}
+        onMapError={(msg) => setMapDiag(msg)}
+      />
 
-      <View style={[styles.speedoWrap, { top: insets.top + 52 }]}>
-        <View style={styles.speedoArc}>
-          <Text style={styles.speedoNum}>{currentSpeedKmh}</Text>
-          <Text style={styles.speedoUnit}>km/h</Text>
+      {mapDiag ? (
+        <View style={[styles.mapDiagBadge, { top: insets.top + 52 }]}>
+          <Text style={styles.mapDiagText} numberOfLines={2}>
+            {mapDiag}
+          </Text>
         </View>
+      ) : null}
+      <View style={[styles.mapDataBadge, { top: insets.top + 88 }]}>
+        <Text style={styles.mapDataText}>
+          r:{liveRoutePoints.length} m:{mapMembers.length} p:{mapOverlayPins.length} u:
+          {effectiveUserGeo ? "1" : "0"} s:{startPoint ? "1" : "0"} e:{endPoint ? "1" : "0"}
+        </Text>
       </View>
 
       <View style={[styles.liveTopBar, { top: insets.top + 8 }]}>
@@ -1284,12 +1515,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
             if (status !== "granted") return;
             const loc = await Location.getCurrentPositionAsync({});
             const { latitude, longitude } = loc.coords;
-            mapRef.current?.animateToRegion({
-              latitude,
-              longitude,
-              latitudeDelta: 0.05,
-              longitudeDelta: 0.05,
-            });
+            setMapRecenterPoint({ lat: latitude, lng: longitude });
           }}
         >
           <Ionicons name="locate" size={20} color="#fff" />
@@ -1892,23 +2118,31 @@ const styles = StyleSheet.create({
   modalTitle: { color: "#fff", fontSize: 18, fontWeight: "800", marginBottom: 8 },
   modalActions: { flexDirection: "row", gap: 10, marginTop: 16 },
   liveRoot: { flex: 1, backgroundColor: "#000" },
-  speedoWrap: {
+  mapDiagBadge: {
     position: "absolute",
-    alignSelf: "center",
-    zIndex: 15,
+    left: 12,
+    right: 12,
+    zIndex: 60,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(248,113,113,0.45)",
+    backgroundColor: "rgba(127,29,29,0.78)",
   },
-  speedoArc: {
-    minWidth: 120,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.55)",
+  mapDiagText: { color: "#fecaca", fontSize: 11, fontWeight: "700" },
+  mapDataBadge: {
+    position: "absolute",
+    left: 12,
+    zIndex: 60,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.2)",
-    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.6)",
   },
-  speedoNum: { color: "#fff", fontSize: 28, fontWeight: "900" },
-  speedoUnit: { color: "rgba(255,255,255,0.45)", fontSize: 11, fontWeight: "700" },
+  mapDataText: { color: "rgba(255,255,255,0.88)", fontSize: 10, fontWeight: "700" },
   mapLeftCol: {
     position: "absolute",
     left: 12,

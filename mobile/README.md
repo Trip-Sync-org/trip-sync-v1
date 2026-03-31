@@ -28,7 +28,7 @@ npm install
 cp .env.example .env
 ```
 
-**`mobile/.env` mirrors the repo root `.env`:** same values, but Expo needs the `EXPO_PUBLIC_` prefix (see the mapping table at the top of `mobile/.env.example`). Copy `VITE_SUPABASE_*` from the root file into the matching `EXPO_PUBLIC_*` lines. Server-only keys (`SUPABASE_SERVICE_ROLE_KEY`, `MAPBOX_SECRET_TOKEN`, etc.) stay in the root `.env` only — never put them in `mobile/.env`.
+**`mobile/.env` mirrors the repo root `.env`:** same values, but Expo needs the `EXPO_PUBLIC_` prefix (see the mapping table at the top of `mobile/.env.example`). Copy `VITE_SUPABASE_*` from the root file into the matching `EXPO_PUBLIC_*` lines. Server-only keys (`SUPABASE_SERVICE_ROLE_KEY`, etc.) stay in the root `.env` only — never put them in `mobile/.env`.
 
 Set `EXPO_PUBLIC_API_URL` for your environment (see below). **Restart Expo** after changing `.env`.
 

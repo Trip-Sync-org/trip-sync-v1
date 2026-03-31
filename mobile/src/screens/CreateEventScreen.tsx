@@ -21,10 +21,11 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { WebView } from "react-native-webview";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { apiFetch, readApiErrorMessage } from "../api/client";
-import { MAPBOX_PUBLIC_TOKEN } from "../config";
+import { MAPPLS_MAP_TOKEN } from "../config";
 import { useAuth } from "../context/AuthContext";
 import { colors, typography } from "../theme";
 import { Badge, Card } from "../components/ui";
@@ -60,22 +61,21 @@ type InviteRow = { type: "email" | "phone"; value: string };
 
 const CREATE_EVENT_DRAFT_KEY = "tripsync_create_event_draft_v1";
 
-function buildMapPreviewUrl(
-  start: { lat: number; lng: number } | null,
-  end: { lat: number; lng: number } | null,
-  mapboxToken: string,
-): string | null {
-  if (!start) return null;
-  if (mapboxToken.length > 0) {
-    const pins = end
-      ? `pin-s+22c55e(${start.lng},${start.lat}),pin-s+ef4444(${end.lng},${end.lat})`
-      : `pin-s+22c55e(${start.lng},${start.lat})`;
-    return `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${pins}/auto/400x220@2x?access_token=${encodeURIComponent(mapboxToken)}`;
-  }
-  const lat = end ? (start.lat + end.lat) / 2 : start.lat;
-  const lng = end ? (start.lng + end.lng) / 2 : start.lng;
-  const zoom = end ? 10 : 12;
-  return `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=${zoom}&size=400x220&maptype=mapnik`;
+function MapplsCreatePreview({
+  start,
+  end,
+}: {
+  start: { lat: number; lng: number } | null;
+  end: { lat: number; lng: number } | null;
+}) {
+  const html = useMemo(() => {
+    if (!MAPPLS_MAP_TOKEN) {
+      return "<html><body style='margin:0;background:#0a0a0a;color:#fff;font-family:sans-serif;padding:12px'>Missing EXPO_PUBLIC_MAPPLS_MAP_TOKEN</body></html>";
+    }
+    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><link rel="stylesheet" href="https://apis.mappls.com/advancedmaps/api/${MAPPLS_MAP_TOKEN}/map_sdk_plugins"/><style>html,body,#map{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0a0a0a}.dot{width:12px;height:12px;border-radius:999px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)}.err{padding:12px;color:#fecaca;background:#7f1d1d;font:12px sans-serif}</style></head><body><div id="map"></div><script src="https://apis.mappls.com/advancedmaps/v1/${MAPPLS_MAP_TOKEN}/map_load?v=3.0&autopan=true" onerror="window.__mapplsScriptError=true"></script><script>const S=${JSON.stringify(start)},E=${JSON.stringify(end)};let map=null;function mk(c){const d=document.createElement('div');d.className='dot';d.style.background=c;return d;}function showErr(m){const el=document.getElementById('map');if(el)el.innerHTML='<div class=\"err\">'+String(m).replace(/</g,'&lt;')+'</div>';}function fit(){if(!map)return;const pts=[];if(S)pts.push([S.lng,S.lat]);if(E)pts.push([E.lng,E.lat]);if(!pts.length)return;const lats=pts.map(p=>p[1]),lngs=pts.map(p=>p[0]);map.fitBounds([[Math.min(...lngs),Math.min(...lats)],[Math.max(...lngs),Math.max(...lats)]],{padding:60});}function init(){if(window.__mapplsScriptError){showErr('Mappls SDK script failed to load');return;}if(!window.mappls){setTimeout(init,220);return;}map=new window.mappls.Map('map',{center:S?[S.lng,S.lat]:[78.9629,20.5937],zoom:S?11:4,zoomControl:false,traffic:false,location:false,search:false});const draw=()=>{if(S)new window.mappls.Marker({map,fitbounds:false,position:{lat:S.lat,lng:S.lng},html:mk('#22c55e')});if(E)new window.mappls.Marker({map,fitbounds:false,position:{lat:E.lat,lng:E.lng},html:mk('#ef4444')});fit();};if(typeof map.on==='function')map.on('load',draw);else setTimeout(draw,900);}init();setTimeout(()=>{if(!map)showErr(window.__mapplsScriptError?'Mappls script blocked':'Mappls SDK unavailable (token/policy issue)');},7000);</script></body></html>`;
+  }, [end, start]);
+
+  return <WebView originWhitelist={["*"]} source={{ html }} style={styles.mapImage} javaScriptEnabled domStorageEnabled mixedContentMode="always" />;
 }
 
 function parseGeocodeFeatures(data: unknown): PlaceSuggestion[] {
@@ -716,11 +716,6 @@ export function CreateEventScreen({ navigation }: Props) {
     }
   };
 
-  const mapPreviewUri = useMemo(
-    () => buildMapPreviewUrl(startCoords, endCoords, MAPBOX_PUBLIC_TOKEN),
-    [startCoords, endCoords],
-  );
-
   const filteredTz = useMemo(() => {
     const q = tzSearch.trim().toLowerCase();
     if (!q) return TIMEZONES_DATA;
@@ -996,14 +991,7 @@ export function CreateEventScreen({ navigation }: Props) {
 
           <View style={styles.mapPlaceholder}>
             <Text style={styles.mapPhTitle}>Map preview</Text>
-            {mapPreviewUri ? (
-              <Image source={{ uri: mapPreviewUri }} style={styles.mapImage} resizeMode="cover" />
-            ) : (
-              <Text style={styles.mutedXs}>
-                Set a meetup location to see the map. Add EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN for richer
-                Mapbox tiles, or we fall back to OpenStreetMap.
-              </Text>
-            )}
+            <MapplsCreatePreview start={startCoords} end={endCoords} />
             {startCoords ? (
               <Text style={styles.coordLine}>
                 📍 {meetupPoint || "Start"} ({startCoords.lat.toFixed(5)}, {startCoords.lng.toFixed(5)})

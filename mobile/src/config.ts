@@ -11,6 +11,14 @@ export const API_BASE_URL = (
   process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000"
 ).replace(/\/$/, "");
 
-/** Optional: Mapbox public token for static map previews on Create Event (same as web `VITE_MAPBOX_PUBLIC_TOKEN`). */
-export const MAPBOX_PUBLIC_TOKEN =
-  process.env.EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN?.trim() || "";
+/** Mappls Web SDK token (used inside mobile live map WebView) */
+export const MAPPLS_MAP_TOKEN =
+  process.env.EXPO_PUBLIC_MAPPLS_MAP_TOKEN?.trim() ||
+  process.env.VITE_MAPPLS_MAP_TOKEN?.trim() ||
+  "ekxxaggusljbiffcwzwvrezpnjrlqymitetk";
+
+/** Mappls Cloud key (optional for REST calls) */
+export const MAPPLS_API_KEY =
+  process.env.EXPO_PUBLIC_MAPPLS_API_KEY?.trim() ||
+  process.env.VITE_MAPPLS_API_KEY?.trim() ||
+  "";

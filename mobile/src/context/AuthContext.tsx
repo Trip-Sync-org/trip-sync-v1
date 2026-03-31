@@ -123,7 +123,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const msg = [body.error, body.hint].filter(Boolean).join(" — ") || "Sign up failed";
+        const isRateLimited =
+          body?.code === "over_email_send_rate_limit" || Number(res.status) === 429;
+        const waitSecs =
+          typeof body?.retry_after_seconds === "number" && Number.isFinite(body.retry_after_seconds)
+            ? Math.max(1, Math.floor(body.retry_after_seconds))
+            : 60;
+        const msg = isRateLimited
+          ? `Too many sign-up attempts. Please wait ${waitSecs}s and try again.`
+          : [body.error, body.hint].filter(Boolean).join(" — ") || "Sign up failed";
         throw new Error(msg);
       }
       const u: User = {

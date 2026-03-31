@@ -25,13 +25,27 @@ export function SignupScreen({ navigation }: Props) {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"user" | "organizer">("user");
   const [busy, setBusy] = useState(false);
+  const [cooldownSec, setCooldownSec] = useState(0);
+
+  React.useEffect(() => {
+    if (cooldownSec <= 0) return;
+    const t = setInterval(() => setCooldownSec((s) => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [cooldownSec]);
 
   const onSubmit = async () => {
+    if (cooldownSec > 0) {
+      Alert.alert("Please wait", `Try again in ${cooldownSec}s.`);
+      return;
+    }
     setBusy(true);
     try {
       await signup(email.trim(), password, name.trim() || email.split("@")[0] || "User", role);
     } catch (e: unknown) {
-      Alert.alert("Sign up failed", e instanceof Error ? e.message : "Try again");
+      const msg = e instanceof Error ? e.message : "Try again";
+      const m = msg.match(/wait\s+(\d+)s/i);
+      if (m?.[1]) setCooldownSec(Number(m[1]));
+      Alert.alert("Sign up failed", msg);
     } finally {
       setBusy(false);
     }
@@ -87,8 +101,14 @@ export function SignupScreen({ navigation }: Props) {
             </Pressable>
           ))}
         </View>
-        <Pressable style={[styles.btn, busy && { opacity: 0.6 }]} onPress={onSubmit} disabled={busy}>
-          <Text style={styles.btnText}>{busy ? "…" : "Create account"}</Text>
+        <Pressable
+          style={[styles.btn, (busy || cooldownSec > 0) && { opacity: 0.6 }]}
+          onPress={onSubmit}
+          disabled={busy || cooldownSec > 0}
+        >
+          <Text style={styles.btnText}>
+            {busy ? "…" : cooldownSec > 0 ? `Wait ${cooldownSec}s` : "Create account"}
+          </Text>
         </Pressable>
         <Pressable onPress={() => navigation.navigate("Login")}>
           <Text style={styles.link}>Already have an account? Sign in</Text>
