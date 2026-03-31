@@ -54,6 +54,24 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
 
   app.use(express.json());
 
+  const explicitWebOrigin = String(process.env.WEB_ORIGIN || "").trim();
+  const isVercelOrigin = (origin: string) =>
+    /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin);
+  app.use((req, res, next) => {
+    const origin = String(req.headers.origin || "").trim();
+    if (origin && (origin === explicitWebOrigin || isVercelOrigin(origin))) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+    }
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (req.method === "OPTIONS") {
+      return res.status(204).end();
+    }
+    return next();
+  });
+
   // Logging middleware
   app.use((req, res, next) => {
     console.log(`${req.method} ${req.url}`);
