@@ -3,8 +3,22 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
     "dev": "tsx server.ts",
     "start": "tsx server.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.101.0",
+    "@vercel/node": "^5.6.22",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3",
+    "vite": "^8.0.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
   }
 }
-
