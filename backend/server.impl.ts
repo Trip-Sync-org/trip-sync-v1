@@ -2260,7 +2260,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     // Without this, @vite/client tries ws://localhost and the app fails to load on mobile.
     const vite = await createViteServer({
       root: repoRoot,
-      configFile: path.join(repoRoot, "frontend", "vite.config.ts"),
+      configFile: path.join(repoRoot, "frontend", "vite.config.js"),
       server: {
         middlewareMode: true,
         allowedHosts: true,

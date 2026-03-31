@@ -56,7 +56,7 @@ For stricter uptime, also configure an external uptime monitor/cron to hit `/api
 
 - Frontend project (Vercel):
   - Root Directory: `frontend`
-  - Uses `frontend/package.json`, `frontend/vite.config.ts`, `frontend/index.html`, `frontend/vercel.json`
+  - Uses `frontend/package.json`, `frontend/vite.config.js`, `frontend/index.html`, `frontend/vercel.json`
   - Build Command: `npm run build`
   - Output Directory: `dist`
 - Backend project (separate):
