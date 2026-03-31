@@ -41,7 +41,7 @@ type StartServerOptions = {
 
 async function startServer(options: StartServerOptions = {}): Promise<express.Express> {
   const shouldListen = options.listen ?? !isVercelRuntime;
-  const supabase = createSupabaseServerClient();
+  let supabase: ReturnType<typeof createSupabaseServerClient>;
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     cors: {
@@ -57,8 +57,33 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     next();
   });
 
+  try {
+    supabase = createSupabaseServerClient();
+  } catch (supabaseInitError) {
+    console.error("[startup] Supabase init failed:", supabaseInitError);
+    app.get("/api/health", (_req, res) => {
+      res.json({
+        ok: true,
+        service: "trip-sync",
+        api: "express",
+        supabase_ready: false,
+        supabase_error:
+          supabaseInitError instanceof Error
+            ? supabaseInitError.message
+            : String(supabaseInitError ?? "Unknown Supabase init error"),
+      });
+    });
+    app.use("/api", (_req, res) => {
+      return res.status(503).json({
+        error: "Backend configuration error: Supabase is not initialized",
+        hint: "Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Vercel backend project env vars, then redeploy.",
+      });
+    });
+    return app;
+  }
+
   app.get("/api/health", (_req, res) => {
-    res.json({ ok: true, service: "trip-sync", api: "express" });
+    res.json({ ok: true, service: "trip-sync", api: "express", supabase_ready: true });
   });
 
   function toFiniteNumber(value: unknown): number | null {
