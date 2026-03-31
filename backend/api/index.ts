@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    const { getServerApp } = await import("../server.impl");
+    const { getServerApp } = await import("../server.impl.js");
     const app = await getServerApp();
     return app(req, res);
   } catch (error) {

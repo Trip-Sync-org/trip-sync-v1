@@ -5,7 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import { networkInterfaces } from "os";
-import { createSupabaseServerClient } from "./src/lib/supabaseServerClient";
+import { createSupabaseServerClient } from "./src/lib/supabaseServerClient.js";
 
 /** Non-loopback IPv4 addresses — use these on your phone (same Wi‑Fi), not `localhost`. */
 function lanIPv4Urls(port: number): string[] {

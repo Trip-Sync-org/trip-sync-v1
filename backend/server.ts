@@ -2,7 +2,7 @@
  * Backend entrypoint.
  * Uses backend-local implementation so this folder can deploy independently.
  */
-import { startLocalServer } from "./server.impl";
+import { startLocalServer } from "./server.impl.js";
 
 startLocalServer().catch((error) => {
   console.error("Server bootstrap failed:", error);
