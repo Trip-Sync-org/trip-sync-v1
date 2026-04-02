@@ -28,9 +28,12 @@ export async function readApiErrorMessage(res: Response): Promise<string> {
 
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   const url = apiUrl(path);
+  const controller = !init?.signal ? new AbortController() : null;
+  const timeout = setTimeout(() => controller?.abort(), 12000);
   try {
     return await fetch(url, {
       ...init,
+      signal: init?.signal ?? controller?.signal,
       headers: {
         "Content-Type": "application/json",
         ...(init?.headers ?? {}),
@@ -38,6 +41,9 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("aborted") || msg.includes("AbortError")) {
+      throw new Error(`API request timed out. Trying: ${API_BASE_URL}`);
+    }
     const isNetwork =
       msg === "Network request failed" ||
       msg.includes("Failed to fetch") ||
@@ -52,5 +58,7 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
       );
     }
     throw e;
+  } finally {
+    clearTimeout(timeout);
   }
 }

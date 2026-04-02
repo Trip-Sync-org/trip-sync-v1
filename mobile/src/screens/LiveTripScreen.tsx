@@ -4,9 +4,9 @@ import {
   Alert,
   Animated,
   Dimensions,
-  Easing,
   Image,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -27,7 +27,7 @@ import { normalizeTripFromApi, type Trip } from "../lib/tripNormalize";
 import { fetchWeatherNow, type WeatherNow } from "../lib/weather";
 import { useAppTheme } from "../context/ThemeContext";
 import { colors } from "../theme";
-import { LiveMapView, type UserGeo } from "../components/LiveMapView";
+import { LiveMapView, type LiveMapViewRef, type UserGeo } from "../components/LiveMapView";
 
 type Props = NativeStackScreenProps<RootStackParamList, "LiveTrip">;
 
@@ -131,7 +131,23 @@ function toNum(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-const SOS_REASONS = ["Medical emergency", "Vehicle issue", "Lost from group", "Road hazard", "Other"];
+const SOS_OPTIONS: Array<{ id: string; label: string; icon: string; reason: string }> = [
+  { id: "breakdown", label: "Breakdown", icon: "🚓", reason: "Vehicle issue" },
+  { id: "medical", label: "Medical", icon: "⚕️", reason: "Medical emergency" },
+  { id: "low-fuel", label: "Low fuel", icon: "⛽", reason: "Low fuel" },
+  { id: "other", label: "Other", icon: "❓", reason: "Other" },
+];
+
+type LiveAlert = {
+  id: string;
+  kind: string;
+  title: string;
+  message: string;
+  actorName: string;
+  actorUserId: number | null;
+  atIso: string;
+  dismissible: boolean;
+};
 
 /** Distinct pin colors so riders read like a racing grid. */
 const RIDER_PIN_COLORS = ["#22c55e", "#3b82f6", "#f97316", "#a855f7", "#ec4899", "#14b8a6", "#eab308", "#ef4444"];
@@ -179,22 +195,32 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [mapDiag, setMapDiag] = useState<string | null>(null);
   const [showSosModal, setShowSosModal] = useState(false);
+  const [sosOtherReason, setSosOtherReason] = useState("");
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinType, setPinType] = useState<"parking" | "fuel" | "attraction" | "hazard" | "road-damage">("parking");
   const [pinLabel, setPinLabel] = useState("");
   const [showAttractionModal, setShowAttractionModal] = useState(false);
   const [attrName, setAttrName] = useState("");
   const [attrDesc, setAttrDesc] = useState("");
+  const [sheetDragging, setSheetDragging] = useState(false);
+  const [alertHistory, setAlertHistory] = useState<LiveAlert[]>([]);
+  const [activeAlert, setActiveAlert] = useState<LiveAlert | null>(null);
+  const [sentAlertPopup, setSentAlertPopup] = useState<LiveAlert | null>(null);
+  const [showAlertHistoryModal, setShowAlertHistoryModal] = useState(false);
+  const [unreadAlertCount, setUnreadAlertCount] = useState(0);
 
   const socketRef = useRef<Socket | null>(null);
+  const liveMapRef = useRef<LiveMapViewRef | null>(null);
   const [mapFitTick, setMapFitTick] = useState(0);
   const [mapRecenterPoint, setMapRecenterPoint] = useState<{ lat: number; lng: number } | null>(null);
   const [userGeo, setUserGeo] = useState<UserGeo | null>(null);
   const convoyFitDoneRef = useRef(false);
+  const initialAutoCenterDoneRef = useRef(false);
   const lastPosRef = useRef<{ lat: number; lng: number } | null>(null);
   const lastLocTsRef = useRef<number | null>(null);
   const [myDistanceKm, setMyDistanceKm] = useState(0);
   const sheetHeightAnim = useRef(new Animated.Value(200)).current;
+  const sheetScrollYRef = useRef(0);
 
   const tripIdNum = Number(id);
   const localMemberId = Number.isFinite(Number(user?.id)) ? `m${Number(user!.id)}` : null;
@@ -207,6 +233,11 @@ export function LiveTripScreen({ route, navigation }: Props) {
     localRole === "co-admin" ||
     localRole === "moderator" ||
     user?.role === "organizer";
+  const canSendLineupFormation =
+    localRole === "organizer" ||
+    localRole === "co-admin" ||
+    localRole === "moderator" ||
+    user?.role === "organizer";
   const isOrganizer =
     user?.role === "organizer" || localRole === "organizer" || localRole === "admin";
   const localMuted = localMember?.muted ?? true;
@@ -215,6 +246,98 @@ export function LiveTripScreen({ route, navigation }: Props) {
     canModerateVoice ||
     (localMemberId != null && approvedSpeakers.includes(localMemberId));
 
+  const nameByUserId = useCallback(
+    (uid: number | null | undefined) => {
+      if (uid == null) return "A member";
+      const m = members.find((x) => x.userId === uid || Number(String(x.id).replace("m", "")) === uid);
+      if (m?.name) return m.name;
+      if (user?.id != null && Number(user.id) === uid) return user.name || "You";
+      return `User ${uid}`;
+    },
+    [members, user?.id, user?.name],
+  );
+
+  const pushIncomingAlert = useCallback(
+    (payload: { kind?: string; userId?: number | null; actorName?: string; at?: string; reason?: string; details?: string }) => {
+      const kind = String(payload.kind ?? "");
+      if (!kind) return;
+      const actorUserId = payload.userId ?? null;
+      const actorName = payload.actorName?.trim() || nameByUserId(actorUserId);
+      const atIso = payload.at && payload.at.length > 0 ? payload.at : new Date().toISOString();
+      const extra = payload.details?.trim() || payload.reason?.trim() || "";
+      let title = "Convoy alert";
+      let message = `${actorName} sent an alert.`;
+      if (kind === "regroup-ping") {
+        title = "Regroup Ping";
+        message = `${actorName} requested everyone to regroup at the meetup corridor.`;
+      } else if (kind === "line-up-formation") {
+        title = "Line-up Formation";
+        message = `${actorName} asked riders to line up and match pace.`;
+      } else if (kind.startsWith("sos")) {
+        const reason = kind.includes(":") ? kind.split(":").slice(1).join(":") : "SOS";
+        title = "SOS Alert";
+        message = `${actorName} raised SOS: ${reason}${extra ? ` (${extra})` : ""}.`;
+      } else if (kind === "map-pin-added") {
+        title = "Map Pin Added";
+        message = `${actorName} added a map pin${extra ? `: ${extra}` : ""}.`;
+      } else if (kind === "trip-started") {
+        title = "Trip Started";
+        message = `${actorName} started the trip.`;
+      } else {
+        title = "Convoy Alert";
+        message = `${actorName}: ${kind}${extra ? ` (${extra})` : ""}`;
+      }
+      const next: LiveAlert = {
+        id: `${atIso}-${kind}-${actorUserId ?? "na"}`,
+        kind,
+        title,
+        message,
+        actorName,
+        actorUserId,
+        atIso,
+        dismissible: true,
+      };
+      setAlertHistory((prev) => [next, ...prev].slice(0, 100));
+      setActiveAlert(next);
+      setUnreadAlertCount((n) => n + 1);
+    },
+    [nameByUserId],
+  );
+
+  const showSentAlertPopup = useCallback(
+    (kind: string, details?: string) => {
+      const actorName = user?.name || "You";
+      let title = "Alert sent";
+      let message = "Your alert was sent to all joined members.";
+      if (kind.startsWith("sos")) {
+        const reason = kind.includes(":") ? kind.split(":").slice(1).join(":") : "SOS";
+        title = "SOS sent";
+        message = `You sent SOS: ${reason}${details ? ` (${details})` : ""}.`;
+      } else if (kind === "regroup-ping") {
+        title = "Regroup sent";
+        message = "Your regroup ping was sent to all joined members.";
+      } else if (kind === "line-up-formation") {
+        title = "Formation sent";
+        message = "Your line-up formation alert was sent.";
+      } else if (kind === "map-pin-added") {
+        title = "Map pin alert sent";
+        message = `You alerted members about a new map pin${details ? `: ${details}` : ""}.`;
+      }
+      const now = new Date().toISOString();
+      setSentAlertPopup({
+        id: `${now}-${kind}-self`,
+        kind,
+        title,
+        message,
+        actorName,
+        actorUserId: user?.id != null ? Number(user.id) : null,
+        atIso: now,
+        dismissible: true,
+      });
+    },
+    [user?.id, user?.name],
+  );
+
   const arrivedCount = members.filter((m) => m.status === "arrived").length;
   const totalCount = members.length;
 
@@ -222,6 +345,9 @@ export function LiveTripScreen({ route, navigation }: Props) {
 
   useEffect(() => {
     let cancelled = false;
+    const watchdog = setTimeout(() => {
+      if (!cancelled) setTripLoading(false);
+    }, 2500);
     (async () => {
       try {
         setTripLoading(true);
@@ -245,12 +371,16 @@ export function LiveTripScreen({ route, navigation }: Props) {
     })();
     return () => {
       cancelled = true;
+      clearTimeout(watchdog);
     };
   }, [id]);
 
   useEffect(() => {
     if (!user?.id) return;
     let cancelled = false;
+    const watchdog = setTimeout(() => {
+      if (!cancelled) setAccessChecking(false);
+    }, 2500);
     (async () => {
       try {
         setAccessChecking(true);
@@ -279,6 +409,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
     })();
     return () => {
       cancelled = true;
+      clearTimeout(watchdog);
     };
   }, [id, user?.id]);
 
@@ -419,22 +550,18 @@ export function LiveTripScreen({ route, navigation }: Props) {
 
     socket.on(
       "convoy-action",
-      (payload: { kind?: string; userId?: number | null; at?: string }) => {
+      (payload: { kind?: string; userId?: number | null; actorName?: string; at?: string; reason?: string; details?: string }) => {
         const k = String(payload?.kind || "");
-        if (k === "regroup-ping") {
-          Alert.alert("Regroup ping", "The convoy asked everyone to regroup at the meetup corridor.");
-        } else if (k === "trip-started") {
+        const selfId = user?.id != null ? Number(user.id) : null;
+        const isSelf = selfId != null && payload.userId != null && Number(payload.userId) === selfId;
+        if (k === "trip-started") {
           setTripStarted(true);
-          if (!isOrganizer && phase === "waiting") {
-            Alert.alert("Trip started", "Organizer started the trip. You can now join live.");
+          if (!isOrganizer && phase === "waiting" && !isSelf) {
+            pushIncomingAlert(payload);
           }
-        } else if (k === "line-up-formation") {
-          Alert.alert("Formation", "Line up — match speed and spacing with the group.");
-        } else if (k.startsWith("sos")) {
-          Alert.alert("SOS", "An SOS was signaled in this trip.");
-        } else if (k) {
-          Alert.alert("Convoy", k);
+          return;
         }
+        if (k && !isSelf) pushIncomingAlert(payload);
       },
     );
 
@@ -458,7 +585,18 @@ export function LiveTripScreen({ route, navigation }: Props) {
 
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") return;
+      if (status !== "granted") {
+        Alert.alert(
+          "Location permission needed",
+          "Enable precise location to auto-center the live map and track distance accurately.",
+        );
+        return;
+      }
+      try {
+        await Location.enableNetworkProviderAsync();
+      } catch {
+        // Ignore if unavailable; GPS can still work.
+      }
 
       // Bootstrap an immediate fix so map pins/camera appear without waiting for watch callback.
       try {
@@ -477,7 +615,11 @@ export function LiveTripScreen({ route, navigation }: Props) {
           headingDeg: hDeg,
           speedMps: speed ?? null,
         });
-        setMapRecenterPoint({ lat, lng });
+        if (!initialAutoCenterDoneRef.current) {
+          setMapRecenterPoint({ lat, lng });
+          liveMapRef.current?.recenter({ lat, lng });
+          initialAutoCenterDoneRef.current = true;
+        }
         lastPosRef.current = { lat, lng };
         lastLocTsRef.current = first.timestamp;
       } catch {
@@ -494,13 +636,28 @@ export function LiveTripScreen({ route, navigation }: Props) {
           const { latitude, longitude, accuracy, speed, heading } = loc.coords;
           const lat = latitude;
           const lng = longitude;
-          let speedKmh = 0;
-          if (speed != null && Number.isFinite(speed) && speed >= 0) {
-            speedKmh = Math.max(0, speed * 3.6);
+          const accM = Math.max(0, accuracy ?? 50);
+          const prev = lastPosRef.current;
+          const dKmFromPrev = prev ? haversineKm(prev, { lat, lng }) : 0;
+          const dMFromPrev = dKmFromPrev * 1000;
+          const speedMps = speed != null && Number.isFinite(speed) ? Math.max(0, speed) : 0;
+          const movedEnough = dMFromPrev >= Math.max(10, accM * 0.8);
+          const deviceSaysMoving = speedMps >= 0.9;
+
+          // Ignore noisy GPS drift when user is effectively stationary.
+          if (prev && !movedEnough && !deviceSaysMoving) {
+            return;
           }
-          if (lastPosRef.current) {
-            const d = haversineKm(lastPosRef.current, { lat, lng });
-            if (d > 0.001 && d < 5) setMyDistanceKm((x) => x + d);
+
+          let speedKmh = 0;
+          if (speedMps > 0) {
+            speedKmh = speedMps * 3.6;
+          }
+          if (prev) {
+            const d = haversineKm(prev, { lat, lng });
+            const dM = d * 1000;
+            // Only accumulate meaningful movement; suppress drift and teleport jumps.
+            if (dM >= Math.max(10, accM * 0.8) && d < 2) setMyDistanceKm((x) => x + d);
             if (speedKmh < 0.5 && lastLocTsRef.current != null) {
               const dtSec = Math.max(0.1, (loc.timestamp - lastLocTsRef.current) / 1000);
               speedKmh = (d / dtSec) * 3600;
@@ -509,7 +666,6 @@ export function LiveTripScreen({ route, navigation }: Props) {
           setCurrentSpeedKmh(Math.max(0, Math.round(speedKmh)));
           lastPosRef.current = { lat, lng };
           lastLocTsRef.current = loc.timestamp;
-          setMapRecenterPoint({ lat, lng });
           let hDeg: number | null = heading ?? null;
           if (hDeg != null && Number.isFinite(hDeg) && hDeg < 0) hDeg = hDeg + 360;
           setUserGeo({
@@ -557,12 +713,40 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const hWin = Dimensions.get("window").height;
   const peekH = 200;
   const expandH = Math.min(hWin * 0.62, 560);
+  const sheetBlocking = sheetExpanded || sheetDragging;
+  const mapControlsTop = sheetBlocking ? hWin * 0.20 : hWin * 0.26;
+
+  const sheetPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_evt, gestureState) => {
+          const vertical = Math.abs(gestureState.dy) > 6 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
+          if (!vertical) return false;
+          if (!sheetExpanded) return true;
+          // When expanded, only capture downward pull if list is already at top.
+          return gestureState.dy > 6 && sheetScrollYRef.current <= 0;
+        },
+        onPanResponderGrant: () => {
+          setSheetDragging(true);
+        },
+        onPanResponderRelease: (_evt, gestureState) => {
+          if (gestureState.dy < -18) setSheetExpanded(true);
+          if (gestureState.dy > 18) setSheetExpanded(false);
+          setSheetDragging(false);
+        },
+        onPanResponderTerminate: () => {
+          setSheetDragging(false);
+        },
+      }),
+    [sheetExpanded],
+  );
 
   useEffect(() => {
-    Animated.timing(sheetHeightAnim, {
+    Animated.spring(sheetHeightAnim, {
       toValue: sheetExpanded ? expandH : peekH,
-      duration: 320,
-      easing: Easing.out(Easing.cubic),
+      damping: 22,
+      stiffness: 220,
+      mass: 0.7,
       useNativeDriver: false,
     }).start();
   }, [sheetExpanded, expandH, peekH, sheetHeightAnim]);
@@ -734,6 +918,35 @@ export function LiveTripScreen({ route, navigation }: Props) {
     setMapFitTick((n) => n + 1);
   }, []);
 
+  const handleRecenter = useCallback(async () => {
+    try {
+      const pos =
+        userGeo ??
+        (lastPosRef.current
+          ? { lat: lastPosRef.current.lat, lng: lastPosRef.current.lng }
+          : null);
+      if (pos) {
+        setMapRecenterPoint({ lat: pos.lat, lng: pos.lng });
+        liveMapRef.current?.fitConvoy();
+        setTimeout(() => {
+          liveMapRef.current?.recenter({ lat: pos.lat, lng: pos.lng });
+        }, 220);
+        return;
+      }
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") return;
+      const loc = await Location.getCurrentPositionAsync({});
+      const { latitude, longitude } = loc.coords;
+      setMapRecenterPoint({ lat: latitude, lng: longitude });
+      liveMapRef.current?.fitConvoy();
+      setTimeout(() => {
+        liveMapRef.current?.recenter({ lat: latitude, lng: longitude });
+      }, 220);
+    } catch {
+      // keep UI stable
+    }
+  }, [userGeo]);
+
   useEffect(() => {
     convoyFitDoneRef.current = false;
   }, [id]);
@@ -792,15 +1005,24 @@ export function LiveTripScreen({ route, navigation }: Props) {
   }, []);
 
   const emitConvoy = useCallback(
-    (kind: string) => {
+    (kind: string, extras?: { reason?: string; details?: string }) => {
       if (!user?.id) return;
+      if (kind === "line-up-formation" && !canSendLineupFormation) {
+        Alert.alert("Not allowed", "Only organizer, co-admin, or moderator can send line-up formation alerts.");
+        return;
+      }
       socketRef.current?.emit("convoy-action", {
         kind,
         tripId: tripIdNum,
         userId: Number(user.id),
+        actorName: user?.name || "You",
+        at: new Date().toISOString(),
+        reason: extras?.reason,
+        details: extras?.details,
       });
+      showSentAlertPopup(kind, extras?.details || extras?.reason);
     },
-    [tripIdNum, user?.id],
+    [tripIdNum, user?.id, canSendLineupFormation, showSentAlertPopup],
   );
 
   const submitMapPin = useCallback(async () => {
@@ -841,6 +1063,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
           addedBy: String(body.addedBy ?? user.name),
         },
       ]);
+      emitConvoy("map-pin-added", { details: pinLabel.trim() });
       setPinLabel("");
       setShowPinModal(false);
       Alert.alert("Map pin", "Pin added for the convoy.");
@@ -883,74 +1106,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
     }
   }, [attrDesc, attrName, user?.id]);
 
-  // Keep map camera target synced while in live mode.
-  useEffect(() => {
-    if (phase !== "live") return;
-    const fallbackStart =
-      drivingRoute?.start ??
-      (trip?.meetupLat != null && trip?.meetupLng != null
-        ? { lat: trip.meetupLat, lng: trip.meetupLng }
-        : null);
-    const effective =
-      userGeo ??
-      (lastPosRef.current
-        ? {
-            lat: lastPosRef.current.lat,
-            lng: lastPosRef.current.lng,
-          }
-        : null);
-    if (effective) {
-      setMapRecenterPoint({ lat: effective.lat, lng: effective.lng });
-    } else if (fallbackStart) {
-      setMapRecenterPoint({ lat: fallbackStart.lat, lng: fallbackStart.lng });
-    }
-  }, [
-    phase,
-    userGeo?.lat,
-    userGeo?.lng,
-    drivingRoute?.start?.lat,
-    drivingRoute?.start?.lng,
-    trip?.meetupLat,
-    trip?.meetupLng,
-  ]);
-
-  // Auto-fit whenever meaningful map data appears/changes in live mode.
-  useEffect(() => {
-    if (phase !== "live") return;
-    const routeCount = drivingRoute?.coordinates?.length ?? 0;
-    const hasStart =
-      (drivingRoute?.start != null &&
-        Number.isFinite(Number(drivingRoute.start.lat)) &&
-        Number.isFinite(Number(drivingRoute.start.lng))) ||
-      (trip?.meetupLat != null && trip?.meetupLng != null);
-    const hasEnd =
-      (drivingRoute?.end != null &&
-        Number.isFinite(Number(drivingRoute.end.lat)) &&
-        Number.isFinite(Number(drivingRoute.end.lng))) ||
-      (trip?.endLat != null && trip?.endLng != null);
-    const memberCount = members.filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng) && m.lat !== 0 && m.lng !== 0).length;
-    const pinCount = mapPins.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)).length;
-    const hasUser = !!userGeo || !!lastPosRef.current;
-    const hasData = routeCount > 0 || hasStart || hasEnd || memberCount > 0 || pinCount > 0 || hasUser;
-    if (!hasData) return;
-    setMapFitTick((n) => n + 1);
-  }, [
-    phase,
-    drivingRoute?.coordinates?.length,
-    drivingRoute?.start?.lat,
-    drivingRoute?.start?.lng,
-    drivingRoute?.end?.lat,
-    drivingRoute?.end?.lng,
-    trip?.meetupLat,
-    trip?.meetupLng,
-    trip?.endLat,
-    trip?.endLng,
-    members,
-    mapPins,
-    userGeo?.lat,
-    userGeo?.lng,
-    posTick,
-  ]);
+  // Keep camera stable: avoid continuous auto-recenter / auto-fit loops.
+  // Camera actions stay user-driven (locate/fit/zoom) plus initial one-time fit.
 
   if (accessChecking) {
     return (
@@ -1452,6 +1609,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
   return (
     <View style={styles.liveRoot}>
       <LiveMapView
+        ref={liveMapRef}
         dark={mode === "dark"}
         route={liveRoutePoints}
         start={startPoint}
@@ -1471,12 +1629,12 @@ export function LiveTripScreen({ route, navigation }: Props) {
           </Text>
         </View>
       ) : null}
-      <View style={[styles.mapDataBadge, { top: insets.top + 88 }]}>
-        <Text style={styles.mapDataText}>
-          r:{liveRoutePoints.length} m:{mapMembers.length} p:{mapOverlayPins.length} u:
-          {effectiveUserGeo ? "1" : "0"} s:{startPoint ? "1" : "0"} e:{endPoint ? "1" : "0"}
-        </Text>
-      </View>
+      {!sheetBlocking ? (
+        <Pressable style={[styles.recenterPill, { bottom: Math.max(insets.bottom + 210, 220) }]} onPress={() => void handleRecenter()}>
+          <Ionicons name="navigate" size={20} color="#0f7a8a" />
+          <Text style={styles.recenterPillText}>Re-centre</Text>
+        </Pressable>
+      ) : null}
 
       <View style={[styles.liveTopBar, { top: insets.top + 8 }]}>
         <Pressable style={styles.mapCircleBtn} onPress={() => setShowExitConfirm(true)}>
@@ -1495,35 +1653,54 @@ export function LiveTripScreen({ route, navigation }: Props) {
             </Text>
           ) : null}
         </View>
-        <View style={{ width: 44 }} />
+        <Pressable
+          style={styles.alertHistoryBtn}
+          onPress={() => {
+            setShowAlertHistoryModal(true);
+            setUnreadAlertCount(0);
+          }}
+        >
+          <Ionicons name="notifications-outline" size={20} color="#fff" />
+          {unreadAlertCount > 0 ? (
+            <View style={styles.alertBadge}>
+              <Text style={styles.alertBadgeText}>{Math.min(99, unreadAlertCount)}</Text>
+            </View>
+          ) : null}
+        </Pressable>
       </View>
 
-      <View style={[styles.mapLeftCol, { top: h * 0.34 }]}>
+      <View style={[styles.mapLeftCol, { top: mapControlsTop }]}>
         <Pressable style={styles.mapCircleBtn} onPress={toggleMode}>
           <Ionicons name={mode === "dark" ? "moon" : "sunny"} size={20} color="#fff" />
         </Pressable>
       </View>
 
-      <View style={[styles.mapRightCol, { top: h * 0.36 }]}>
-        <Pressable style={styles.mapCircleBtn}>
-          <Text style={{ color: "#fff", fontWeight: "800", fontSize: 11 }}>3D</Text>
-        </Pressable>
-        <Pressable
-          style={styles.mapCircleBtn}
-          onPress={async () => {
-            const { status } = await Location.requestForegroundPermissionsAsync();
-            if (status !== "granted") return;
-            const loc = await Location.getCurrentPositionAsync({});
-            const { latitude, longitude } = loc.coords;
-            setMapRecenterPoint({ lat: latitude, lng: longitude });
-          }}
-        >
-          <Ionicons name="locate" size={20} color="#fff" />
-        </Pressable>
-        <Pressable style={styles.mapCircleBtn} onPress={fitConvoy} accessibilityLabel="Fit route and riders">
-          <Ionicons name="expand-outline" size={20} color="#fff" />
-        </Pressable>
-      </View>
+      {!sheetBlocking ? (
+        <View style={[styles.mapRightCol, { top: mapControlsTop }]}>
+          <Pressable style={styles.mapCircleBtn} onPress={() => liveMapRef.current?.zoomBy(1)}>
+            <Ionicons name="add" size={20} color="#fff" />
+          </Pressable>
+          <Pressable style={styles.mapCircleBtn} onPress={() => liveMapRef.current?.zoomBy(-1)}>
+            <Ionicons name="remove" size={20} color="#fff" />
+          </Pressable>
+          <Pressable style={styles.mapCircleBtn} onPress={() => liveMapRef.current?.togglePitch()}>
+            <Text style={{ color: "#fff", fontWeight: "800", fontSize: 11 }}>3D</Text>
+          </Pressable>
+          <Pressable style={styles.mapCircleBtn} onPress={() => void handleRecenter()}>
+            <Ionicons name="locate" size={20} color="#fff" />
+          </Pressable>
+          <Pressable
+            style={styles.mapCircleBtn}
+            onPress={() => {
+              fitConvoy();
+              liveMapRef.current?.fitConvoy();
+            }}
+            accessibilityLabel="Fit route and riders"
+          >
+            <Ionicons name="expand-outline" size={20} color="#fff" />
+          </Pressable>
+        </View>
+      ) : null}
 
       <Animated.View
         style={[
@@ -1533,12 +1710,15 @@ export function LiveTripScreen({ route, navigation }: Props) {
             paddingBottom: Math.max(insets.bottom, 10),
           },
         ]}
+        {...sheetPanResponder.panHandlers}
       >
         <Pressable style={styles.sheetHandle} onPress={() => setSheetExpanded((s) => !s)}>
+          <View style={styles.sheetGrabber} />
           <Ionicons
             name={sheetExpanded ? "chevron-down" : "chevron-up"}
-            size={18}
-            color="rgba(255,255,255,0.35)"
+            size={14}
+            color="rgba(255,255,255,0.45)"
+            style={{ marginTop: 4 }}
           />
         </Pressable>
         {!sheetExpanded ? (
@@ -1561,7 +1741,13 @@ export function LiveTripScreen({ route, navigation }: Props) {
               </View>
             </View>
             <View style={styles.peekActions}>
-              <Pressable style={styles.dangerOutline} onPress={() => setShowSosModal(true)}>
+              <Pressable
+                style={styles.dangerOutline}
+                onPress={() => {
+                  setSheetExpanded(false);
+                  setShowSosModal(true);
+                }}
+              >
                 <Ionicons name="warning" size={14} color="#f87171" />
                 <Text style={styles.dangerOutlineText}>SOS</Text>
               </Pressable>
@@ -1585,7 +1771,17 @@ export function LiveTripScreen({ route, navigation }: Props) {
             <Text style={styles.swipeHint}>Swipe up for convoy controls</Text>
           </>
         ) : (
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 8 }}
+            onScroll={(e) => {
+              sheetScrollYRef.current = e.nativeEvent.contentOffset.y;
+            }}
+            scrollEventThrottle={16}
+            nestedScrollEnabled
+            bounces={false}
+            overScrollMode="never"
+          >
             <View style={styles.statusBanner}>
               <View style={styles.gpsDot} />
               <Text style={styles.statusBannerText}>Live GPS tracking</Text>
@@ -1606,7 +1802,13 @@ export function LiveTripScreen({ route, navigation }: Props) {
               </View>
             </View>
             <View style={styles.iconRow}>
-              <Pressable style={styles.roundIcon} onPress={() => setShowSosModal(true)}>
+              <Pressable
+                style={styles.roundIcon}
+                onPress={() => {
+                  setSheetExpanded(false);
+                  setShowSosModal(true);
+                }}
+              >
                 <Ionicons name="warning" size={22} color="#fff" />
               </Pressable>
               <Pressable style={styles.roundIcon} onPress={() => emitConvoy("regroup-ping")}>
@@ -1622,7 +1824,11 @@ export function LiveTripScreen({ route, navigation }: Props) {
               <Pressable style={styles.roundIcon} onPress={() => setShowPinModal(true)}>
                 <Ionicons name="location" size={22} color="#c084fc" />
               </Pressable>
-              <Pressable style={styles.roundIcon} onPress={() => emitConvoy("line-up-formation")}>
+              <Pressable
+                style={[styles.roundIcon, !canSendLineupFormation && { opacity: 0.35 }]}
+                onPress={() => emitConvoy("line-up-formation")}
+                disabled={!canSendLineupFormation}
+              >
                 <Ionicons name="list" size={22} color="#2dd4bf" />
               </Pressable>
             </View>
@@ -1631,6 +1837,21 @@ export function LiveTripScreen({ route, navigation }: Props) {
                 <View style={styles.liveDot} />
                 <Text style={styles.liveChipText}>LIVE</Text>
               </View>
+              <Pressable
+                style={styles.liveChip}
+                onPress={() => {
+                  setShowAlertHistoryModal(true);
+                  setUnreadAlertCount(0);
+                }}
+              >
+                <Ionicons name="notifications-outline" size={14} color="#fff" />
+                <Text style={styles.liveChipText}>Alerts</Text>
+                {unreadAlertCount > 0 ? (
+                  <View style={styles.alertBadgeInline}>
+                    <Text style={styles.alertBadgeText}>{Math.min(99, unreadAlertCount)}</Text>
+                  </View>
+                ) : null}
+              </Pressable>
               <Pressable
                 style={styles.endTripChip}
                 disabled={endingTrip}
@@ -1723,27 +1944,134 @@ export function LiveTripScreen({ route, navigation }: Props) {
         )}
       </Animated.View>
 
-      <Modal visible={showSosModal} transparent animationType="fade">
-        <Pressable style={styles.modalBackdrop} onPress={() => setShowSosModal(false)}>
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>SOS alert</Text>
-            <Text style={styles.mutedSmall}>Pick a reason — your group is notified.</Text>
-            {SOS_REASONS.map((r) => (
-              <Pressable
-                key={r}
-                style={styles.sosRow}
-                onPress={() => {
-                  emitConvoy(`sos:${r}`);
-                  setShowSosModal(false);
-                  Alert.alert("SOS sent", r);
-                }}
-              >
-                <Text style={{ color: "#fecaca", fontWeight: "700" }}>{r}</Text>
+      <Modal visible={showSosModal} transparent animationType="slide">
+        <Pressable style={[styles.modalBackdrop, styles.modalBackdropBottom]} onPress={() => setShowSosModal(false)}>
+          <Pressable
+            style={[styles.sosSheet, { paddingBottom: Math.max(insets.bottom + 10, 18) }]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.sosSheetHandle} />
+            <View style={styles.sosSheetHeader}>
+              <Text style={styles.sosSheetTitle}>SOS Alert</Text>
+              <Pressable style={styles.sosCloseBtn} onPress={() => setShowSosModal(false)}>
+                <Ionicons name="close" size={24} color="rgba(255,255,255,0.75)" />
               </Pressable>
-            ))}
-            <Pressable style={[styles.primaryBtn, styles.outlineBtn, { marginTop: 8 }]} onPress={() => setShowSosModal(false)}>
-              <Text style={styles.outlineBtnText}>Cancel</Text>
+            </View>
+            <Text style={styles.sosSheetSubtitle}>
+              This will broadcast an emergency alert to all trip members and the organizer.
+            </Text>
+            <View style={styles.sosSheetGrid}>
+              {SOS_OPTIONS.map((opt) => (
+                <Pressable
+                  key={opt.id}
+                  style={styles.sosTile}
+                  onPress={() => {
+                    if (opt.id === "other") {
+                      const reason = sosOtherReason.trim();
+                      if (!reason) {
+                        Alert.alert("SOS", "Please type the reason for Other.");
+                        return;
+                      }
+                      emitConvoy("sos:Other", { details: reason });
+                    } else {
+                      emitConvoy(`sos:${opt.reason}`, { reason: opt.reason });
+                    }
+                    setShowSosModal(false);
+                    setSosOtherReason("");
+                  }}
+                >
+                  <View style={styles.sosTileIconWrap}>
+                    <Text style={styles.sosTileIcon}>{opt.icon}</Text>
+                  </View>
+                  <Text style={styles.sosTileText}>{opt.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <TextInput
+              style={[styles.textInputDark, { marginTop: 12, borderColor: "rgba(225,29,72,0.35)" }]}
+              placeholder="Other reason (required for Other)"
+              placeholderTextColor="rgba(255,255,255,0.38)"
+              value={sosOtherReason}
+              onChangeText={setSosOtherReason}
+            />
+            <Pressable
+              style={[styles.primaryBtn, { marginTop: 10 }]}
+              onPress={() => {
+                const reason = sosOtherReason.trim();
+                if (!reason) {
+                  Alert.alert("SOS", "Please type the reason for Other.");
+                  return;
+                }
+                emitConvoy("sos:Other", { details: reason });
+                setShowSosModal(false);
+                setSosOtherReason("");
+              }}
+            >
+              <Text style={styles.primaryBtnText}>Send</Text>
             </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={!!activeAlert} transparent animationType="fade">
+        <Pressable style={styles.modalBackdrop} onPress={() => setActiveAlert(null)}>
+          <Pressable style={styles.alertCardDark} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.alertCardTitle}>{activeAlert?.title ?? "Alert"}</Text>
+            <Text style={styles.alertCardMeta}>
+              From: {activeAlert?.actorName || "Unknown"} •{" "}
+              {activeAlert ? new Date(activeAlert.atIso).toLocaleTimeString() : ""}
+            </Text>
+            <Text style={styles.alertCardMessage}>{activeAlert?.message}</Text>
+            <View style={styles.modalActions}>
+              <Pressable style={styles.alertCardDismissBtn} onPress={() => setActiveAlert(null)}>
+                <Text style={styles.alertCardDismissText}>Dismiss</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={!!sentAlertPopup} transparent animationType="fade">
+        <Pressable style={styles.modalBackdrop} onPress={() => setSentAlertPopup(null)}>
+          <Pressable style={styles.alertCardDark} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.alertCardTitle}>{sentAlertPopup?.title ?? "Alert sent"}</Text>
+            <Text style={styles.alertCardMeta}>
+              {sentAlertPopup ? new Date(sentAlertPopup.atIso).toLocaleTimeString() : ""}
+            </Text>
+            <Text style={styles.alertCardMessage}>{sentAlertPopup?.message}</Text>
+            <View style={styles.modalActions}>
+              <Pressable style={styles.alertCardDismissBtn} onPress={() => setSentAlertPopup(null)}>
+                <Text style={styles.alertCardDismissText}>Dismiss</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={showAlertHistoryModal} transparent animationType="slide">
+        <Pressable style={[styles.modalBackdrop, styles.modalBackdropBottom]} onPress={() => setShowAlertHistoryModal(false)}>
+          <Pressable style={[styles.sosSheet, { paddingBottom: Math.max(insets.bottom + 10, 18) }]} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.sosSheetHeader}>
+              <Text style={styles.sosSheetTitle}>Alert History</Text>
+              <Pressable style={styles.sosCloseBtn} onPress={() => setShowAlertHistoryModal(false)}>
+                <Ionicons name="close" size={24} color="rgba(255,255,255,0.75)" />
+              </Pressable>
+            </View>
+            <ScrollView style={{ maxHeight: 360 }}>
+              {alertHistory.length === 0 ? (
+                <Text style={styles.sosSheetSubtitle}>No alerts yet.</Text>
+              ) : (
+                alertHistory.map((a) => (
+                  <View key={a.id} style={styles.alertHistoryRow}>
+                    <Text style={styles.alertHistoryTitle}>{a.title}</Text>
+                    <Text style={styles.alertHistoryMeta}>
+                      {a.actorName} • {new Date(a.atIso).toLocaleString()}
+                    </Text>
+                    <Text style={styles.alertHistoryMessage}>{a.message}</Text>
+                  </View>
+                ))
+              )}
+            </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
@@ -2108,6 +2436,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 24,
   },
+  modalBackdropBottom: {
+    justifyContent: "flex-end",
+    padding: 0,
+    backgroundColor: "rgba(0,0,0,0.60)",
+  },
   modalCard: {
     backgroundColor: "#111",
     borderRadius: 20,
@@ -2131,6 +2464,25 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(127,29,29,0.78)",
   },
   mapDiagText: { color: "#fecaca", fontSize: 11, fontWeight: "700" },
+  recenterPill: {
+    position: "absolute",
+    left: 14,
+    zIndex: 60,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    height: 46,
+    borderRadius: 24,
+    backgroundColor: "rgba(255,255,255,0.95)",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.12)",
+  },
+  recenterPillText: {
+    color: "#0f7a8a",
+    fontSize: 14,
+    fontWeight: "800",
+  },
   mapDataBadge: {
     position: "absolute",
     left: 12,
@@ -2198,6 +2550,143 @@ const styles = StyleSheet.create({
   },
   timelineOrder: { color: "#fbbf24", fontSize: 12, fontWeight: "900" },
   timelineName: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  sosSheet: {
+    width: "100%",
+    alignSelf: "stretch",
+    backgroundColor: "#07090d",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 18,
+    borderTopWidth: 1,
+    borderColor: "rgba(190,24,24,0.35)",
+  },
+  sosSheetHandle: {
+    width: 42,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.22)",
+    alignSelf: "center",
+    marginBottom: 12,
+  },
+  sosSheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  sosSheetTitle: {
+    color: "#fb7185",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  sosCloseBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sosSheetSubtitle: {
+    color: "rgba(255,255,255,0.58)",
+    fontSize: 14,
+    lineHeight: 19,
+    marginBottom: 14,
+  },
+  sosSheetGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    rowGap: 12,
+  },
+  sosTile: {
+    width: "48%",
+    borderRadius: 14,
+    backgroundColor: "rgba(127,29,29,0.24)",
+    borderWidth: 1,
+    borderColor: "rgba(225,29,72,0.30)",
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  sosTileIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#fee2e2",
+  },
+  sosTileIcon: {
+    fontSize: 20,
+  },
+  sosTileText: {
+    color: "#fecaca",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  alertHistoryRow: {
+    borderWidth: 1,
+    borderColor: "rgba(225,29,72,0.24)",
+    backgroundColor: "rgba(127,29,29,0.14)",
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 8,
+  },
+  alertHistoryTitle: {
+    color: "#fb7185",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  alertHistoryMeta: {
+    color: "rgba(255,255,255,0.58)",
+    fontSize: 11,
+    marginTop: 2,
+  },
+  alertHistoryMessage: {
+    color: "#fecaca",
+    fontSize: 12,
+    marginTop: 6,
+    lineHeight: 18,
+  },
+  alertCardDark: {
+    backgroundColor: "#07090d",
+    borderRadius: 18,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "rgba(225,29,72,0.34)",
+  },
+  alertCardTitle: {
+    color: "#fb7185",
+    fontSize: 30,
+    fontWeight: "800",
+  },
+  alertCardMeta: {
+    color: "rgba(255,255,255,0.60)",
+    fontSize: 12,
+    marginTop: 8,
+  },
+  alertCardMessage: {
+    color: "#fecaca",
+    fontSize: 16,
+    lineHeight: 24,
+    marginTop: 10,
+  },
+  alertCardDismissBtn: {
+    backgroundColor: "rgba(255,255,255,0.95)",
+    paddingVertical: 12,
+    paddingHorizontal: 22,
+    borderRadius: 14,
+    alignItems: "center",
+  },
+  alertCardDismissText: {
+    color: "#111827",
+    fontSize: 22,
+    fontWeight: "800",
+  },
   sosRow: {
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -2242,6 +2731,43 @@ const styles = StyleSheet.create({
   liveTopTitleWrap: { flex: 1, marginHorizontal: 8, alignItems: "center", justifyContent: "center" },
   liveTopTitle: { color: "rgba(255,255,255,0.92)", fontSize: 13, fontWeight: "800" },
   liveTopSub: { color: "rgba(255,255,255,0.45)", fontSize: 10, fontWeight: "600", marginTop: 2 },
+  alertHistoryBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  alertBadge: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#ef4444",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+  alertBadgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  alertBadgeInline: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#ef4444",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+    marginLeft: 4,
+  },
   mapRightCol: {
     position: "absolute",
     right: 12,
@@ -2261,7 +2787,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 4,
   },
-  sheetHandle: { alignItems: "center", paddingVertical: 4 },
+  sheetHandle: { alignItems: "center", paddingTop: 6, paddingBottom: 4 },
+  sheetGrabber: {
+    width: 42,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.28)",
+  },
   peekRow: {
     flexDirection: "row",
     alignItems: "center",

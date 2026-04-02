@@ -28,7 +28,7 @@ import LiveTripMap, {
   type LiveTripMapRef,
   type LiveUserGeo,
   type MapTheme,
-} from "./components/LiveTripMapNoProvider";
+} from "./components/LiveTripMap";
 import { io } from "socket.io-client";
 
 // ─── UTILS ──────────────────────────────────────────────────

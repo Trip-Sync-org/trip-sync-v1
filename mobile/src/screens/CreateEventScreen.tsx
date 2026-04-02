@@ -25,7 +25,6 @@ import { WebView } from "react-native-webview";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { apiFetch, readApiErrorMessage } from "../api/client";
-import { MAPPLS_MAP_TOKEN } from "../config";
 import { useAuth } from "../context/AuthContext";
 import { colors, typography } from "../theme";
 import { Badge, Card } from "../components/ui";
@@ -60,8 +59,9 @@ type CouponRow = {
 type InviteRow = { type: "email" | "phone"; value: string };
 
 const CREATE_EVENT_DRAFT_KEY = "tripsync_create_event_draft_v1";
+const MAPBOX_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN ?? "";
 
-function MapplsCreatePreview({
+function MapboxCreatePreview({
   start,
   end,
 }: {
@@ -69,10 +69,10 @@ function MapplsCreatePreview({
   end: { lat: number; lng: number } | null;
 }) {
   const html = useMemo(() => {
-    if (!MAPPLS_MAP_TOKEN) {
-      return "<html><body style='margin:0;background:#0a0a0a;color:#fff;font-family:sans-serif;padding:12px'>Missing EXPO_PUBLIC_MAPPLS_MAP_TOKEN</body></html>";
+    if (!MAPBOX_TOKEN) {
+      return "<html><body style='margin:0;background:#0a0a0a;color:#fff;font-family:sans-serif;padding:12px'>Missing EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN</body></html>";
     }
-    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><link rel="stylesheet" href="https://apis.mappls.com/advancedmaps/api/${MAPPLS_MAP_TOKEN}/map_sdk_plugins"/><style>html,body,#map{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0a0a0a}.dot{width:12px;height:12px;border-radius:999px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)}.err{padding:12px;color:#fecaca;background:#7f1d1d;font:12px sans-serif}</style></head><body><div id="map"></div><script src="https://apis.mappls.com/advancedmaps/v1/${MAPPLS_MAP_TOKEN}/map_load?v=3.0&autopan=true" onerror="window.__mapplsScriptError=true"></script><script>const S=${JSON.stringify(start)},E=${JSON.stringify(end)};let map=null;function mk(c){const d=document.createElement('div');d.className='dot';d.style.background=c;return d;}function showErr(m){const el=document.getElementById('map');if(el)el.innerHTML='<div class=\"err\">'+String(m).replace(/</g,'&lt;')+'</div>';}function fit(){if(!map)return;const pts=[];if(S)pts.push([S.lng,S.lat]);if(E)pts.push([E.lng,E.lat]);if(!pts.length)return;const lats=pts.map(p=>p[1]),lngs=pts.map(p=>p[0]);map.fitBounds([[Math.min(...lngs),Math.min(...lats)],[Math.max(...lngs),Math.max(...lats)]],{padding:60});}function init(){if(window.__mapplsScriptError){showErr('Mappls SDK script failed to load');return;}if(!window.mappls){setTimeout(init,220);return;}map=new window.mappls.Map('map',{center:S?[S.lng,S.lat]:[78.9629,20.5937],zoom:S?11:4,zoomControl:false,traffic:false,location:false,search:false});const draw=()=>{if(S)new window.mappls.Marker({map,fitbounds:false,position:{lat:S.lat,lng:S.lng},html:mk('#22c55e')});if(E)new window.mappls.Marker({map,fitbounds:false,position:{lat:E.lat,lng:E.lng},html:mk('#ef4444')});fit();};if(typeof map.on==='function')map.on('load',draw);else setTimeout(draw,900);}init();setTimeout(()=>{if(!map)showErr(window.__mapplsScriptError?'Mappls script blocked':'Mappls SDK unavailable (token/policy issue)');},7000);</script></body></html>`;
+    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css"/><style>html,body,#map{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0a0a0a}.dot{width:12px;height:12px;border-radius:999px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)}.err{padding:12px;color:#fecaca;background:#7f1d1d;font:12px sans-serif}</style></head><body><div id="map"></div><script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script><script>const S=${JSON.stringify(start)},E=${JSON.stringify(end)},TOKEN=${JSON.stringify(MAPBOX_TOKEN)};let map=null;function mk(c){const d=document.createElement('div');d.className='dot';d.style.background=c;return d;}function showErr(m){const el=document.getElementById('map');if(el)el.innerHTML='<div class="err">'+String(m).replace(/</g,'&lt;')+'</div>';}function fit(){if(!map)return;const pts=[];if(S)pts.push([S.lng,S.lat]);if(E)pts.push([E.lng,E.lat]);if(!pts.length)return;const lats=pts.map(p=>p[1]),lngs=pts.map(p=>p[0]);if(pts.length===1){map.flyTo({center:pts[0],zoom:13,duration:700});return;}map.fitBounds([[Math.min(...lngs),Math.min(...lats)],[Math.max(...lngs),Math.max(...lats)]],{padding:60,maxZoom:15,duration:800});}function init(){if(!window.mapboxgl){showErr("Mapbox SDK failed to load");return;}mapboxgl.accessToken=TOKEN;map=new mapboxgl.Map({container:'map',style:'mapbox://styles/mapbox/navigation-night-v1',center:S?[S.lng,S.lat]:[78.9629,20.5937],zoom:S?11:4,attributionControl:false});map.on('load',()=>{if(S)new mapboxgl.Marker({element:mk('#22c55e')}).setLngLat([S.lng,S.lat]).addTo(map);if(E)new mapboxgl.Marker({element:mk('#ef4444')}).setLngLat([E.lng,E.lat]).addTo(map);if(S&&E){const line={type:'Feature',properties:{},geometry:{type:'LineString',coordinates:[[S.lng,S.lat],[E.lng,E.lat]]}};map.addSource('route',{type:'geojson',data:line});map.addLayer({id:'route-casing',type:'line',source:'route',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#fff','line-width':8,'line-opacity':0.85}});map.addLayer({id:'route-line',type:'line',source:'route',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#4285F4','line-width':4}});}fit();});map.on('error',e=>showErr((e&&e.error&&e.error.message)||'Mapbox map error'));}if(!TOKEN){showErr("Missing EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN")}else{init();}</script></body></html>`;
   }, [end, start]);
 
   return <WebView originWhitelist={["*"]} source={{ html }} style={styles.mapImage} javaScriptEnabled domStorageEnabled mixedContentMode="always" />;
@@ -991,7 +991,7 @@ export function CreateEventScreen({ navigation }: Props) {
 
           <View style={styles.mapPlaceholder}>
             <Text style={styles.mapPhTitle}>Map preview</Text>
-            <MapplsCreatePreview start={startCoords} end={endCoords} />
+            <MapboxCreatePreview start={startCoords} end={endCoords} />
             {startCoords ? (
               <Text style={styles.coordLine}>
                 📍 {meetupPoint || "Start"} ({startCoords.lat.toFixed(5)}, {startCoords.lng.toFixed(5)})

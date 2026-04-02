@@ -1,0 +1,51 @@
+Trip-Sync repo map (folders + key file names for AI)
+
+Root
+- `.env`, `.env.example`, `.gitignore`
+- `api/` → `index.ts`
+
+`backend/`
+- `server.ts`, `server.impl.ts`, `tsconfig.json`, `package.json`, `vercel.json`
+- `api/` → `index.ts`
+- `livetripmap/` → `registerLiveTripMapRoutes.ts`
+- `src/lib/` → `supabaseServerClient.ts`
+
+`frontend/`
+- `index.html`
+- `src/`
+  - `main.tsx`, `App.tsx`, `index.css`, `vite-env.d.ts`
+  - `components/` → `LiveTripMap.tsx`, `LiveTripMapNoProvider.tsx`, `MapboxRouteMap.tsx`, `RoutePreviewMap.tsx`
+  - `lib/` → `auth.ts`, `keepAlive.ts`, `supabaseClient.ts`, `supabaseServerClient.ts`, `utils.ts`
+- `api/` → `proxy.js`
+
+`mobile/`
+- `App.tsx`, `index.ts`, `app.json`, `metro.config.js`, `tsconfig.json`
+- `src/`
+  - `config.ts`, `theme.ts`, `types.ts`
+  - `api/` → `client.ts`
+  - `components/` → `LiveMapView.tsx`, `ui.tsx`
+  - `constants/` → `createEvent.ts`
+  - `context/` → `AuthContext.tsx`, `ThemeContext.tsx`
+  - `lib/` → `createEventFormat.ts`, `mapStyles.ts`, `supabase.ts`, `tripNormalize.ts`, `weather.ts`
+  - `navigation/` → `AppNavigator.tsx`
+  - `screens/` (mobile screens)
+    - `LandingScreen.tsx`
+    - `LoginScreen.tsx`
+    - `SignupScreen.tsx`
+    - `OrganizerScreen.tsx`
+    - `UserDashboardScreen.tsx`
+    - `TripDetailScreen.tsx`
+    - `LiveTripScreen.tsx`
+    - `EndTripDashboardScreen.tsx`
+    - `ExploreScreen.tsx`
+    - `CreateEventScreen.tsx`
+    - `ProfileScreen.tsx`
+
+`sql/`
+- `fix_organizer_coupons_rls.sql`
+- `fix_users_rls_signup.sql`
+- `nearby_attractions_schema.sql`
+- `organizer_coupons_schema.sql`
+
+`scripts/`
+

@@ -5,6 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import { networkInterfaces } from "os";
+import { existsSync } from "fs";
 import { createSupabaseServerClient } from "./src/lib/supabaseServerClient.js";
 import { registerLiveTripMapRoutes } from "./livetripmap/registerLiveTripMapRoutes.js";
 
@@ -1826,16 +1827,31 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
         console.log(`Socket ${socket.id} joined trip-${tripId}`);
       });
 
-      socket.on("convoy-action", (payload: { kind?: string; tripId?: number; userId?: number }) => {
+      socket.on("convoy-action", (payload: {
+        kind?: string;
+        tripId?: number;
+        userId?: number;
+        actorName?: string;
+        reason?: string;
+        details?: string;
+        at?: string;
+      }) => {
         const tripIdNum = Number(payload?.tripId);
         const kind = String(payload?.kind || "").trim();
         if (!Number.isFinite(tripIdNum) || !kind) return;
         const uid = toFiniteNumber(payload?.userId);
+        const actorName = String(payload?.actorName || "").trim();
+        const reason = String(payload?.reason || "").trim();
+        const details = String(payload?.details || "").trim();
+        const at = String(payload?.at || "").trim() || new Date().toISOString();
         io.to(`trip-${tripIdNum}`).emit("convoy-action", {
           kind,
           tripId: tripIdNum,
           userId: uid,
-          at: new Date().toISOString(),
+          actorName: actorName || undefined,
+          reason: reason || undefined,
+          details: details || undefined,
+          at,
         });
       });
 
@@ -1892,16 +1908,21 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     });
   }
 
-  // Vite middleware for development
-  if (shouldListen && process.env.NODE_ENV !== "production") {
+  // Vite middleware:
+  // - Prefer it during local dev
+  // - Also fall back to it if the frontend build output is missing (prevents GET / 404)
+  const frontendDistIndex = path.resolve(repoRoot, "frontend", "dist", "index.html");
+  const hasFrontendDist = existsSync(frontendDistIndex);
+  if (shouldListen && (!hasFrontendDist || process.env.NODE_ENV !== "production")) {
     if (!httpServer) {
       throw new Error("HTTP server missing in listen mode");
     }
     const { createServer: createViteServer } = await import("vite");
+    const frontendRoot = path.resolve(repoRoot, "frontend");
     // Bind HMR to the same HTTP server so phones on Wi‑Fi use the LAN IP (not localhost).
     // Without this, @vite/client tries ws://localhost and the app fails to load on mobile.
     const vite = await createViteServer({
-      root: repoRoot,
+      root: frontendRoot,
       configFile: path.join(repoRoot, "frontend", "vite.config.js"),
       server: {
         middlewareMode: true,
