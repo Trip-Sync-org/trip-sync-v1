@@ -10,6 +10,6 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  "include": ["api/**/*.ts", "server.ts", "server.impl.ts", "src/**/*.ts"]
+  "include": ["api/**/*.ts", "server.ts", "server.impl.ts", "src/**/*.ts", "livetripmap/**/*.ts"]
 }
 
