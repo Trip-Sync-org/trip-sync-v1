@@ -1,5 +1,19 @@
 import type { Express } from "express";
 
+const inMemoryAlertsByTrip = new Map<
+  number,
+  Array<{
+    id: string;
+    trip_id: number;
+    user_id: number;
+    actor_name: string;
+    kind: string;
+    reason: string | null;
+    details: string | null;
+    created_at: string;
+  }>
+>();
+
 export type LiveTripMapRoutesContext = {
   supabase: any;
   getTripById: (tripId: number) => Promise<any | null>;
@@ -14,6 +28,7 @@ export type LiveTripMapRoutesContext = {
 };
 
 export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesContext): void {
+  let hasTripAlertsTable: boolean | null = null;
   // Map API proxy routes (provider-neutral fallbacks)
   app.get("/api/maps/geocode", async (req, res) => {
     const query = String(req.query.query || req.query.q || "").trim();
@@ -410,6 +425,124 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
       label: String(data.label || "Map pin"),
       addedBy: String(data.added_by || req.body?.added_by || "Rider"),
     });
+  });
+
+  // Alerts API for serverless-safe mobile/web alert flow.
+  app.post("/api/trips/:id/alerts", async (req, res) => {
+    const tripId = Number(req.params.id);
+    const userId = Number(req.body?.user_id);
+    const kind = String(req.body?.kind || "").trim();
+    const reason = req.body?.reason == null ? null : String(req.body.reason).trim();
+    const details = req.body?.details == null ? null : String(req.body.details).trim();
+    const actorName = String(req.body?.actor_name || "").trim();
+    if (!Number.isFinite(tripId) || !Number.isFinite(userId) || !kind) {
+      return res.status(400).json({ error: "trip id, user id and kind are required" });
+    }
+
+    const trip = await ctx.getTripById(tripId);
+    if (!trip) return res.status(404).json({ error: "Trip not found" });
+    const actor = await ctx.getUserById(userId);
+    if (!actor) return res.status(404).json({ error: "User not found" });
+
+    const isTripOrganizer = actor.role === "organizer" && Number(trip.organizer_id) === userId;
+    if (!isTripOrganizer) {
+      const { data: booking } = await ctx.supabase
+        .from("bookings")
+        .select("id")
+        .eq("trip_id", tripId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!booking) return res.status(403).json({ error: "Only participants can send alerts" });
+    }
+
+    const nowIso = new Date().toISOString();
+    const alertRow = {
+      id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      trip_id: tripId,
+      user_id: userId,
+      actor_name: actorName || String(actor.name || `User ${userId}`),
+      kind,
+      reason,
+      details,
+      created_at: nowIso,
+    };
+
+    // Always keep a memory fallback (useful when DB table is missing).
+    const memList = inMemoryAlertsByTrip.get(tripId) ?? [];
+    memList.unshift(alertRow);
+    inMemoryAlertsByTrip.set(tripId, memList.slice(0, 200));
+
+    if (hasTripAlertsTable !== false) {
+      const { error } = await ctx.supabase.from("trip_alerts").insert({
+        trip_id: tripId,
+        user_id: userId,
+        actor_name: alertRow.actor_name,
+        kind,
+        reason,
+        details,
+      });
+      if (error) {
+        if (ctx.isMissingTableError(error.message)) {
+          hasTripAlertsTable = false;
+        } else {
+          console.warn("trip_alerts insert:", error.message);
+        }
+      } else {
+        hasTripAlertsTable = true;
+      }
+    }
+
+    return res.json(alertRow);
+  });
+
+  app.get("/api/trips/:id/alerts", async (req, res) => {
+    const tripId = Number(req.params.id);
+    const userId = Number(req.query.user_id);
+    const since = String(req.query.since || "").trim();
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit || 30)));
+    if (!Number.isFinite(tripId) || !Number.isFinite(userId)) {
+      return res.status(400).json({ error: "trip id and user id are required" });
+    }
+
+    const trip = await ctx.getTripById(tripId);
+    if (!trip) return res.status(404).json({ error: "Trip not found" });
+    const actor = await ctx.getUserById(userId);
+    if (!actor) return res.status(404).json({ error: "User not found" });
+
+    const isTripOrganizer = actor.role === "organizer" && Number(trip.organizer_id) === userId;
+    if (!isTripOrganizer) {
+      const { data: booking } = await ctx.supabase
+        .from("bookings")
+        .select("id")
+        .eq("trip_id", tripId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!booking) return res.status(403).json({ error: "Only participants can view alerts" });
+    }
+
+    if (hasTripAlertsTable !== false) {
+      let q = ctx.supabase
+        .from("trip_alerts")
+        .select("id, trip_id, user_id, actor_name, kind, reason, details, created_at")
+        .eq("trip_id", tripId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (since) q = q.gt("created_at", since);
+      const { data, error } = await q;
+      if (!error) {
+        hasTripAlertsTable = true;
+        return res.json({ alerts: data ?? [] });
+      }
+      if (ctx.isMissingTableError(error.message)) {
+        hasTripAlertsTable = false;
+      } else {
+        console.warn("trip_alerts read:", error.message);
+      }
+    }
+
+    const mem = inMemoryAlertsByTrip.get(tripId) ?? [];
+    const filtered = since ? mem.filter((a) => a.created_at > since) : mem;
+    return res.json({ alerts: filtered.slice(0, limit) });
   });
 }
 

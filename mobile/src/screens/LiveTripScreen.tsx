@@ -149,6 +149,16 @@ type LiveAlert = {
   dismissible: boolean;
 };
 
+type AlertApiRow = {
+  id?: string | number;
+  kind?: string;
+  user_id?: number | null;
+  actor_name?: string;
+  created_at?: string;
+  reason?: string | null;
+  details?: string | null;
+};
+
 /** Distinct pin colors so riders read like a racing grid. */
 const RIDER_PIN_COLORS = ["#22c55e", "#3b82f6", "#f97316", "#a855f7", "#ec4899", "#14b8a6", "#eab308", "#ef4444"];
 
@@ -221,6 +231,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const [myDistanceKm, setMyDistanceKm] = useState(0);
   const sheetHeightAnim = useRef(new Animated.Value(200)).current;
   const sheetScrollYRef = useRef(0);
+  const seenAlertIdsRef = useRef<Set<string>>(new Set());
+  const lastAlertIsoRef = useRef<string>("");
 
   const tripIdNum = Number(id);
   const localMemberId = Number.isFinite(Number(user?.id)) ? `m${Number(user!.id)}` : null;
@@ -258,7 +270,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
   );
 
   const pushIncomingAlert = useCallback(
-    (payload: { kind?: string; userId?: number | null; actorName?: string; at?: string; reason?: string; details?: string }) => {
+    (payload: { id?: string; kind?: string; userId?: number | null; actorName?: string; at?: string; reason?: string; details?: string }) => {
       const kind = String(payload.kind ?? "");
       if (!kind) return;
       const actorUserId = payload.userId ?? null;
@@ -288,7 +300,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
         message = `${actorName}: ${kind}${extra ? ` (${extra})` : ""}`;
       }
       const next: LiveAlert = {
-        id: `${atIso}-${kind}-${actorUserId ?? "na"}`,
+        id: payload.id && payload.id.trim().length > 0 ? payload.id : `${atIso}-${kind}-${actorUserId ?? "na"}`,
         kind,
         title,
         message,
@@ -570,6 +582,51 @@ export function LiveTripScreen({ route, navigation }: Props) {
       socketRef.current = null;
     };
   }, [tripIdNum, isOrganizer, phase]);
+
+  useEffect(() => {
+    if (phase !== "live" || !user?.id || !Number.isFinite(tripIdNum)) return;
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const since = lastAlertIsoRef.current ? `&since=${encodeURIComponent(lastAlertIsoRef.current)}` : "";
+        const res = await apiFetch(
+          `/api/trips/${tripIdNum}/alerts?user_id=${Number(user.id)}&limit=50${since}`,
+        );
+        const body = (await res.json().catch(() => ({}))) as { alerts?: AlertApiRow[] };
+        if (!res.ok || stopped) return;
+        const incoming = Array.isArray(body.alerts) ? body.alerts : [];
+        for (const row of incoming) {
+          const alertId = row.id != null ? String(row.id) : "";
+          if (!alertId || seenAlertIdsRef.current.has(alertId)) continue;
+          seenAlertIdsRef.current.add(alertId);
+          const atIso = String(row.created_at || new Date().toISOString());
+          if (!lastAlertIsoRef.current || atIso > lastAlertIsoRef.current) {
+            lastAlertIsoRef.current = atIso;
+          }
+          const selfId = Number(user.id);
+          const actorId = row.user_id != null ? Number(row.user_id) : null;
+          if (actorId === selfId) continue;
+          pushIncomingAlert({
+            id: alertId,
+            kind: row.kind,
+            userId: actorId,
+            actorName: row.actor_name,
+            at: atIso,
+            reason: row.reason ?? undefined,
+            details: row.details ?? undefined,
+          });
+        }
+      } catch {
+        // Keep polling; socket may still deliver in parallel.
+      }
+    };
+    tick();
+    const t = setInterval(tick, 2500);
+    return () => {
+      stopped = true;
+      clearInterval(t);
+    };
+  }, [phase, pushIncomingAlert, tripIdNum, user?.id]);
 
   useEffect(() => {
     if (phase !== "live" || !user?.id) return;
@@ -1005,21 +1062,37 @@ export function LiveTripScreen({ route, navigation }: Props) {
   }, []);
 
   const emitConvoy = useCallback(
-    (kind: string, extras?: { reason?: string; details?: string }) => {
+    async (kind: string, extras?: { reason?: string; details?: string }) => {
       if (!user?.id) return;
       if (kind === "line-up-formation" && !canSendLineupFormation) {
         Alert.alert("Not allowed", "Only organizer, co-admin, or moderator can send line-up formation alerts.");
         return;
       }
-      socketRef.current?.emit("convoy-action", {
+      const atIso = new Date().toISOString();
+      const payload = {
         kind,
         tripId: tripIdNum,
         userId: Number(user.id),
         actorName: user?.name || "You",
-        at: new Date().toISOString(),
+        at: atIso,
         reason: extras?.reason,
         details: extras?.details,
-      });
+      };
+      try {
+        await apiFetch(`/api/trips/${tripIdNum}/alerts`, {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: Number(user.id),
+            kind,
+            actor_name: payload.actorName,
+            reason: extras?.reason,
+            details: extras?.details,
+          }),
+        });
+      } catch {
+        // Socket fallback still runs for near-realtime UX.
+      }
+      socketRef.current?.emit("convoy-action", payload);
       showSentAlertPopup(kind, extras?.details || extras?.reason);
     },
     [tripIdNum, user?.id, canSendLineupFormation, showSentAlertPopup],
