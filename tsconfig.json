@@ -19,5 +19,6 @@
     "backend/server.ts",
     "backend/server.impl.ts",
     "backend/api"
-  ]
+  ],
+  "exclude": ["frontend", "mobile"]
 }

@@ -14,7 +14,7 @@
     "build": "vite build --config frontend/vite.config.js",
     "preview": "vite preview --config frontend/vite.config.js",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc -p backend/tsconfig.json --noEmit"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
