@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "lib": ["ES2022", "DOM"],
+    "skipLibCheck": true,
+    "allowJs": false,
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "include": [
+    "./**/*.ts",
+    "../server.ts",
+    "../backend/server.ts",
+    "../backend/server.impl.ts",
+    "../backend/src/**/*.ts",
+    "../backend/livetripmap/**/*.ts"
+  ],
+  "exclude": [
+    "../frontend",
+    "../mobile"
+  ]
+}
