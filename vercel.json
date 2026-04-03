@@ -1,6 +1,7 @@
 {
   "version": 2,
-  "buildCommand": "echo API-only deploy",
+  "framework": null,
+  "buildCommand": "npm run vercel-build",
   "builds": [
     {
       "src": "api/index.ts",

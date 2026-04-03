@@ -12,6 +12,7 @@
     "backend:dev": "tsx backend/server.ts",
     "dev": "tsx backend/server.ts",
     "build": "vite build --config frontend/vite.config.js",
+    "vercel-build": "node -e \"console.log('API-only deploy: skipping Vite'); process.exit(0)\"",
     "preview": "vite preview --config frontend/vite.config.js",
     "clean": "rm -rf dist",
     "lint": "tsc -p backend/tsconfig.json --noEmit"
