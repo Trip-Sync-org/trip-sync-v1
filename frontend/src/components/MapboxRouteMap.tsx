@@ -106,7 +106,7 @@ export default function MapboxRouteMap({
 
         const waitLoad = () => new Promise<void>((resolve) => {
           if (map.isStyleLoaded()) resolve();
-          else map.once("load", resolve);
+          else map.once("load", () => resolve());
         });
         await waitLoad();
 

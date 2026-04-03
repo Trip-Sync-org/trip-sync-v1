@@ -4562,6 +4562,8 @@ const LiveTripPage = ({ user }: { user: User }) => {
         <div className="absolute inset-0 overflow-hidden bg-[#0a1628]">
           <LiveTripMap
             ref={liveMapRef}
+            tripId={trip ? Number(trip.id) || 0 : 0}
+            userId={Number(user.id) || 0}
             minimalChrome
             mapTheme={liveMapTheme}
             onMapThemeChange={setLiveMapTheme}
