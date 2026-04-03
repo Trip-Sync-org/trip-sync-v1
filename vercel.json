@@ -1,9 +1,12 @@
 {
-  "functions": {
-    "api/index.ts": {
-      "maxDuration": 30
+  "version": 2,
+  "buildCommand": "echo API-only deploy",
+  "builds": [
+    {
+      "src": "api/index.ts",
+      "use": "@vercel/node"
     }
-  },
+  ],
   "routes": [
     {
       "src": "/(.*)",
