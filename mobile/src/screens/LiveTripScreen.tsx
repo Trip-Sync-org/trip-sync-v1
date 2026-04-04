@@ -132,6 +132,13 @@ function hasValidMapCoords(m: LiveMember): boolean {
   return lat != null && lng != null && (Math.abs(lat) > 1e-5 || Math.abs(lng) > 1e-5);
 }
 
+/** For merge: prefer socket/real-time row when its fix is newer than REST (avoids stale DB overwriting live pins). */
+function locationUpdatedAtMs(iso: string | null | undefined): number {
+  if (!iso) return 0;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : 0;
+}
+
 /**
  * Same DB user can appear twice (REST 0,0 + socket row). Dedupe by user id, keeping the row
  * with a real GPS fix; if both have fixes, keep the newer locationUpdatedAt.
@@ -265,7 +272,14 @@ function mergeLiveMembersFromApi(prev: LiveMember[], incoming: LiveMember[]): Li
       }
     }
 
-    if (incMissing && oldHasFix && old) {
+    const prevMs = locationUpdatedAtMs(old?.locationUpdatedAt);
+    const incMs = locationUpdatedAtMs(inc.locationUpdatedAt);
+    const keepPrevPosition =
+      old &&
+      oldHasFix &&
+      (incMissing || prevMs > incMs);
+
+    if (keepPrevPosition) {
       lat = oldLat!;
       lng = oldLng!;
       speed = old.speed;
@@ -724,23 +738,41 @@ export function LiveTripScreen({ route, navigation }: Props) {
   }, [voiceMode, videoCallActive]);
 
   useEffect(() => {
+    const lastSeenPeer: Record<number, number> = {};
+
     const socket = io(API_BASE_URL, {
-      // Polling first: some mobile networks block WS; peers still get REST + fallback.
-      transports: ["polling", "websocket"],
+      transports: ["websocket", "polling"],
       path: "/socket.io/",
       reconnection: true,
-      reconnectionAttempts: 8,
-      reconnectionDelay: 500,
+      reconnectionAttempts: 20,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 10000,
     });
     socketRef.current = socket;
+
+    const selfUid = appUserNumericId(user);
+
+    const emitLastKnownPosition = () => {
+      const pos = lastPosRef.current;
+      const uid = appUserNumericId(user);
+      if (!pos || uid == null) return;
+      socket.emit("update-location", {
+        tripId: tripIdNum,
+        userId: uid,
+        lat: pos.lat,
+        lng: pos.lng,
+        speed: null,
+        heading: null,
+      });
+    };
 
     const onConnectErr = (err: Error) => {
       setMapDiag(
         `Live socket: ${err.message || "cannot connect"}. Same Wi‑Fi/LAN as the API? EXPO_PUBLIC_API_URL must be http://<PC-IP>:3000 not localhost.`,
       );
+      if (__DEV__) console.log("[socket] connect error:", err.message);
     };
-    socket.on("connect_error", onConnectErr);
-    socket.on("connect", () => setMapDiag((d) => (d?.includes("Live socket") ? null : d)));
 
     const joinTripRoom = () => {
       socket.emit("join-trip", Number(tripIdNum));
@@ -748,12 +780,20 @@ export function LiveTripScreen({ route, navigation }: Props) {
       if (uid != null) {
         socket.emit("join-trip", { tripId: tripIdNum, userId: uid });
       }
+      socket.emit("request-positions", { tripId: tripIdNum });
+      if (__DEV__) console.log("[socket] joined trip room:", tripIdNum);
     };
+
     const onConnect = () => {
+      setMapDiag((d) => (d?.includes("Live socket") ? null : d));
       joinTripRoom();
       if (__DEV__) console.log("[socket] connected + joined trip", tripIdNum);
       void fetchLiveStateRef.current();
+      setTimeout(() => {
+        emitLastKnownPosition();
+      }, 500);
     };
+
     if (socket.connected) onConnect();
     socket.on("connect", onConnect);
 
@@ -762,10 +802,46 @@ export function LiveTripScreen({ route, navigation }: Props) {
       if (!Number.isFinite(uid)) return;
       const selfId = appUserNumericId(user);
       if (selfId != null && uid === selfId) return;
-      // Do not drop members on disconnect — transient reconnects cleared peer coords in UI while
-      // REST could still return 0,0 until the next fix, so markers disappeared. Sync from API instead.
       void fetchLiveStateRef.current();
     });
+
+    const onBroadcastPositionNow = () => {
+      emitLastKnownPosition();
+    };
+
+    const onRiderLeft = (payload: { userId?: number }) => {
+      const uid = Number(payload?.userId);
+      if (!Number.isFinite(uid)) return;
+      delete lastSeenPeer[uid];
+      const memberId = `m${uid}`;
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.id === memberId ? { ...m, lat: 0, lng: 0, status: "absent" as const } : m,
+        ),
+      );
+    };
+
+    socket.on("broadcast-position-now", onBroadcastPositionNow);
+    socket.on("rider-left", onRiderLeft);
+
+    const STALE_MS = 15000;
+    const staleTimer = setInterval(() => {
+      const now = Date.now();
+      Object.entries(lastSeenPeer).forEach(([userIdStr, lastSeen]) => {
+        const peerUserId = Number(userIdStr);
+        if (!Number.isFinite(peerUserId)) return;
+        if (selfUid != null && peerUserId === selfUid) return;
+        if (now - lastSeen <= STALE_MS) return;
+        const memberId = `m${peerUserId}`;
+        if (__DEV__) console.log("[convoy] rider stale, hiding from map:", memberId);
+        delete lastSeenPeer[peerUserId];
+        setMembers((prev) =>
+          prev.map((m) =>
+            m.id === memberId ? { ...m, lat: 0, lng: 0, status: "absent" as const } : m,
+          ),
+        );
+      });
+    }, 5000);
 
     socket.on(
       "location-updated",
@@ -781,6 +857,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
         const plng = toNum(payload.lng);
         if (!Number.isFinite(puid) || plat == null || plng == null) return;
         if (Math.abs(plat) <= 1e-5 && Math.abs(plng) <= 1e-5) return;
+        lastSeenPeer[puid] = Date.now();
         if (__DEV__) {
           console.log("📍 location-updated:", puid, plat, plng);
         }
@@ -849,9 +926,19 @@ export function LiveTripScreen({ route, navigation }: Props) {
       },
     );
 
+    const onDisconnect = (reason: string) => {
+      if (__DEV__) console.log("[socket] disconnected:", reason);
+    };
+
+    socket.on("disconnect", onDisconnect);
+
     return () => {
+      clearInterval(staleTimer);
       socket.off("connect_error", onConnectErr);
       socket.off("connect", onConnect);
+      socket.off("broadcast-position-now", onBroadcastPositionNow);
+      socket.off("rider-left", onRiderLeft);
+      socket.off("disconnect", onDisconnect);
       socket.disconnect();
       socketRef.current = null;
     };

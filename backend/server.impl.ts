@@ -1847,6 +1847,14 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
         }
       });
 
+      socket.on("request-positions", (payload: unknown) => {
+        const p = payload as { tripId?: unknown };
+        const tid = Number(p?.tripId);
+        if (!Number.isFinite(tid)) return;
+        const room = `trip-${Number(tid)}`;
+        socket.to(room).emit("broadcast-position-now");
+      });
+
       socket.on("convoy-action", (payload: {
         kind?: string;
         tripId?: number;
@@ -1941,12 +1949,24 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
         io.to(`trip-${tripId}`).emit("new-message", { userId, message, timestamp: new Date() });
       });
 
-      socket.on("disconnect", () => {
+      socket.on("disconnect", async () => {
         const data = socket.data as { liveTripId?: number; liveUserId?: number | null };
         const tid = data?.liveTripId;
         const uid = data?.liveUserId;
         if (tid != null && uid != null && Number.isFinite(tid) && Number.isFinite(uid)) {
-          io.to(`trip-${tid}`).emit("trip-member-presence", { userId: uid, online: false });
+          const room = `trip-${Number(tid)}`;
+          io.to(room).emit("trip-member-presence", { userId: uid, online: false });
+          io.to(room).emit("rider-left", { userId: uid });
+          try {
+            const { error: delErr } = await supabase
+              .from("trip_participant_locations")
+              .delete()
+              .eq("trip_id", Number(tid))
+              .eq("user_id", Number(uid));
+            if (delErr) console.error("[socket] location delete on disconnect:", delErr.message);
+          } catch (err) {
+            console.error("[socket] location delete on disconnect:", err);
+          }
         }
         console.log("User disconnected");
       });

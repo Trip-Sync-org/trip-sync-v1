@@ -91,11 +91,6 @@ function buildHtml(dark: boolean, token: string): string {
     box-shadow:0 2px 6px rgba(0,0,0,.4);
     position:relative;
   }
-  .mb-spd {
-    position:absolute; bottom:-18px; left:50%; transform:translateX(-50%);
-    background:rgba(0,0,0,.75); color:#fff; padding:1px 5px;
-    border-radius:8px; font-size:9px; white-space:nowrap; font-weight:700;
-  }
   .mb-pin { width:12px; height:12px; border-radius:50%; border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,.4); }
   @keyframes pulse { 0%{transform:scale(1);opacity:.8}100%{transform:scale(3);opacity:0} }
 </style>
@@ -136,20 +131,11 @@ function mkDot(color) {
   el.style.background = color || "#3b82f6";
   return el;
 }
-function mkMember(name, color, speed) {
+function mkMember(name, color) {
   const el = document.createElement("div");
   el.className = "mb-member";
   el.style.background = color || "#1a73e8";
-  el.style.flexDirection = "column";
-  el.style.alignItems = "center";
-  el.style.justifyContent = "center";
-  const initials = document.createElement("span");
-  initials.textContent = (name || "?").substring(0, 2).toUpperCase();
-  el.appendChild(initials);
-  const spd = document.createElement("div");
-  spd.className = "mb-spd";
-  spd.textContent = Math.round(Number(speed) || 0) + " km/h";
-  el.appendChild(spd);
+  el.textContent = (name || "?").substring(0, 2).toUpperCase();
   return el;
 }
 function mkUserDot(headingDeg) {
@@ -232,11 +218,9 @@ function apply(data) {
       try {
         const el = existing.getElement();
         if (el) el.style.zIndex = "15";
-        const badge = el.querySelector(".mb-spd");
-        if (badge) badge.textContent = Math.round(Number(m.speed) || 0) + " km/h";
       } catch {}
     } else {
-      const mm = new mapboxgl.Marker({ element: mkMember(m.name, m.color, m.speed), anchor: "center" })
+      const mm = new mapboxgl.Marker({ element: mkMember(m.name, m.color), anchor: "center" })
         .setLngLat([ln, la])
         .addTo(map);
       try {
@@ -260,28 +244,6 @@ function apply(data) {
     pinMarkers.push(new mapboxgl.Marker({ element: mkDot("#a78bfa"), anchor: "bottom" }).setLngLat([ln, la]).addTo(map));
   });
 
-  if (data.userGeo) {
-    const lat = Number(data.userGeo.lat); const lng = Number(data.userGeo.lng);
-    if (Number.isFinite(lat) && Number.isFinite(lng)) {
-      const { headingDeg } = data.userGeo;
-      if (!userMarker) {
-        userMarker = new mapboxgl.Marker({ element: mkUserDot(headingDeg), anchor:"center" }).setLngLat([lng, lat]).addTo(map);
-        try {
-          const el = userMarker.getElement();
-          if (el) el.style.zIndex = "25";
-        } catch {}
-      } else {
-        userMarker.setLngLat([lng, lat]);
-        try {
-          const el = userMarker.getElement();
-          if (el) el.style.zIndex = "25";
-        } catch {}
-        const cone = userMarker.getElement().querySelector(".mb-cone");
-        if (cone && headingDeg != null) cone.style.transform = "rotate(" + headingDeg + "deg)";
-      }
-      updateRouteProgress(lng, lat);
-    }
-  }
 }
 
 function fitAll(data) {
@@ -373,11 +335,37 @@ function applySetDataPayload(msg) {
   latestData = msg;
   if (map) apply(latestData);
 }
+function applyUserGeoPayload(ug) {
+  if (!map || !ug) return;
+  const lat = Number(ug.lat); const lng = Number(ug.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  const headingDeg = ug.headingDeg;
+  if (!userMarker) {
+    userMarker = new mapboxgl.Marker({ element: mkUserDot(headingDeg != null ? headingDeg : 0), anchor: "center" })
+      .setLngLat([lng, lat])
+      .addTo(map);
+    try {
+      const el = userMarker.getElement();
+      if (el) el.style.zIndex = "25";
+    } catch {}
+  } else {
+    userMarker.setLngLat([lng, lat]);
+    try {
+      const el = userMarker.getElement();
+      if (el) el.style.zIndex = "25";
+      const cone = el && el.querySelector(".mb-cone");
+      if (cone && headingDeg != null) cone.style.transform = "rotate(" + headingDeg + "deg)";
+    } catch {}
+  }
+  updateRouteProgress(lng, lat);
+}
 function onRNMessage(raw) {
   try {
     const msg = JSON.parse(raw || "{}");
     if (msg.type === "set-data") {
       applySetDataPayload(msg);
+    } else if (msg.type === "update-user-geo" && msg.userGeo) {
+      applyUserGeoPayload(msg.userGeo);
     } else if (msg.type === "fit") {
       fitAll(msg);
     } else if (msg.type === "recenter" && msg.point) {
@@ -430,6 +418,8 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
   const [ready, setReady]  = useState(false);
   const latestRef          = useRef<object | null>(null);
   const memberVersionRef   = useRef(0);
+  const prevMemberCoordsRef = useRef<string | null>(null);
+  const prevRestDataRef    = useRef<string | null>(null);
   const mapboxToken = getMapboxPublicToken();
   const tokenErr = useMemo(() => mapboxTokenConfigError(mapboxToken), [mapboxToken]);
   const tokenErrReported = useRef(false);
@@ -459,8 +449,27 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
     }
   }, []);
 
-  // Push data whenever any prop changes (version bumps so WebView always applies member moves)
+  // Push route/members/pins when ready; skip redundant WebView updates if coords + static map props unchanged
   useEffect(() => {
+    if (!ready) return;
+
+    const coordsFingerprint = members
+      .map((m) => `${m.id}:${(m.lat ?? 0).toFixed(4)},${(m.lng ?? 0).toFixed(4)}`)
+      .sort()
+      .join("|");
+    const restFingerprint = [JSON.stringify(route), JSON.stringify(start), JSON.stringify(end), JSON.stringify(pins)].join(
+      "||",
+    );
+    const unchanged =
+      prevMemberCoordsRef.current != null &&
+      prevRestDataRef.current != null &&
+      coordsFingerprint === prevMemberCoordsRef.current &&
+      restFingerprint === prevRestDataRef.current;
+    if (unchanged) return;
+
+    prevMemberCoordsRef.current = coordsFingerprint;
+    prevRestDataRef.current = restFingerprint;
+
     memberVersionRef.current += 1;
     const payload = {
       type: "set-data",
@@ -470,20 +479,16 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
       end,
       members,
       pins,
-      userGeo,
     };
     latestRef.current = payload;
-    if (__DEV__) {
-      console.log(
-        "[LiveMapView] sending members to WebView:",
-        members.map((m) => `${m.id}@${m.lat?.toFixed(4)},${m.lng?.toFixed(4)}`).join(" | "),
-      );
-    }
-    if (ready) {
-      post(payload);
-      injectSetData(payload);
-    }
-  }, [route, start, end, members, pins, userGeo, ready, injectSetData]);
+    post(payload);
+    injectSetData(payload);
+  }, [route, start, end, members, pins, ready, injectSetData]);
+
+  useEffect(() => {
+    if (!ready || !userGeo) return;
+    post({ type: "update-user-geo", userGeo });
+  }, [userGeo, ready]);
 
   // Fit bounds
   useEffect(() => {
