@@ -1822,9 +1822,12 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     io.on("connection", (socket) => {
       console.log("User connected:", socket.id);
 
-      socket.on("join-trip", (tripId) => {
-        socket.join(`trip-${tripId}`);
-        console.log(`Socket ${socket.id} joined trip-${tripId}`);
+      socket.on("join-trip", (tripId: unknown) => {
+        const tid = Number(tripId);
+        if (!Number.isFinite(tid)) return;
+        const room = `trip-${tid}`;
+        socket.join(room);
+        console.log(`[socket] ${socket.id} joined ${room}`);
       });
 
       socket.on("convoy-action", (payload: {
@@ -1870,32 +1873,51 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
           return;
         }
 
-        io.to(`trip-${tripIdNum}`).emit("location-updated", {
+        const room = `trip-${tripIdNum}`;
+        const speedMps = toFiniteNumber(speed);
+        const headingNum =
+          heading != null && Number.isFinite(Number(heading)) ? Number(heading) : null;
+
+        socket.to(room).emit("location-updated", {
           userId: userIdNum,
           lat: latNum,
           lng: lngNum,
-          accuracy,
-          speed,
-          heading,
-          recordedAt: recordedAt || new Date().toISOString(),
+          speed: speedMps,
+          heading: headingNum,
         });
 
-        const payload = {
-          trip_id: tripIdNum,
-          user_id: userIdNum,
-          lat: latNum,
-          lng: lngNum,
-          accuracy_m: toFiniteNumber(accuracy),
-          speed_mps: toFiniteNumber(speed),
-          heading_deg: toFiniteNumber(heading),
-          recorded_at: recordedAt ? new Date(recordedAt).toISOString() : new Date().toISOString(),
-        };
+        const nowIso = new Date().toISOString();
+        try {
+          const { error: locUpsertErr } = await supabase.from("trip_participant_locations").upsert(
+            {
+              trip_id: tripIdNum,
+              user_id: userIdNum,
+              lat: latNum,
+              lng: lngNum,
+              speed_mps: speedMps,
+              updated_at: nowIso,
+            },
+            { onConflict: "trip_id,user_id" },
+          );
+          if (locUpsertErr) console.error("[socket] location upsert failed:", locUpsertErr);
+        } catch (err) {
+          console.error("[socket] location upsert failed:", err);
+        }
 
-        await supabase
-          .from("trip_participant_locations")
-          .upsert(payload, { onConflict: "trip_id,user_id" });
-
-        await supabase.from("trip_location_events").insert(payload);
+        try {
+          await supabase.from("trip_location_events").insert({
+            trip_id: tripIdNum,
+            user_id: userIdNum,
+            lat: latNum,
+            lng: lngNum,
+            accuracy_m: toFiniteNumber(accuracy),
+            speed_mps: speedMps,
+            heading_deg: toFiniteNumber(heading),
+            recorded_at: recordedAt ? new Date(recordedAt).toISOString() : nowIso,
+          });
+        } catch {
+          /* optional analytics table */
+        }
       });
 
       socket.on("send-message", ({ tripId, userId, message }) => {

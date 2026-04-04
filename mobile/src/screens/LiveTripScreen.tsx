@@ -27,7 +27,7 @@ import { normalizeTripFromApi, type Trip } from "../lib/tripNormalize";
 import { fetchWeatherNow, type WeatherNow } from "../lib/weather";
 import { useAppTheme } from "../context/ThemeContext";
 import { colors } from "../theme";
-import { LiveMapView, type LiveMapViewRef, type UserGeo } from "../components/LiveMapView";
+import { LiveMapView, type LiveMapViewRef, type MapMember, type UserGeo } from "../components/LiveMapView";
 
 type Props = NativeStackScreenProps<RootStackParamList, "LiveTrip">;
 
@@ -50,6 +50,8 @@ export type LiveMember = {
   xpGained: number;
   lat: number;
   lng: number;
+  /** ISO time of last known GPS (API / socket); stale markers are hidden */
+  locationUpdatedAt?: string | null;
 };
 
 type Checkpoint = {
@@ -131,6 +133,70 @@ function toNum(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Hide convoy dots if we have not heard from this rider in this window (offline / left / network lost). */
+const PEER_LOCATION_STALE_MS = 45_000;
+const LIVE_STATE_POLL_MS = 1200;
+const LOCATION_HTTP_POST_MIN_MS = 1500;
+
+function isPeerLocationFresh(m: LiveMember): boolean {
+  const raw = m.locationUpdatedAt;
+  if (raw == null || raw === "") return true;
+  const t = Date.parse(raw);
+  if (Number.isNaN(t)) return true;
+  return Date.now() - t <= PEER_LOCATION_STALE_MS;
+}
+
+/**
+ * Merge REST live-state without wiping voice UI or real-time positions.
+ * - If the API still has 0,0 for a rider, keep coords we already have from Socket.IO / HTTP.
+ * - Keep any prev-only members (e.g. added by socket before REST listed them) so they are not dropped.
+ */
+function mergeLiveMembersFromApi(prev: LiveMember[], incoming: LiveMember[]): LiveMember[] {
+  const prevById = new Map(prev.map((m) => [m.id, m]));
+  const incomingIds = new Set(incoming.map((m) => m.id));
+
+  const merged = incoming.map((inc) => {
+    const old = prevById.get(inc.id);
+    let lat = inc.lat;
+    let lng = inc.lng;
+    let speed = inc.speed;
+
+    const incMissing =
+      !Number.isFinite(inc.lat) ||
+      !Number.isFinite(inc.lng) ||
+      (Math.abs(inc.lat) <= 1e-5 && Math.abs(inc.lng) <= 1e-5);
+    const oldHasFix =
+      old &&
+      Number.isFinite(old.lat) &&
+      Number.isFinite(old.lng) &&
+      (Math.abs(old.lat) > 1e-5 || Math.abs(old.lng) > 1e-5);
+
+    let locationUpdatedAt: string | null | undefined =
+      inc.locationUpdatedAt ?? old?.locationUpdatedAt ?? undefined;
+
+    if (incMissing && oldHasFix) {
+      lat = old.lat;
+      lng = old.lng;
+      speed = old.speed;
+      locationUpdatedAt = old.locationUpdatedAt ?? locationUpdatedAt;
+    }
+
+    return {
+      ...inc,
+      lat,
+      lng,
+      speed,
+      locationUpdatedAt: locationUpdatedAt ?? null,
+      role: normalizeRole(inc.role),
+      muted: old?.muted ?? inc.muted,
+      blocked: old?.blocked ?? inc.blocked,
+    };
+  });
+
+  const extra = prev.filter((m) => !incomingIds.has(m.id));
+  return extra.length ? [...merged, ...extra] : merged;
+}
+
 const SOS_OPTIONS: Array<{ id: string; label: string; icon: string; reason: string }> = [
   { id: "breakdown", label: "Breakdown", icon: "🚓", reason: "Vehicle issue" },
   { id: "medical", label: "Medical", icon: "⚕️", reason: "Medical emergency" },
@@ -200,6 +266,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const [endingTrip, setEndingTrip] = useState(false);
   const [tripStarted, setTripStarted] = useState(false);
   const [posTick, setPosTick] = useState(0);
+  /** Bumps on an interval so stale peer markers disappear without waiting for new socket events */
+  const [locationStaleTick, setLocationStaleTick] = useState(0);
   const [currentSpeedKmh, setCurrentSpeedKmh] = useState(0);
   const [weather, setWeather] = useState<WeatherNow | null>(null);
   const [weatherLoading, setWeatherLoading] = useState(false);
@@ -233,6 +301,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const sheetScrollYRef = useRef(0);
   const seenAlertIdsRef = useRef<Set<string>>(new Set());
   const lastAlertIsoRef = useRef<string>("");
+  /** Throttle REST location posts so convoy works when Socket.IO cannot reach the server. */
+  const lastLocationHttpPostRef = useRef<number>(0);
 
   const tripIdNum = Number(id);
   const localMemberId = Number.isFinite(Number(user?.id)) ? `m${Number(user!.id)}` : null;
@@ -473,12 +543,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
         };
         if (!res.ok) return;
         if (Array.isArray(body.members) && body.members.length > 0 && !cancelled) {
-          setMembers(
-            body.members.map((m) => ({
-              ...m,
-              role: normalizeRole(m.role),
-            })),
-          );
+          // Must merge: a blind replace races with Socket.IO / watchPosition and wipes live coords.
+          setMembers((prev) => mergeLiveMembersFromApi(prev, body.members!));
         }
         if (Array.isArray(body.checkpoints) && !cancelled) setCheckpoints(body.checkpoints);
         if (Array.isArray(body.mapPins) && !cancelled) setMapPins(body.mapPins);
@@ -490,6 +556,39 @@ export function LiveTripScreen({ route, navigation }: Props) {
       cancelled = true;
     };
   }, [id, user?.id, accessDenied]);
+
+  // While convoy is live, keep member positions in sync with Supabase (same as web poll).
+  // Socket.IO alone is unreliable on some networks and does not run on typical serverless hosts.
+  useEffect(() => {
+    if (!user?.id || accessDenied || phase !== "live") return;
+    let cancelled = false;
+    const pull = async () => {
+      try {
+        const res = await apiFetch(
+          `/api/trips/${id}/live-state?user_id=${encodeURIComponent(user.id)}`,
+        );
+        const body = (await res.json().catch(() => ({}))) as {
+          members?: LiveMember[];
+          checkpoints?: Checkpoint[];
+          mapPins?: MapPin[];
+        };
+        if (!res.ok || cancelled) return;
+        if (Array.isArray(body.members) && body.members.length > 0) {
+          setMembers((prev) => mergeLiveMembersFromApi(prev, body.members!));
+        }
+        if (Array.isArray(body.checkpoints) && !cancelled) setCheckpoints(body.checkpoints);
+        if (Array.isArray(body.mapPins) && !cancelled) setMapPins(body.mapPins);
+      } catch {
+        /* keep UI stable */
+      }
+    };
+    void pull();
+    const t = setInterval(pull, LIVE_STATE_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [id, user?.id, accessDenied, phase]);
 
   useEffect(() => {
     if (!videoCallActive) return;
@@ -514,11 +613,17 @@ export function LiveTripScreen({ route, navigation }: Props) {
       reconnectionDelay: 500,
     });
     socketRef.current = socket;
-    socket.emit("join-trip", tripIdNum);
+
+    const joinTripRoom = () => {
+      socket.emit("join-trip", Number(tripIdNum));
+    };
+    if (socket.connected) joinTripRoom();
+    socket.on("connect", joinTripRoom);
 
     socket.on(
       "location-updated",
       (payload: { userId: number; lat: number; lng: number; speed?: number }) => {
+        console.log("📍 RECEIVED location-updated:", JSON.stringify(payload));
         const kmh =
           payload.speed != null && Number.isFinite(payload.speed)
             ? Number((payload.speed * 3.6).toFixed(1))
@@ -532,6 +637,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
               ...cur,
               lat: payload.lat,
               lng: payload.lng,
+              locationUpdatedAt: new Date().toISOString(),
               status: cur.status === "absent" ? "on-way" : cur.status,
               ...(kmh != null ? { speed: kmh } : {}),
             };
@@ -542,8 +648,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
             {
               id: `m${payload.userId}`,
               userId: payload.userId,
-              name: `Member ${payload.userId}`,
-              avatar: `member-${payload.userId}`,
+              name: `Rider ${payload.userId}`,
+              avatar: `rider-${payload.userId}`,
               status: "on-way",
               role: "member",
               muted: true,
@@ -554,6 +660,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
               xpGained: 0,
               lat: payload.lat,
               lng: payload.lng,
+              locationUpdatedAt: new Date().toISOString(),
             },
           ];
         });
@@ -633,6 +740,12 @@ export function LiveTripScreen({ route, navigation }: Props) {
     const t = setInterval(() => setElapsedSec((s) => s + 1), 1000);
     return () => clearInterval(t);
   }, [phase, user?.id]);
+
+  useEffect(() => {
+    if (phase !== "live") return;
+    const t = setInterval(() => setLocationStaleTick((x) => x + 1), 4000);
+    return () => clearInterval(t);
+  }, [phase]);
 
   useEffect(() => {
     if (phase !== "live" || !user?.id) {
@@ -741,6 +854,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
                     ...m,
                     lat,
                     lng,
+                    locationUpdatedAt: new Date().toISOString(),
                     speed: Math.max(0, Math.round(speedKmh)),
                     status: m.status === "absent" ? "on-way" : m.status,
                   }
@@ -758,6 +872,23 @@ export function LiveTripScreen({ route, navigation }: Props) {
             heading: heading ?? undefined,
             recordedAt: new Date(loc.timestamp).toISOString(),
           });
+
+          const nowMs = Date.now();
+          if (nowMs - lastLocationHttpPostRef.current >= LOCATION_HTTP_POST_MIN_MS) {
+            lastLocationHttpPostRef.current = nowMs;
+            void apiFetch(`/api/trips/${tripIdNum}/location`, {
+              method: "POST",
+              body: JSON.stringify({
+                user_id: Number(user.id),
+                lat,
+                lng,
+                speed_mps:
+                  speed != null && Number.isFinite(speed) && speed >= 0 ? Number(speed) : null,
+              }),
+            }).catch(() => {
+              /* non-fatal; socket or next tick may succeed */
+            });
+          }
         },
       );
     })();
@@ -1649,23 +1780,30 @@ export function LiveTripScreen({ route, navigation }: Props) {
       : startPoint && endPoint
         ? [startPoint, endPoint]
         : [];
+  /** Only plot riders with a real, recent GPS fix (hide offline / left riders after staleness). */
+  const convoyMarkerCoords = (m: LiveMember): { lat: number; lng: number } | null => {
+    void locationStaleTick;
+    if (!isPeerLocationFresh(m)) return null;
+    if (!Number.isFinite(m.lat) || !Number.isFinite(m.lng)) return null;
+    if (Math.abs(m.lat) <= 1e-5 && Math.abs(m.lng) <= 1e-5) return null;
+    return { lat: m.lat, lng: m.lng };
+  };
   const mapMembers = members
-    .filter(
-      (m) =>
-        m.lat !== 0 &&
-        m.lng !== 0 &&
-        Number.isFinite(m.lat) &&
-        Number.isFinite(m.lng) &&
-        (localMemberId ? m.id !== localMemberId : true),
-    )
-    .map((m, i) => ({
-      id: m.id,
-      name: m.name,
-      lat: m.lat,
-      lng: m.lng,
-      speed: m.speed,
-      color: RIDER_PIN_COLORS[i % RIDER_PIN_COLORS.length],
-    }));
+    .filter((m) => (localMemberId ? m.id !== localMemberId : true))
+    .map((m) => {
+      const c = convoyMarkerCoords(m);
+      if (!c) return null;
+      const i = members.findIndex((x) => x.id === m.id);
+      return {
+        id: m.id,
+        name: m.name,
+        lat: c.lat,
+        lng: c.lng,
+        speed: m.speed,
+        color: RIDER_PIN_COLORS[(i >= 0 ? i : 0) % RIDER_PIN_COLORS.length],
+      };
+    })
+    .filter((m): m is MapMember => m != null);
   const mapOverlayPins = mapPins.map((p) => ({ id: p.id, label: p.label, lat: p.lat, lng: p.lng }));
   const effectiveUserGeo =
     userGeo ??

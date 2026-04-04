@@ -259,7 +259,7 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
 
     const { data: locations, error: locErr } = await ctx.supabase
       .from("trip_participant_locations")
-      .select("user_id, lat, lng, speed_mps")
+      .select("user_id, lat, lng, speed_mps, updated_at")
       .eq("trip_id", tripId);
 
     if (locErr && !ctx.isMissingTableError(locErr.message)) {
@@ -279,7 +279,11 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
       const isTripOwner = numericId === Number(trip.organizer_id);
       const booking = (bookings ?? []).find((b: any) => Number(b.user_id) === numericId);
 
-      const status = isTripOwner || loc
+      const rawLat = loc?.lat != null && Number.isFinite(Number(loc.lat)) ? Number(loc.lat) : 0;
+      const rawLng = loc?.lng != null && Number.isFinite(Number(loc.lng)) ? Number(loc.lng) : 0;
+      const hasRealLocation =
+        (Math.abs(rawLat) > 1e-5 || Math.abs(rawLng) > 1e-5) && ctx.isValidLatLng(rawLat, rawLng);
+      const status = hasRealLocation
         ? "arrived"
         : String(booking?.status || "").toLowerCase() === "cancelled"
           ? "absent"
@@ -287,6 +291,9 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
 
       const speedMps = Number(loc?.speed_mps);
       const speedKmh = Number.isFinite(speedMps) ? speedMps * 3.6 : 0;
+
+      const updatedAtIso =
+        hasRealLocation && loc?.updated_at != null ? String(loc.updated_at) : null;
 
       return {
         id: `m${numericId}`,
@@ -301,8 +308,9 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
         distanceCovered: 0,
         checkpoints: 0,
         xpGained: 0,
-        lat: Number(loc?.lat) || Number((trip as any).meetup_lat) || 0,
-        lng: Number(loc?.lng) || Number((trip as any).meetup_lng) || 0,
+        lat: hasRealLocation ? rawLat : 0,
+        lng: hasRealLocation ? rawLng : 0,
+        locationUpdatedAt: updatedAtIso,
       };
     });
 
@@ -357,6 +365,68 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
     }
 
     return res.json({ members, checkpoints, mapPins });
+  });
+
+  /**
+   * Persist GPS without Socket.IO (mobile/web can POST when websockets are unavailable,
+   * e.g. serverless or flaky networks). Same auth rules as GET live-state.
+   */
+  app.post("/api/trips/:id/location", async (req, res) => {
+    const tripId = Number(req.params.id);
+    const { user_id, lat, lng, speed_mps } = req.body ?? {};
+    const userId = Number(user_id);
+    const latNum = ctx.toFiniteNumber(lat);
+    const lngNum = ctx.toFiniteNumber(lng);
+    const speedMps = ctx.toFiniteNumber(speed_mps);
+
+    if (!Number.isFinite(tripId) || !Number.isFinite(userId)) {
+      return res.status(400).json({ error: "trip id and user_id are required" });
+    }
+    if (latNum == null || lngNum == null || !ctx.isValidLatLng(latNum, lngNum)) {
+      return res.status(400).json({ error: "valid lat and lng are required" });
+    }
+
+    const trip = await ctx.getTripById(tripId);
+    if (!trip) return res.status(404).json({ error: "Trip not found" });
+
+    const actor = await ctx.getUserById(userId);
+    if (!actor) return res.status(404).json({ error: "User not found" });
+
+    const isOrganizer = actor.role === "organizer" && Number(trip.organizer_id) === userId;
+    if (!isOrganizer) {
+      const { data: booking } = await ctx.supabase
+        .from("bookings")
+        .select("id")
+        .eq("trip_id", tripId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!booking) return res.status(403).json({ error: "Book the trip before sharing location" });
+    }
+
+    const nowIso = new Date().toISOString();
+    const { error: upErr } = await ctx.supabase.from("trip_participant_locations").upsert(
+      {
+        trip_id: tripId,
+        user_id: userId,
+        lat: latNum,
+        lng: lngNum,
+        speed_mps: speedMps,
+        updated_at: nowIso,
+      },
+      { onConflict: "trip_id,user_id" },
+    );
+
+    if (upErr) {
+      if (ctx.isMissingTableError(upErr.message)) {
+        return res.status(503).json({
+          error: "trip_participant_locations table missing — run sql/004_trip_participant_locations.sql in Supabase.",
+        });
+      }
+      console.error("POST /location upsert:", upErr.message);
+      return res.status(500).json({ error: "Failed to save location" });
+    }
+
+    return res.json({ ok: true, updated_at: nowIso });
   });
 
   app.post("/api/trips/:id/map-pins", async (req, res) => {

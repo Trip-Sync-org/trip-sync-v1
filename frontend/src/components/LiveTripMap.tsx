@@ -59,6 +59,8 @@ export interface ConvoyMember {
   xpGained: number;
   lat: number;
   lng: number;
+  /** ISO time of last GPS write; used to hide stale markers when peer goes offline */
+  locationUpdatedAt?: string | null;
 }
 
 export interface TripCheckpoint {

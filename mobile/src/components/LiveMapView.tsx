@@ -327,12 +327,12 @@ function onRNMessage(raw) {
 window.addEventListener("message", evt => onRNMessage(evt.data));
 document.addEventListener("message", evt => onRNMessage(evt.data));
 
-// Timeout guard
+// Timeout guard (slow CDN / 4G can exceed 10s without being a hard failure)
 setTimeout(() => {
   if (!map || !map.loaded()) {
-    post({ type:"map-error", message:"Mapbox GL JS failed to load within 10 seconds" });
+    post({ type:"map-error", message:"Mapbox GL JS failed to load within 25 seconds" });
   }
-}, 10000);
+}, 25000);
 </script>
 </body>
 </html>`;

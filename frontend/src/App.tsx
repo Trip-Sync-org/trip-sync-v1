@@ -3623,21 +3623,48 @@ const LiveTripPage = ({ user }: { user: User }) => {
       reconnectionDelay: 500,
     });
     socketRef.current = socket;
-    socket.emit("join-trip", Number(id));
+    const joinTripRoom = () => {
+      socket.emit("join-trip", Number(id));
+    };
+    if (socket.connected) joinTripRoom();
+    socket.on("connect", joinTripRoom);
 
     socket.on("location-updated", (payload: { userId: number; lat: number; lng: number; speed?: number }) => {
-      setMembers(prev =>
-        prev.map(m =>
-          Number(m.id.replace("m", "")) === payload.userId
-            ? {
-                ...m,
-                lat: payload.lat,
-                lng: payload.lng,
-                speed: payload.speed ?? m.speed,
-              }
-            : m
-        )
-      );
+      const kmh =
+        payload.speed != null && Number.isFinite(payload.speed)
+          ? Number((payload.speed * 3.6).toFixed(1))
+          : undefined;
+      setMembers((prev) => {
+        const idx = prev.findIndex((m) => Number(m.id.replace("m", "")) === payload.userId);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = {
+            ...next[idx],
+            lat: payload.lat,
+            lng: payload.lng,
+            ...(kmh != null ? { speed: kmh } : {}),
+          };
+          return next;
+        }
+        return [
+          ...prev,
+          {
+            id: `m${payload.userId}`,
+            name: `Rider ${payload.userId}`,
+            avatar: `rider-${payload.userId}`,
+            status: "on-way" as MemberStatus,
+            role: "member",
+            muted: false,
+            blocked: false,
+            speed: kmh ?? 0,
+            distanceCovered: 0,
+            checkpoints: 0,
+            xpGained: 0,
+            lat: payload.lat,
+            lng: payload.lng,
+          },
+        ];
+      });
     });
 
     return () => {

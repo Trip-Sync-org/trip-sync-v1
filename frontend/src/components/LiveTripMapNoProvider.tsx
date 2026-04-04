@@ -3,7 +3,8 @@
  * Fetches /api/trips/:id/live-state on an interval and renders the Mapbox-based LiveTripMap.
  */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { io } from "socket.io-client";
 import LiveTripMap, {
   type ConvoyMember,
   type TripCheckpoint,
@@ -47,6 +48,16 @@ interface LiveState {
   mapPins: MapPin[];
 }
 
+const PEER_LOCATION_STALE_MS = 45_000;
+
+function convoyMemberLocationFresh(m: ConvoyMember): boolean {
+  const raw = m.locationUpdatedAt;
+  if (raw == null || raw === "") return true;
+  const t = Date.parse(raw);
+  if (Number.isNaN(t)) return true;
+  return Date.now() - t <= PEER_LOCATION_STALE_MS;
+}
+
 type Props = Omit<LiveTripMapProps, "members" | "checkpoints" | "mapPins"> & {
   pollIntervalMs?: number;
 };
@@ -54,7 +65,7 @@ type Props = Omit<LiveTripMapProps, "members" | "checkpoints" | "mapPins"> & {
 export default function LiveTripMapNoProvider({
   tripId,
   userId,
-  pollIntervalMs = 5000,
+  pollIntervalMs = 1200,
   ...rest
 }: Props) {
   const [liveState, setLiveState] = useState<LiveState>({
@@ -64,6 +75,7 @@ export default function LiveTripMapNoProvider({
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [staleTick, setStaleTick] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchLiveState = useCallback(async () => {
@@ -93,6 +105,76 @@ export default function LiveTripMapNoProvider({
     };
   }, [fetchLiveState, pollIntervalMs]);
 
+  useEffect(() => {
+    const t = setInterval(() => setStaleTick((x) => x + 1), 4000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    const socket = io("/", { transports: ["websocket", "polling"] });
+    const tid = Number(tripId);
+    const joinTripRoom = () => {
+      socket.emit("join-trip", tid);
+    };
+    if (socket.connected) joinTripRoom();
+    socket.on("connect", joinTripRoom);
+
+    socket.on(
+      "location-updated",
+      (payload: { userId: number; lat: number; lng: number; speed?: number | null }) => {
+        setLiveState((prev) => {
+          const kmh =
+            payload.speed != null && Number.isFinite(payload.speed)
+              ? Number((payload.speed * 3.6).toFixed(1))
+              : undefined;
+          const idx = prev.members.findIndex((m) => m.userId === payload.userId);
+          if (idx >= 0) {
+            return {
+              ...prev,
+              members: prev.members.map((m) =>
+                m.userId === payload.userId
+                  ? {
+                      ...m,
+                      lat: payload.lat,
+                      lng: payload.lng,
+                      speed: kmh != null ? kmh : m.speed,
+                      locationUpdatedAt: new Date().toISOString(),
+                    }
+                  : m,
+              ),
+            };
+          }
+          return {
+            ...prev,
+            members: [
+              ...prev.members,
+              {
+                id: `m${payload.userId}`,
+                userId: payload.userId,
+                name: `Rider ${payload.userId}`,
+                avatar: `rider-${payload.userId}`,
+                status: "on-way" as const,
+                role: "member",
+                muted: false,
+                blocked: false,
+                speed: kmh ?? 0,
+                distanceCovered: 0,
+                checkpoints: 0,
+                xpGained: 0,
+                lat: payload.lat,
+                lng: payload.lng,
+                locationUpdatedAt: new Date().toISOString(),
+              },
+            ],
+          };
+        });
+      },
+    );
+    return () => {
+      socket.disconnect();
+    };
+  }, [tripId]);
+
   // Best-effort location push (non-critical).
   const pushLocationRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const myPositionRef = useRef<{ lat: number; lng: number; speed: number } | null>(null);
@@ -115,7 +197,7 @@ export default function LiveTripMapNoProvider({
       } catch {
         // silent
       }
-    }, 4000);
+    }, 2000);
     return () => {
       if (pushLocationRef.current) clearInterval(pushLocationRef.current);
     };
@@ -128,6 +210,17 @@ export default function LiveTripMapNoProvider({
     },
     [rest],
   );
+
+  const membersForMap = useMemo(() => {
+    void staleTick;
+    return liveState.members.filter(
+      (m) =>
+        convoyMemberLocationFresh(m) &&
+        Number.isFinite(m.lat) &&
+        Number.isFinite(m.lng) &&
+        (Math.abs(m.lat) > 1e-5 || Math.abs(m.lng) > 1e-5),
+    );
+  }, [liveState.members, staleTick]);
 
   if (loading) {
     return (
@@ -198,7 +291,7 @@ export default function LiveTripMapNoProvider({
       {...rest}
       tripId={tripId}
       userId={userId}
-      members={liveState.members}
+      members={membersForMap}
       checkpoints={liveState.checkpoints}
       mapPins={liveState.mapPins}
       onLocationUpdate={handleLocationUpdate}
