@@ -9,10 +9,9 @@
  */
 
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
-
-const MAPBOX_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN ?? "";
+import { getMapboxPublicToken, mapboxTokenConfigError } from "../lib/mapboxPublicToken";
 
 // ─── Types (public API — unchanged from original) ─────────────────────────────
 
@@ -115,6 +114,8 @@ window.onerror = function(message, source, lineno, colno){
 
 if (!TOKEN) {
   post({ type:"map-error", message:"EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN is not set" });
+} else if (TOKEN.indexOf("sk.") === 0) {
+  post({ type:"map-error", message:"Mapbox public token (pk.…) required, not secret (sk.…). Remove duplicate EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN lines in mobile/.env." });
 }
 if (!window.mapboxgl) post({ type:"map-error", message:"Mapbox GL JS failed to load in WebView" });
 
@@ -124,7 +125,7 @@ let userMarker = null;
 let routeLayerReady = false;
 let traveledLayerReady = false;
 let sourceRouteCoords = [];
-const memberMarkers = {};
+const memberMarkers = new Map();
 let pinMarkers = [];
 let startMarker = null;
 let endMarker = null;
@@ -139,7 +140,16 @@ function mkMember(name, color, speed) {
   const el = document.createElement("div");
   el.className = "mb-member";
   el.style.background = color || "#1a73e8";
-  el.innerHTML = (name || "?").substring(0,2).toUpperCase();
+  el.style.flexDirection = "column";
+  el.style.alignItems = "center";
+  el.style.justifyContent = "center";
+  const initials = document.createElement("span");
+  initials.textContent = (name || "?").substring(0, 2).toUpperCase();
+  el.appendChild(initials);
+  const spd = document.createElement("div");
+  spd.className = "mb-spd";
+  spd.textContent = Math.round(Number(speed) || 0) + " km/h";
+  el.appendChild(spd);
   return el;
 }
 function mkUserDot(headingDeg) {
@@ -189,60 +199,118 @@ function updateRouteProgress(lng, lat) {
 function apply(data) {
   if (!map || !data) return;
 
-  const routeCoords = (data.route || []).filter(p => Number.isFinite(p?.lat) && Number.isFinite(p?.lng)).map(p => [p.lng, p.lat]);
+  const routeCoords = (data.route || []).filter(p => {
+    const la = Number(p?.lat); const ln = Number(p?.lng);
+    return Number.isFinite(la) && Number.isFinite(ln);
+  }).map(p => [Number(p.lng), Number(p.lat)]);
   upsertRouteLayers(routeCoords);
 
   if (startMarker) { startMarker.remove(); startMarker = null; }
   if (endMarker) { endMarker.remove(); endMarker = null; }
-  if (data.start && Number.isFinite(data.start.lat) && Number.isFinite(data.start.lng)) {
-    startMarker = new mapboxgl.Marker({ element: mkDot("#22c55e") }).setLngLat([data.start.lng, data.start.lat]).addTo(map);
+  const sla = data.start ? Number(data.start.lat) : NaN;
+  const sln = data.start ? Number(data.start.lng) : NaN;
+  if (data.start && Number.isFinite(sla) && Number.isFinite(sln)) {
+    startMarker = new mapboxgl.Marker({ element: mkDot("#22c55e") }).setLngLat([sln, sla]).addTo(map);
   }
-  if (data.end && Number.isFinite(data.end.lat) && Number.isFinite(data.end.lng)) {
-    endMarker = new mapboxgl.Marker({ element: mkDot("#ef4444") }).setLngLat([data.end.lng, data.end.lat]).addTo(map);
+  const ela = data.end ? Number(data.end.lat) : NaN;
+  const eln = data.end ? Number(data.end.lng) : NaN;
+  if (data.end && Number.isFinite(ela) && Number.isFinite(eln)) {
+    endMarker = new mapboxgl.Marker({ element: mkDot("#ef4444") }).setLngLat([eln, ela]).addTo(map);
   }
 
   const seen = new Set();
   (data.members || []).forEach((m) => {
-    if (!Number.isFinite(m?.lat) || !Number.isFinite(m?.lng)) return;
-    seen.add(String(m.id));
-    const ex = memberMarkers[m.id];
-    if (ex) {
-      ex.setLngLat([m.lng, m.lat]);
+    const la = Number(m?.lat); const ln = Number(m?.lng);
+    if (!Number.isFinite(la) || !Number.isFinite(ln)) return;
+    if (Math.abs(la) <= 1e-5 && Math.abs(ln) <= 1e-5) return;
+    const mid = m.id != null && m.id !== "" ? String(m.id) : "";
+    if (!mid) return;
+    seen.add(mid);
+    const existing = memberMarkers.get(mid);
+    if (existing) {
+      existing.setLngLat([ln, la]);
+      try {
+        const el = existing.getElement();
+        if (el) el.style.zIndex = "15";
+        const badge = el.querySelector(".mb-spd");
+        if (badge) badge.textContent = Math.round(Number(m.speed) || 0) + " km/h";
+      } catch {}
     } else {
-      memberMarkers[m.id] = new mapboxgl.Marker({ element: mkMember(m.name, m.color, m.speed), anchor:"center" })
-        .setLngLat([m.lng, m.lat]).addTo(map);
+      const mm = new mapboxgl.Marker({ element: mkMember(m.name, m.color, m.speed), anchor: "center" })
+        .setLngLat([ln, la])
+        .addTo(map);
+      try {
+        const el = mm.getElement();
+        if (el) el.style.zIndex = "15";
+      } catch {}
+      memberMarkers.set(mid, mm);
     }
   });
-  Object.keys(memberMarkers).forEach((id) => { if (!seen.has(id)) { memberMarkers[id].remove(); delete memberMarkers[id]; } });
+  memberMarkers.forEach((marker, id) => {
+    if (!seen.has(id)) {
+      marker.remove();
+      memberMarkers.delete(id);
+    }
+  });
 
   clearPins();
   (data.pins || []).forEach((p) => {
-    if (!Number.isFinite(p?.lat) || !Number.isFinite(p?.lng)) return;
-    pinMarkers.push(new mapboxgl.Marker({ element: mkDot("#a78bfa"), anchor: "bottom" }).setLngLat([p.lng, p.lat]).addTo(map));
+    const la = Number(p?.lat); const ln = Number(p?.lng);
+    if (!Number.isFinite(la) || !Number.isFinite(ln)) return;
+    pinMarkers.push(new mapboxgl.Marker({ element: mkDot("#a78bfa"), anchor: "bottom" }).setLngLat([ln, la]).addTo(map));
   });
 
-  if (data.userGeo && Number.isFinite(data.userGeo.lat) && Number.isFinite(data.userGeo.lng)) {
-    const { lat, lng, headingDeg } = data.userGeo;
-    if (!userMarker) {
-      userMarker = new mapboxgl.Marker({ element: mkUserDot(headingDeg), anchor:"center" }).setLngLat([lng, lat]).addTo(map);
-    } else {
-      userMarker.setLngLat([lng, lat]);
-      const cone = userMarker.getElement().querySelector(".mb-cone");
-      if (cone && headingDeg != null) cone.style.transform = "rotate(" + headingDeg + "deg)";
+  if (data.userGeo) {
+    const lat = Number(data.userGeo.lat); const lng = Number(data.userGeo.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      const { headingDeg } = data.userGeo;
+      if (!userMarker) {
+        userMarker = new mapboxgl.Marker({ element: mkUserDot(headingDeg), anchor:"center" }).setLngLat([lng, lat]).addTo(map);
+        try {
+          const el = userMarker.getElement();
+          if (el) el.style.zIndex = "25";
+        } catch {}
+      } else {
+        userMarker.setLngLat([lng, lat]);
+        try {
+          const el = userMarker.getElement();
+          if (el) el.style.zIndex = "25";
+        } catch {}
+        const cone = userMarker.getElement().querySelector(".mb-cone");
+        if (cone && headingDeg != null) cone.style.transform = "rotate(" + headingDeg + "deg)";
+      }
+      updateRouteProgress(lng, lat);
     }
-    updateRouteProgress(lng, lat);
   }
 }
 
 function fitAll(data) {
   if (!map || !data) return;
   const pts = [];
-  (data.route || []).forEach((p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lng) && pts.push([p.lng, p.lat]));
-  if (data.start) pts.push([data.start.lng, data.start.lat]);
-  if (data.end) pts.push([data.end.lng, data.end.lat]);
-  (data.members || []).forEach((m) => Number.isFinite(m?.lat) && Number.isFinite(m?.lng) && pts.push([m.lng, m.lat]));
-  (data.pins || []).forEach((p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lng) && pts.push([p.lng, p.lat]));
-  if (data.userGeo) pts.push([data.userGeo.lng, data.userGeo.lat]);
+  (data.route || []).forEach((p) => {
+    const la = Number(p?.lat); const ln = Number(p?.lng);
+    if (Number.isFinite(la) && Number.isFinite(ln)) pts.push([ln, la]);
+  });
+  if (data.start) {
+    const la = Number(data.start.lat); const ln = Number(data.start.lng);
+    if (Number.isFinite(la) && Number.isFinite(ln)) pts.push([ln, la]);
+  }
+  if (data.end) {
+    const la = Number(data.end.lat); const ln = Number(data.end.lng);
+    if (Number.isFinite(la) && Number.isFinite(ln)) pts.push([ln, la]);
+  }
+  (data.members || []).forEach((m) => {
+    const la = Number(m?.lat); const ln = Number(m?.lng);
+    if (Number.isFinite(la) && Number.isFinite(ln)) pts.push([ln, la]);
+  });
+  (data.pins || []).forEach((p) => {
+    const la = Number(p?.lat); const ln = Number(p?.lng);
+    if (Number.isFinite(la) && Number.isFinite(ln)) pts.push([ln, la]);
+  });
+  if (data.userGeo) {
+    const la = Number(data.userGeo.lat); const ln = Number(data.userGeo.lng);
+    if (Number.isFinite(la) && Number.isFinite(ln)) pts.push([ln, la]);
+  }
   if (pts.length < 1) return;
   if (pts.length === 1) {
     map.flyTo({ center: pts[0], zoom: 15, duration: 700 });
@@ -300,12 +368,16 @@ if (!bootstrap()) {
 
 // ── message handler (RN → WebView) ───────────────────────────────────────────
 
+function applySetDataPayload(msg) {
+  if (!msg || msg.type !== "set-data") return;
+  latestData = msg;
+  if (map) apply(latestData);
+}
 function onRNMessage(raw) {
   try {
     const msg = JSON.parse(raw || "{}");
     if (msg.type === "set-data") {
-      latestData = msg;
-      if (map && map.isStyleLoaded()) apply(latestData);
+      applySetDataPayload(msg);
     } else if (msg.type === "fit") {
       fitAll(msg);
     } else if (msg.type === "recenter" && msg.point) {
@@ -326,6 +398,7 @@ function onRNMessage(raw) {
 }
 window.addEventListener("message", evt => onRNMessage(evt.data));
 document.addEventListener("message", evt => onRNMessage(evt.data));
+window.__tripSyncSetData = applySetDataPayload;
 
 // Timeout guard (slow CDN / 4G can exceed 10s without being a hard failure)
 setTimeout(() => {
@@ -356,19 +429,61 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
   const webRef             = useRef<WebView>(null);
   const [ready, setReady]  = useState(false);
   const latestRef          = useRef<object | null>(null);
+  const memberVersionRef   = useRef(0);
+  const mapboxToken = getMapboxPublicToken();
+  const tokenErr = useMemo(() => mapboxTokenConfigError(mapboxToken), [mapboxToken]);
+  const tokenErrReported = useRef(false);
 
-  // Rebuild HTML only when dark mode changes
-  const html = useMemo(() => buildHtml(dark, MAPBOX_TOKEN), [dark]);
+  useEffect(() => {
+    if (!tokenErr || tokenErrReported.current) return;
+    tokenErrReported.current = true;
+    onMapError?.(tokenErr);
+  }, [tokenErr, onMapError]);
+
+  // Rebuild HTML only when dark mode / token changes
+  const html = useMemo(() => buildHtml(dark, mapboxToken), [dark, mapboxToken]);
 
   const post = (payload: unknown) =>
     webRef.current?.postMessage(JSON.stringify(payload));
 
-  // Push data whenever any prop changes
+  /** Android WebView often drops native→page postMessage; injectApply mirrors set-data so peer markers reliably render. */
+  const injectSetData = React.useCallback((payload: object) => {
+    const w = webRef.current;
+    if (!w) return;
+    try {
+      const s = JSON.stringify(payload);
+      const js = `(function(){try{var p=JSON.parse(${JSON.stringify(s)});if(window.__tripSyncSetData)window.__tripSyncSetData(p);}catch(e){}true;})();`;
+      w.injectJavaScript(js);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  // Push data whenever any prop changes (version bumps so WebView always applies member moves)
   useEffect(() => {
-    const payload = { type:"set-data", route, start, end, members, pins, userGeo };
+    memberVersionRef.current += 1;
+    const payload = {
+      type: "set-data",
+      version: memberVersionRef.current,
+      route,
+      start,
+      end,
+      members,
+      pins,
+      userGeo,
+    };
     latestRef.current = payload;
-    if (ready) post(payload);
-  }, [route, start, end, members, pins, userGeo, ready]);
+    if (__DEV__) {
+      console.log(
+        "[LiveMapView] sending members to WebView:",
+        members.map((m) => `${m.id}@${m.lat?.toFixed(4)},${m.lng?.toFixed(4)}`).join(" | "),
+      );
+    }
+    if (ready) {
+      post(payload);
+      injectSetData(payload);
+    }
+  }, [route, start, end, members, pins, userGeo, ready, injectSetData]);
 
   // Fit bounds
   useEffect(() => {
@@ -408,6 +523,14 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
     [route, start, end, members, pins, userGeo, recenterPoint],
   );
 
+  if (tokenErr) {
+    return (
+      <View style={[styles.wrap, styles.tokenErrPad]}>
+        <Text style={styles.tokenErrText}>{tokenErr}</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.wrap}>
       <WebView
@@ -424,7 +547,10 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
             const msg = JSON.parse(e.nativeEvent.data);
             if (msg?.type === "map-ready") {
               setReady(true);
-              if (latestRef.current) post(latestRef.current);
+              if (latestRef.current) {
+                post(latestRef.current);
+                injectSetData(latestRef.current as object);
+              }
               if (recenterPoint) post({ type: "recenter", point: recenterPoint });
               onReady?.();
             } else if (msg?.type === "map-error") {
@@ -439,4 +565,6 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
 
 const styles = StyleSheet.create({
   wrap: { ...StyleSheet.absoluteFillObject, backgroundColor: "#0b1220" },
+  tokenErrPad: { justifyContent: "center", padding: 20 },
+  tokenErrText: { color: "#fecaca", fontSize: 13, lineHeight: 20 },
 });

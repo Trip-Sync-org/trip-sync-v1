@@ -5,6 +5,9 @@ const path = require("path");
 const projectRoot = __dirname;
 const config = getDefaultConfig(projectRoot);
 
+// Allow importing shared `../shared/voiceConstants.js` from the repo root
+config.watchFolders = [path.resolve(projectRoot, "..")];
+
 const dtPickerSrc = path.join(
   projectRoot,
   "node_modules/@react-native-community/datetimepicker/src",

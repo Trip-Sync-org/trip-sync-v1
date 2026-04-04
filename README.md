@@ -61,11 +61,12 @@ For stricter uptime, also configure an external uptime monitor/cron to hit `/api
   - Output Directory: `dist`
 - Backend project (separate):
   - Root Directory: `backend`
-  - Uses `backend/package.json`, `backend/server.ts`, `backend/api/index.ts`, `backend/vercel.json`
-  - Build Command: `npm run build`
+  - Uses `backend/package.json`, `backend/vercel.json`, and serverless handlers under `backend/api/` (voice + signal ICE)
+  - Build Command: `npm run build` (or default Vercel build if you add one)
   - Output Directory: _(leave empty)_
   - Set backend env vars (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) in backend host
-  - Serves API routes through `/api/*` via `backend/vercel.json`
+  - Voice REST routes: `/api/voice/*`, `/api/signal/ice` — see `backend/README.md`
+  - Local Express API (live trip map, etc.): still available via `npm run dev` from repo root (`backend/server.ts`)
 
 ## React Native (Expo SDK 54)
 

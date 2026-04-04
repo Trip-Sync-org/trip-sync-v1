@@ -1,14 +1,17 @@
 {
+  "version": 2,
   "functions": {
-    "api/index.ts": {
-      "maxDuration": 30
-    }
+    "api/**/*.js": { "runtime": "@vercel/node@3" }
   },
-  "rewrites": [
+  "routes": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/index.ts"
+      "src": "/api/(.*)",
+      "dest": "/api/$1",
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+      }
     }
   ]
 }
-

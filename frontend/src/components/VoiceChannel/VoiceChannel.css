@@ -1,0 +1,281 @@
+.vc-card {
+  background: #1c1c1e;
+  border: 1px solid #2c2c2e;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.vc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.vc-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.vc-sub {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 4px;
+}
+
+.vc-badge {
+  border: 1px solid #2c2c2e;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.vc-badge-on {
+  border-color: #34c759;
+  color: #34c759;
+}
+
+.vc-info {
+  margin-top: 8px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.42);
+  line-height: 1.35;
+}
+
+.vc-warn {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: 8px;
+  font-size: 11px;
+  color: #fbbf24;
+}
+
+.vc-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.vc-tab {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #2c2c2e;
+  background: #2c2c2e;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.vc-tab:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.vc-tab-on {
+  background: #fff;
+  color: #000;
+  border-color: #fff;
+}
+
+.vc-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.vc-btn-join {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #2c2c2e;
+  background: transparent;
+  color: #6ee7b7;
+  font-weight: 800;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.vc-btn-disconnect {
+  flex: 1;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #34c759;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.75);
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.vc-btn-mute {
+  width: 28%;
+  padding: 12px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.vc-btn-mute-hot {
+  border-color: #fca5a5;
+  color: #fca5a5;
+}
+
+.vc-raise {
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #2c2c2e;
+  background: #1c1c1e;
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.vc-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vc-participant {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid #2c2c2e;
+  background: #000;
+}
+
+.vc-participant-speaking {
+  border-left: 3px solid #34c759;
+}
+
+.vc-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  background: #2c2c2e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.55);
+  flex-shrink: 0;
+}
+
+.vc-avatar-speak {
+  box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.45);
+  animation: vc-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes vc-pulse {
+  50% {
+    box-shadow: 0 0 0 4px rgba(52, 199, 89, 0.2);
+  }
+}
+
+.vc-participant-mid {
+  flex: 1;
+  min-width: 0;
+}
+
+.vc-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vc-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: #fff;
+}
+
+.vc-hand {
+  font-size: 14px;
+}
+
+.vc-status-idle,
+.vc-status-muted {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.vc-status-speak {
+  font-size: 11px;
+  color: #34c759;
+  font-weight: 600;
+}
+
+.vc-role-badge {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+
+.vc-admin-row {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.vc-mini {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+}
+
+.vc-mini-danger {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.vc-role-picks {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.vc-role-pick {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  text-transform: capitalize;
+}
+
+.vc-role-pick.on {
+  background: #fff;
+  color: #000;
+  border-color: #fff;
+}

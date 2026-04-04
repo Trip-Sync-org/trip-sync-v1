@@ -14,6 +14,7 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
+        "NSMicrophoneUsageDescription": "Trip-Sync uses the microphone for waiting-room voice chat with your trip group.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }

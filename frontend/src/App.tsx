@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { signInWithGoogle } from "./lib/auth";
 import { supabase } from "./lib/supabaseClient";
+import { getMicStreamForVoice, micErrorMessage, resumeAudioContextIfNeeded } from "./lib/micAccess";
 import RoutePreviewMap from "./components/RoutePreviewMap";
 import LiveTripMap, {
   readLiveMapStoredTheme,
@@ -3112,6 +3113,7 @@ type LiveMember = {
   role: MemberRole; muted: boolean; blocked: boolean;
   speed: number; distanceCovered: number; checkpoints: number; xpGained: number;
   lat: number; lng: number;
+  locationUpdatedAt?: string | null;
 };
 
 type Checkpoint = { id: string; name: string; lat: number; lng: number; reached: boolean; badge: string; xp: number };
@@ -3392,13 +3394,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
     (async () => {
       try {
         setMicError(null);
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        });
+        const stream = await getMicStreamForVoice();
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -3410,6 +3406,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
         const ctx: AudioContext = new AudioCtx();
         audioCtxRef.current = ctx;
+        await resumeAudioContextIfNeeded(ctx);
 
         const source = ctx.createMediaStreamSource(stream);
         const analyser = ctx.createAnalyser();
@@ -3447,7 +3444,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
       } catch (e) {
         console.error("Mic permission / setup failed:", e);
         if (!cancelled) {
-          setMicError("Microphone access failed. Please allow mic permission and try Join again.");
+          setMicError(e instanceof Error ? e.message : micErrorMessage(e));
           setVideoCallActive(false);
         }
       }
@@ -3624,10 +3621,33 @@ const LiveTripPage = ({ user }: { user: User }) => {
     });
     socketRef.current = socket;
     const joinTripRoom = () => {
-      socket.emit("join-trip", Number(id));
+      socket.emit("join-trip", { tripId: Number(id), userId: Number(user.id) });
     };
     if (socket.connected) joinTripRoom();
     socket.on("connect", joinTripRoom);
+
+    socket.on("trip-member-presence", (payload: { userId?: number; online?: boolean }) => {
+      const uid = Number(payload?.userId);
+      if (!Number.isFinite(uid)) return;
+      if (uid === Number(user.id)) return;
+      void (async () => {
+        try {
+          const res = await fetch(`/api/trips/${id}/live-state?user_id=${encodeURIComponent(String(user.id))}`);
+          if (!res.ok) return;
+          const data = (await res.json()) as { members?: LiveMember[] };
+          if (Array.isArray(data.members) && data.members.length > 0) {
+            setMembers((prev) => {
+              const byId = new Map(data.members!.map((m) => [m.id, m]));
+              return prev.map((m) => (byId.has(m.id) ? { ...m, ...byId.get(m.id)! } : m)).concat(
+                data.members!.filter((m) => !prev.some((p) => p.id === m.id)),
+              );
+            });
+          }
+        } catch {
+          /* ignore */
+        }
+      })();
+    });
 
     socket.on("location-updated", (payload: { userId: number; lat: number; lng: number; speed?: number }) => {
       const kmh =
@@ -3642,6 +3662,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
             ...next[idx],
             lat: payload.lat,
             lng: payload.lng,
+            locationUpdatedAt: new Date().toISOString(),
             ...(kmh != null ? { speed: kmh } : {}),
           };
           return next;
@@ -3662,6 +3683,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
             xpGained: 0,
             lat: payload.lat,
             lng: payload.lng,
+            locationUpdatedAt: new Date().toISOString(),
           },
         ];
       });
@@ -3671,7 +3693,7 @@ const LiveTripPage = ({ user }: { user: User }) => {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [id]);
+  }, [id, user.id]);
 
   useEffect(() => {
     if (!id || phase !== "live") return;

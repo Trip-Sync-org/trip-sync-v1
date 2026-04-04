@@ -38,6 +38,7 @@ import {
   generateCouponCode,
 } from "../constants/createEvent";
 import { formatShortDate, formatTime12h, setTimeOnDate } from "../lib/createEventFormat";
+import { getMapboxPublicToken, mapboxTokenConfigError } from "../lib/mapboxPublicToken";
 
 type Props = NativeStackScreenProps<RootStackParamList, "CreateEvent">;
 
@@ -59,7 +60,6 @@ type CouponRow = {
 type InviteRow = { type: "email" | "phone"; value: string };
 
 const CREATE_EVENT_DRAFT_KEY = "tripsync_create_event_draft_v1";
-const MAPBOX_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN ?? "";
 
 function MapboxCreatePreview({
   start,
@@ -69,10 +69,13 @@ function MapboxCreatePreview({
   end: { lat: number; lng: number } | null;
 }) {
   const html = useMemo(() => {
-    if (!MAPBOX_TOKEN) {
-      return "<html><body style='margin:0;background:#0a0a0a;color:#fff;font-family:sans-serif;padding:12px'>Missing EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN</body></html>";
+    const mapboxToken = getMapboxPublicToken();
+    const cfgErr = mapboxTokenConfigError(mapboxToken);
+    if (cfgErr) {
+      const safe = cfgErr.replace(/</g, "&lt;");
+      return `<html><body style='margin:0;background:#0a0a0a;color:#fecaca;font-family:sans-serif;padding:12px;font-size:13px;line-height:1.4'>${safe}</body></html>`;
     }
-    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css"/><style>html,body,#map{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0a0a0a}.dot{width:12px;height:12px;border-radius:999px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)}.err{padding:12px;color:#fecaca;background:#7f1d1d;font:12px sans-serif}</style></head><body><div id="map"></div><script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script><script>const S=${JSON.stringify(start)},E=${JSON.stringify(end)},TOKEN=${JSON.stringify(MAPBOX_TOKEN)};let map=null;function mk(c){const d=document.createElement('div');d.className='dot';d.style.background=c;return d;}function showErr(m){const el=document.getElementById('map');if(el)el.innerHTML='<div class="err">'+String(m).replace(/</g,'&lt;')+'</div>';}function fit(){if(!map)return;const pts=[];if(S)pts.push([S.lng,S.lat]);if(E)pts.push([E.lng,E.lat]);if(!pts.length)return;const lats=pts.map(p=>p[1]),lngs=pts.map(p=>p[0]);if(pts.length===1){map.flyTo({center:pts[0],zoom:13,duration:700});return;}map.fitBounds([[Math.min(...lngs),Math.min(...lats)],[Math.max(...lngs),Math.max(...lats)]],{padding:60,maxZoom:15,duration:800});}function init(){if(!window.mapboxgl){showErr("Mapbox SDK failed to load");return;}mapboxgl.accessToken=TOKEN;map=new mapboxgl.Map({container:'map',style:'mapbox://styles/mapbox/navigation-night-v1',center:S?[S.lng,S.lat]:[78.9629,20.5937],zoom:S?11:4,attributionControl:false});map.on('load',()=>{if(S)new mapboxgl.Marker({element:mk('#22c55e')}).setLngLat([S.lng,S.lat]).addTo(map);if(E)new mapboxgl.Marker({element:mk('#ef4444')}).setLngLat([E.lng,E.lat]).addTo(map);if(S&&E){const line={type:'Feature',properties:{},geometry:{type:'LineString',coordinates:[[S.lng,S.lat],[E.lng,E.lat]]}};map.addSource('route',{type:'geojson',data:line});map.addLayer({id:'route-casing',type:'line',source:'route',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#fff','line-width':8,'line-opacity':0.85}});map.addLayer({id:'route-line',type:'line',source:'route',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#4285F4','line-width':4}});}fit();});map.on('error',e=>showErr((e&&e.error&&e.error.message)||'Mapbox map error'));}if(!TOKEN){showErr("Missing EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN")}else{init();}</script></body></html>`;
+    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css"/><style>html,body,#map{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0a0a0a}.dot{width:12px;height:12px;border-radius:999px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)}.err{padding:12px;color:#fecaca;background:#7f1d1d;font:12px sans-serif}</style></head><body><div id="map"></div><script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script><script>const S=${JSON.stringify(start)},E=${JSON.stringify(end)},TOKEN=${JSON.stringify(mapboxToken)};let map=null;function mk(c){const d=document.createElement('div');d.className='dot';d.style.background=c;return d;}function showErr(m){const el=document.getElementById('map');if(el)el.innerHTML='<div class="err">'+String(m).replace(/</g,'&lt;')+'</div>';}function fit(){if(!map)return;const pts=[];if(S)pts.push([S.lng,S.lat]);if(E)pts.push([E.lng,E.lat]);if(!pts.length)return;const lats=pts.map(p=>p[1]),lngs=pts.map(p=>p[0]);if(pts.length===1){map.flyTo({center:pts[0],zoom:13,duration:700});return;}map.fitBounds([[Math.min(...lngs),Math.min(...lats)],[Math.max(...lngs),Math.max(...lats)]],{padding:60,maxZoom:15,duration:800});}function init(){if(!window.mapboxgl){showErr("Mapbox SDK failed to load");return;}mapboxgl.accessToken=TOKEN;map=new mapboxgl.Map({container:'map',style:'mapbox://styles/mapbox/navigation-night-v1',center:S?[S.lng,S.lat]:[78.9629,20.5937],zoom:S?11:4,attributionControl:false});map.on('load',()=>{if(S)new mapboxgl.Marker({element:mk('#22c55e')}).setLngLat([S.lng,S.lat]).addTo(map);if(E)new mapboxgl.Marker({element:mk('#ef4444')}).setLngLat([E.lng,E.lat]).addTo(map);if(S&&E){const line={type:'Feature',properties:{},geometry:{type:'LineString',coordinates:[[S.lng,S.lat],[E.lng,E.lat]]}};map.addSource('route',{type:'geojson',data:line});map.addLayer({id:'route-casing',type:'line',source:'route',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#fff','line-width':8,'line-opacity':0.85}});map.addLayer({id:'route-line',type:'line',source:'route',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#4285F4','line-width':4}});}fit();});map.on('error',e=>showErr((e&&e.error&&e.error.message)||'Mapbox map error'));}if(!TOKEN){showErr("Missing EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN")}else{init();}</script></body></html>`;
   }, [end, start]);
 
   return <WebView originWhitelist={["*"]} source={{ html }} style={styles.mapImage} javaScriptEnabled domStorageEnabled mixedContentMode="always" />;

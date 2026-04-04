@@ -1822,12 +1822,29 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     io.on("connection", (socket) => {
       console.log("User connected:", socket.id);
 
-      socket.on("join-trip", (tripId: unknown) => {
-        const tid = Number(tripId);
+      socket.on("join-trip", (payload: unknown) => {
+        let tid: number;
+        let userId: number | null = null;
+        if (typeof payload === "number") {
+          tid = Number(payload);
+        } else if (payload && typeof payload === "object") {
+          const p = payload as { tripId?: unknown; userId?: unknown };
+          tid = Number(p.tripId);
+          const u = Number(p.userId);
+          userId = Number.isFinite(u) ? u : null;
+        } else {
+          return;
+        }
         if (!Number.isFinite(tid)) return;
-        const room = `trip-${tid}`;
+        const room = `trip-${Number(tid)}`;
         socket.join(room);
-        console.log(`[socket] ${socket.id} joined ${room}`);
+        const data = socket.data as { liveTripId?: number; liveUserId?: number | null };
+        data.liveTripId = tid;
+        data.liveUserId = userId;
+        console.log(`[socket] ${socket.id} joined ${room}`, userId ?? "");
+        if (userId != null && Number.isFinite(userId)) {
+          socket.to(room).emit("trip-member-presence", { userId, online: true });
+        }
       });
 
       socket.on("convoy-action", (payload: {
@@ -1873,15 +1890,15 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
           return;
         }
 
-        const room = `trip-${tripIdNum}`;
+        const room = `trip-${Number(tripIdNum)}`;
         const speedMps = toFiniteNumber(speed);
         const headingNum =
           heading != null && Number.isFinite(Number(heading)) ? Number(heading) : null;
 
         socket.to(room).emit("location-updated", {
-          userId: userIdNum,
-          lat: latNum,
-          lng: lngNum,
+          userId: Number(userIdNum),
+          lat: Number(latNum),
+          lng: Number(lngNum),
           speed: speedMps,
           heading: headingNum,
         });
@@ -1925,6 +1942,12 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       });
 
       socket.on("disconnect", () => {
+        const data = socket.data as { liveTripId?: number; liveUserId?: number | null };
+        const tid = data?.liveTripId;
+        const uid = data?.liveUserId;
+        if (tid != null && uid != null && Number.isFinite(tid) && Number.isFinite(uid)) {
+          io.to(`trip-${tid}`).emit("trip-member-presence", { userId: uid, online: false });
+        }
         console.log("User disconnected");
       });
     });

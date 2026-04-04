@@ -48,16 +48,6 @@ interface LiveState {
   mapPins: MapPin[];
 }
 
-const PEER_LOCATION_STALE_MS = 45_000;
-
-function convoyMemberLocationFresh(m: ConvoyMember): boolean {
-  const raw = m.locationUpdatedAt;
-  if (raw == null || raw === "") return true;
-  const t = Date.parse(raw);
-  if (Number.isNaN(t)) return true;
-  return Date.now() - t <= PEER_LOCATION_STALE_MS;
-}
-
 type Props = Omit<LiveTripMapProps, "members" | "checkpoints" | "mapPins"> & {
   pollIntervalMs?: number;
 };
@@ -65,7 +55,7 @@ type Props = Omit<LiveTripMapProps, "members" | "checkpoints" | "mapPins"> & {
 export default function LiveTripMapNoProvider({
   tripId,
   userId,
-  pollIntervalMs = 1200,
+  pollIntervalMs = 350,
   ...rest
 }: Props) {
   const [liveState, setLiveState] = useState<LiveState>({
@@ -75,7 +65,6 @@ export default function LiveTripMapNoProvider({
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [staleTick, setStaleTick] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchLiveState = useCallback(async () => {
@@ -106,18 +95,29 @@ export default function LiveTripMapNoProvider({
   }, [fetchLiveState, pollIntervalMs]);
 
   useEffect(() => {
-    const t = setInterval(() => setStaleTick((x) => x + 1), 4000);
-    return () => clearInterval(t);
-  }, []);
-
-  useEffect(() => {
     const socket = io("/", { transports: ["websocket", "polling"] });
     const tid = Number(tripId);
+    const uid = Number(userId);
     const joinTripRoom = () => {
-      socket.emit("join-trip", tid);
+      if (Number.isFinite(tid) && Number.isFinite(uid)) {
+        socket.emit("join-trip", { tripId: tid, userId: uid });
+      } else {
+        socket.emit("join-trip", tid);
+      }
     };
-    if (socket.connected) joinTripRoom();
-    socket.on("connect", joinTripRoom);
+    const onConnect = () => {
+      joinTripRoom();
+      void fetchLiveState();
+    };
+    if (socket.connected) onConnect();
+    socket.on("connect", onConnect);
+
+    socket.on("trip-member-presence", (payload: { userId?: number; online?: boolean }) => {
+      const puid = Number(payload?.userId);
+      if (!Number.isFinite(puid)) return;
+      if (puid === uid) return;
+      void fetchLiveState();
+    });
 
     socket.on(
       "location-updated",
@@ -173,7 +173,7 @@ export default function LiveTripMapNoProvider({
     return () => {
       socket.disconnect();
     };
-  }, [tripId]);
+  }, [tripId, userId, fetchLiveState]);
 
   // Best-effort location push (non-critical).
   const pushLocationRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -212,15 +212,13 @@ export default function LiveTripMapNoProvider({
   );
 
   const membersForMap = useMemo(() => {
-    void staleTick;
     return liveState.members.filter(
       (m) =>
-        convoyMemberLocationFresh(m) &&
         Number.isFinite(m.lat) &&
         Number.isFinite(m.lng) &&
         (Math.abs(m.lat) > 1e-5 || Math.abs(m.lng) > 1e-5),
     );
-  }, [liveState.members, staleTick]);
+  }, [liveState.members]);
 
   if (loading) {
     return (
