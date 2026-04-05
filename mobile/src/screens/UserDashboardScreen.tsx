@@ -9,9 +9,9 @@ import {
   Pressable,
 } from "react-native";
 import { useNavigation, type NavigationProp } from "@react-navigation/native";
-import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { apiFetch } from "../api/client";
 import type { RootStackParamList } from "../navigation/AppNavigator";
+import { navigateToRootStack } from "../navigation/navigateRoot";
 import { useAuth } from "../context/AuthContext";
 import { colors, typography } from "../theme";
 import { Card, Badge, PrimaryButton, OutlineButton } from "../components/ui";
@@ -36,8 +36,7 @@ export function UserDashboardScreen() {
   const { user, logout } = useAuth();
   const navigation = useNavigation<NavigationProp<Record<string, object | undefined>>>();
   const goStack = (route: keyof RootStackParamList, params?: RootStackParamList[keyof RootStackParamList]) => {
-    const parent = navigation.getParent() as NativeStackNavigationProp<RootStackParamList> | undefined;
-    if (parent) parent.navigate(route, params as never);
+    navigateToRootStack(navigation, route as string, params as Record<string, unknown> | undefined);
   };
   const goExploreTab = () => navigation.navigate("ExploreTab" as never);
 

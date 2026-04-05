@@ -10,3 +10,8 @@
 export const API_BASE_URL = (
   process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000"
 ).replace(/\/$/, "");
+
+/** Same server as API (PayU surl/furl, webhooks). Defaults to EXPO_PUBLIC_API_URL. */
+export const BACKEND_PUBLIC_URL = (
+  process.env.EXPO_PUBLIC_BACKEND_URL ?? process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000"
+).replace(/\/$/, "");

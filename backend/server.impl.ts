@@ -8,6 +8,7 @@ import { networkInterfaces } from "os";
 import { existsSync } from "fs";
 import { createSupabaseServerClient } from "./src/lib/supabaseServerClient.js";
 import { registerLiveTripMapRoutes } from "./livetripmap/registerLiveTripMapRoutes.js";
+import { registerPaymentRoutes } from "./payments/registerPaymentRoutes.js";
 
 /** Non-loopback IPv4 addresses — use these on your phone (same Wi‑Fi), not `localhost`. */
 function lanIPv4Urls(port: number): string[] {
@@ -55,6 +56,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
   }
 
   app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
 
   const explicitWebOrigin = String(process.env.WEB_ORIGIN || "").trim();
   const isVercelOrigin = (origin: string) =>
@@ -438,6 +440,36 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       tripUserRoles: checkpointSocketBridge.tripUserRoles,
     },
   });
+
+  const backendPublicUrl = String(
+    process.env.BACKEND_URL || process.env.API_PUBLIC_URL || "http://localhost:3000",
+  ).replace(/\/$/, "");
+  const platformFeePercent = Math.min(100, Math.max(0, Number(process.env.PLATFORM_FEE_PERCENT ?? 10)));
+  const payuKey = String(process.env.PAYU_MERCHANT_KEY ?? "").trim();
+  const payuSalt = String(process.env.PAYU_MERCHANT_SALT ?? "").trim();
+  const payuBaseUrl = String(process.env.PAYU_BASE_URL ?? "https://test.payu.in").trim();
+  const adminSecretKey = String(process.env.ADMIN_SECRET_KEY ?? "").trim();
+
+  registerPaymentRoutes(app, {
+    supabase,
+    io,
+    backendPublicUrl,
+    platformFeePercent,
+    payuKey,
+    payuSalt,
+    payuBaseUrl,
+    adminSecretKey,
+    incrementOrganizerCouponUsage,
+    enablePayuCheckout: Boolean(payuKey && payuSalt),
+    resolveOrganizerId: (input: unknown) => resolveUserNumericId(input, "organizer"),
+  });
+  if (payuKey && payuSalt) {
+    console.log("[payments] PayU checkout enabled (initiate / success / failure).");
+  } else {
+    console.warn(
+      "[payments] PayU checkout disabled until PAYU_MERCHANT_KEY and PAYU_MERCHANT_SALT are set. Organizer payout APIs are active.",
+    );
+  }
 
   // Auth API (Supabase)
   app.post("/api/auth/signup", async (req, res) => {
@@ -1054,13 +1086,27 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       return res.status(400).json({ error: "Trip is closed for joining" });
     }
 
+    const tripPrice = Number((trip as { price?: unknown }).price ?? 0);
+    const isPaidTrip = tripPrice > 0;
+
     const { data: existingBooking } = await supabase
       .from("bookings")
-      .select("id")
+      .select("id, payment_status, final_amount")
       .eq("trip_id", tripId)
       .eq("user_id", Number(userId))
       .maybeSingle();
+
     if (existingBooking) {
+      const ps = String((existingBooking as { payment_status?: string }).payment_status ?? "");
+      const fid = Number((existingBooking as { final_amount?: unknown }).final_amount ?? NaN);
+      if (isPaidTrip && ps === "pending") {
+        return res.status(200).json({
+          id: existingBooking.id,
+          needs_payment: true,
+          amount: Number.isFinite(fid) ? fid : tripPrice,
+          resume: true,
+        });
+      }
       return res.status(200).json({ id: existingBooking.id, already_joined: true });
     }
 
@@ -1087,12 +1133,26 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     const insertPayload: Record<string, unknown> = {
       trip_id: tripId,
       user_id: Number(userId),
-      status: "confirmed",
-      payment_status: "paid",
     };
-    if (couponValidated && couponValidated.ok === true) {
-      insertPayload.coupon_id = couponValidated.coupon.id;
-      insertPayload.discount_amount = couponValidated.discount_amount;
+
+    if (isPaidTrip) {
+      const baseAmount = Math.round(tripPrice * participants);
+      let finalAmount = baseAmount;
+      if (couponValidated && couponValidated.ok === true) {
+        finalAmount = Math.max(0, baseAmount - couponValidated.discount_amount);
+        insertPayload.coupon_id = couponValidated.coupon.id;
+        insertPayload.discount_amount = couponValidated.discount_amount;
+      }
+      insertPayload.payment_status = "pending";
+      insertPayload.final_amount = finalAmount;
+      insertPayload.status = "pending";
+    } else {
+      insertPayload.status = "confirmed";
+      insertPayload.payment_status = "paid";
+      if (couponValidated && couponValidated.ok === true) {
+        insertPayload.coupon_id = couponValidated.coupon.id;
+        insertPayload.discount_amount = couponValidated.discount_amount;
+      }
     }
 
     let { data, error } = await supabase
@@ -1107,16 +1167,21 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       couponValidated.ok === true &&
       /coupon_id|discount_amount|column|schema/i.test(String(error.message))
     ) {
-      const retry = await supabase
-        .from("bookings")
-        .insert({
-          trip_id: tripId,
-          user_id: Number(userId),
-          status: "confirmed",
-          payment_status: "paid",
-        })
-        .select()
-        .single();
+      const retryPayload: Record<string, unknown> = {
+        trip_id: tripId,
+        user_id: Number(userId),
+        status: isPaidTrip ? "pending" : "confirmed",
+        payment_status: isPaidTrip ? "pending" : "paid",
+      };
+      if (isPaidTrip) {
+        const baseAmount = Math.round(tripPrice * participants);
+        let finalAmount = baseAmount;
+        if (couponValidated && couponValidated.ok === true) {
+          finalAmount = Math.max(0, baseAmount - couponValidated.discount_amount);
+        }
+        retryPayload.final_amount = finalAmount;
+      }
+      const retry = await supabase.from("bookings").insert(retryPayload).select().single();
       data = retry.data;
       error = retry.error;
     }
@@ -1126,7 +1191,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       return res.status(400).json({ error: "Failed to create booking" });
     }
 
-    if (couponValidated && couponValidated.ok === true) {
+    if (!isPaidTrip && couponValidated && couponValidated.ok === true) {
       const ok = await incrementOrganizerCouponUsage(couponValidated.coupon.id);
       if (!ok) {
         console.warn(
@@ -1135,6 +1200,17 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
           ")",
         );
       }
+    }
+
+    if (isPaidTrip) {
+      const fa = Number((data as { final_amount?: unknown }).final_amount ?? 0);
+      return res.json({
+        id: data.id,
+        needs_payment: true,
+        amount: fa,
+        discount_amount:
+          couponValidated && couponValidated.ok === true ? couponValidated.discount_amount : 0,
+      });
     }
 
     res.json({
@@ -1357,6 +1433,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     return res.json(out);
   });
 
+  /** Paid booking cash (amount_paid) by calendar month. Query: ?year=2026 optional &from=&to=YYYY-MM-DD to clip paid_at */
   app.get("/api/organizers/:id/monthly-revenue", async (req, res) => {
     const organizerId = await resolveUserNumericId(req.params.id, "organizer");
     if (!Number.isFinite(organizerId ?? NaN)) {
@@ -1365,26 +1442,58 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     const access = await assertOrganizerAccess(Number(organizerId));
     if (!access.ok) return res.status(access.status).json({ error: access.error });
 
-    const { data: trips, error } = await supabase
+    const yearRaw = Number(req.query.year);
+    const y = Number.isFinite(yearRaw) ? yearRaw : new Date().getFullYear();
+    const fromStr = typeof req.query.from === "string" ? req.query.from.trim() : "";
+    const toStr = typeof req.query.to === "string" ? req.query.to.trim() : "";
+    let fromMs = new Date(y, 0, 1).getTime();
+    let toMs = new Date(y, 11, 31, 23, 59, 59, 999).getTime();
+    if (fromStr && toStr) {
+      const f = /^\d{4}-\d{2}-\d{2}$/.test(fromStr) ? `${fromStr}T00:00:00.000Z` : fromStr;
+      const t = /^\d{4}-\d{2}-\d{2}$/.test(toStr) ? `${toStr}T23:59:59.999Z` : toStr;
+      const a = new Date(f).getTime();
+      const b = new Date(t).getTime();
+      if (Number.isFinite(a) && Number.isFinite(b)) {
+        fromMs = a;
+        toMs = b;
+      }
+    }
+
+    const { data: trips, error: tripsErr } = await supabase
       .from("trips")
-      .select("id, date, price")
+      .select("id")
       .eq("organizer_id", Number(organizerId));
-    if (error) {
-      console.error("monthly-revenue trips:", error.message);
+    if (tripsErr) {
+      console.error("monthly-revenue trips:", tripsErr.message);
+      return res.status(500).json({ error: "Failed to fetch monthly revenue" });
+    }
+    const tripIds = (trips ?? []).map((t: any) => Number(t.id)).filter(Number.isFinite);
+    if (tripIds.length === 0) {
+      return res.json(Array.from({ length: 12 }, (_, i) => ({ month: i, revenue: 0 })));
+    }
+
+    const { data: bookings, error: bErr } = await supabase
+      .from("bookings")
+      .select("amount_paid, paid_at")
+      .in("trip_id", tripIds)
+      .eq("payment_status", "paid");
+    if (bErr) {
+      console.error("monthly-revenue bookings:", bErr.message);
       return res.status(500).json({ error: "Failed to fetch monthly revenue" });
     }
 
     const monthTotals = Array.from({ length: 12 }, (_, i) => ({ month: i, revenue: 0 }));
-    for (const t of trips ?? []) {
-      const d = parseTripDateLocalOnly((t as any).date);
-      if (!d) continue;
-      const month = d.getMonth();
-      const { count: joinedCount } = await supabase
-        .from("bookings")
-        .select("*", { count: "exact", head: true })
-        .eq("trip_id", Number((t as any).id));
-      const revenue = Number((t as any).price ?? 0) * Number(joinedCount ?? 0);
-      monthTotals[month].revenue += Math.max(0, revenue);
+    for (const b of bookings ?? []) {
+      const paid = Number((b as any).amount_paid ?? 0);
+      const raw = (b as any).paid_at;
+      if (raw == null) continue;
+      const at = new Date(String(raw));
+      if (!Number.isFinite(at.getTime())) continue;
+      const tms = at.getTime();
+      if (tms < fromMs || tms > toMs) continue;
+      if (at.getFullYear() !== y) continue;
+      const m = at.getMonth();
+      monthTotals[m].revenue += Math.max(0, paid);
     }
     return res.json(monthTotals);
   });

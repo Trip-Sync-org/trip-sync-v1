@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -8,7 +8,10 @@ import {
   Pressable,
   Alert,
   Image,
+  Modal,
+  ActivityIndicator,
 } from "react-native";
+import { WebView } from "react-native-webview";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { apiFetch, readApiErrorMessage } from "../api/client";
@@ -16,6 +19,10 @@ import { useAuth } from "../context/AuthContext";
 import { colors } from "../theme";
 
 type Props = NativeStackScreenProps<RootStackParamList, "TripDetail">;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 export function TripDetailScreen({ route, navigation }: Props) {
   const { id } = route.params;
@@ -25,6 +32,10 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const [coupon, setCoupon] = useState("");
   const [appliedPct, setAppliedPct] = useState<number | null>(null);
   const [booking, setBooking] = useState(false);
+
+  const [payModal, setPayModal] = useState(false);
+  const [payHtml, setPayHtml] = useState<string | null>(null);
+  const [pendingTxnId, setPendingTxnId] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -53,6 +64,96 @@ export function TripDetailScreen({ route, navigation }: Props) {
     setAppliedPct(Number(body.discount_pct) || 0);
   };
 
+  const pollPaymentStatus = useCallback(
+    async (txnid: string) => {
+      for (let i = 0; i < 40; i++) {
+        try {
+          const r = await apiFetch(`/api/payments/verify/${encodeURIComponent(txnid)}`);
+          const j = (await r.json()) as { payment_status?: string };
+          if (j.payment_status === "paid") {
+            Alert.alert("Success", "Payment confirmed — you're in!", [
+              { text: "OK", onPress: () => navigation.goBack() },
+            ]);
+            return;
+          }
+          if (j.payment_status === "failed") {
+            Alert.alert("Payment", "Payment was not completed.");
+            return;
+          }
+        } catch {
+          /* continue */
+        }
+        await sleep(500);
+      }
+      Alert.alert("Payment", "Could not confirm payment status. Check My trips or try again.");
+    },
+    [navigation],
+  );
+
+  const startPayuCheckout = async (bookingId: number, amount: number) => {
+    if (!user?.email) {
+      Alert.alert("Profile", "Email missing — update your account.");
+      return;
+    }
+    const res = await apiFetch("/api/payments/initiate", {
+      method: "POST",
+      body: JSON.stringify({
+        tripId: Number(id),
+        bookingId,
+        amount,
+        userEmail: user.email,
+        userPhone: "9999999999",
+        userName: user.name ?? "TripSync User",
+      }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      Alert.alert("Payment", typeof body?.error === "string" ? body.error : await readApiErrorMessage(res));
+      return;
+    }
+    const p = body as {
+      payuUrl: string;
+      key: string;
+      txnid: string;
+      amount: string;
+      productinfo: string;
+      firstname: string;
+      email: string;
+      phone: string;
+      surl: string;
+      furl: string;
+      hash: string;
+    };
+
+    const fields: Record<string, string> = {
+      key: p.key,
+      txnid: p.txnid,
+      amount: p.amount,
+      productinfo: p.productinfo,
+      firstname: p.firstname,
+      email: p.email,
+      phone: p.phone,
+      surl: p.surl,
+      furl: p.furl,
+      hash: p.hash,
+    };
+    const formInputs = Object.entries(fields)
+      .map(
+        ([k, v]) =>
+          `<input type="hidden" name="${k.replace(/"/g, "&quot;")}" value="${String(v).replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" />`,
+      )
+      .join("");
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/></head><body onload="document.getElementById('f').submit()">
+<form id="f" method="post" action="${p.payuUrl.replace(/"/g, "&quot;")}">
+${formInputs}
+<noscript><button type="submit">Continue to PayU</button></noscript>
+</form></body></html>`;
+
+    setPendingTxnId(p.txnid);
+    setPayHtml(html);
+    setPayModal(true);
+  };
+
   const book = async () => {
     if (!user) {
       Alert.alert("Sign in required", "Please sign in from the Profile tab.");
@@ -69,13 +170,26 @@ export function TripDetailScreen({ route, navigation }: Props) {
           ...(appliedPct != null && coupon.trim() ? { coupon_code: coupon.trim() } : {}),
         }),
       });
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         Alert.alert("Booking", await readApiErrorMessage(res));
         return;
       }
-      Alert.alert("Success", "You're in!", [
-        { text: "OK", onPress: () => navigation.goBack() },
-      ]);
+
+      if (body?.already_joined) {
+        Alert.alert("Already joined", "You're already on this trip.", [
+          { text: "OK", onPress: () => navigation.goBack() },
+        ]);
+        return;
+      }
+
+      if (body?.needs_payment === true && body?.id != null) {
+        const amt = Number(body.amount ?? 0);
+        await startPayuCheckout(Number(body.id), amt);
+        return;
+      }
+
+      Alert.alert("Success", "You're in!", [{ text: "OK", onPress: () => navigation.goBack() }]);
     } finally {
       setBooking(false);
     }
@@ -96,56 +210,99 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const free = price <= 0;
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={{ paddingBottom: 40 }}>
-      <Image
-        source={{ uri: `https://picsum.photos/seed/${id}/800/400` }}
-        style={styles.hero}
-      />
-      <View style={styles.pad}>
-        <Text style={styles.title}>{name}</Text>
-        <Text style={styles.muted}>{String(trip.description ?? "").slice(0, 280)}</Text>
-        <Text style={styles.row}>
-          {free ? "FREE" : `₹${price.toLocaleString()}`} · {joined}/{max || "—"} joined
-        </Text>
+    <>
+      <ScrollView style={styles.root} contentContainerStyle={{ paddingBottom: 40 }}>
+        <Image
+          source={{ uri: `https://picsum.photos/seed/${id}/800/400` }}
+          style={styles.hero}
+        />
+        <View style={styles.pad}>
+          <Text style={styles.title}>{name}</Text>
+          <Text style={styles.muted}>{String(trip.description ?? "").slice(0, 280)}</Text>
+          <Text style={styles.row}>
+            {free ? "FREE" : `₹${price.toLocaleString()}`} · {joined}/{max || "—"} joined
+          </Text>
 
-        {!free && (
-          <View style={styles.couponBox}>
-            <Text style={styles.label}>Coupon</Text>
-            <View style={styles.couponRow}>
-              <TextInput
-                style={styles.input}
-                placeholder="CODE"
-                placeholderTextColor={colors.muted}
-                autoCapitalize="characters"
-                value={coupon}
-                onChangeText={setCoupon}
-              />
-              <Pressable style={styles.smallBtn} onPress={applyCoupon}>
-                <Text style={styles.smallBtnText}>Apply</Text>
-              </Pressable>
+          {!free && (
+            <View style={styles.couponBox}>
+              <Text style={styles.label}>Coupon</Text>
+              <View style={styles.couponRow}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="CODE"
+                  placeholderTextColor={colors.muted}
+                  autoCapitalize="characters"
+                  value={coupon}
+                  onChangeText={setCoupon}
+                />
+                <Pressable style={styles.smallBtn} onPress={applyCoupon}>
+                  <Text style={styles.smallBtnText}>Apply</Text>
+                </Pressable>
+              </View>
+              {appliedPct != null && (
+                <Text style={styles.ok}>{appliedPct}% discount applied</Text>
+              )}
             </View>
-            {appliedPct != null && (
-              <Text style={styles.ok}>{appliedPct}% discount applied</Text>
-            )}
+          )}
+
+          <Pressable
+            style={[styles.bookBtn, booking && { opacity: 0.6 }]}
+            onPress={book}
+            disabled={booking}
+          >
+            <Text style={styles.bookText}>
+              {booking ? "…" : free ? "Request to join" : "Pay & join"}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.linkBtn}
+            onPress={() => navigation.navigate("LiveTrip", { id })}
+          >
+            <Text style={styles.linkText}>Open live trip (beta)</Text>
+          </Pressable>
+        </View>
+      </ScrollView>
+
+      <Modal visible={payModal} animationType="slide" onRequestClose={() => setPayModal(false)}>
+        <View style={{ flex: 1, backgroundColor: colors.bg }}>
+          <View style={styles.payHeader}>
+            <Pressable onPress={() => setPayModal(false)}>
+              <Text style={styles.payClose}>Cancel</Text>
+            </Pressable>
+            <Text style={styles.payTitle}>Secure checkout</Text>
+            <View style={{ width: 56 }} />
           </View>
-        )}
-
-        <Pressable
-          style={[styles.bookBtn, booking && { opacity: 0.6 }]}
-          onPress={book}
-          disabled={booking}
-        >
-          <Text style={styles.bookText}>{booking ? "…" : free ? "Request to join" : "Book"}</Text>
-        </Pressable>
-
-        <Pressable
-          style={styles.linkBtn}
-          onPress={() => navigation.navigate("LiveTrip", { id })}
-        >
-          <Text style={styles.linkText}>Open live trip (beta)</Text>
-        </Pressable>
-      </View>
-    </ScrollView>
+          {payHtml ? (
+            <WebView
+              originWhitelist={["*"]}
+              source={{ html: payHtml, baseUrl: "https://payu.in" }}
+              onNavigationStateChange={(nav) => {
+                const u = nav.url || "";
+                if (u.includes("tripsync://payment/success")) {
+                  setPayModal(false);
+                  setPayHtml(null);
+                  const m = u.match(/txnid=([^&]+)/);
+                  const txn = m ? decodeURIComponent(m[1]) : pendingTxnId;
+                  if (txn) void pollPaymentStatus(txn);
+                }
+                if (u.includes("tripsync://payment/failure")) {
+                  setPayModal(false);
+                  setPayHtml(null);
+                  Alert.alert("Payment", "Payment failed or was cancelled.");
+                }
+              }}
+              startInLoadingState
+              renderLoading={() => (
+                <View style={styles.wvLoading}>
+                  <ActivityIndicator color={colors.text} size="large" />
+                </View>
+              )}
+            />
+          ) : null}
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -188,4 +345,21 @@ const styles = StyleSheet.create({
   bookText: { color: colors.bg, fontWeight: "800", fontSize: 16 },
   linkBtn: { marginTop: 16, alignItems: "center" },
   linkText: { color: colors.muted, textDecorationLine: "underline" },
+  payHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  payClose: { color: colors.muted, fontSize: 16 },
+  payTitle: { color: colors.text, fontWeight: "700", fontSize: 16 },
+  wvLoading: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: colors.bg,
+  },
 });
