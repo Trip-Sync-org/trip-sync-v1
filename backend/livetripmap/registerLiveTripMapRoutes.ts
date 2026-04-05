@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import { registerTripCheckpointRoutes, type TripCheckpointSocketBridge } from "./tripCheckpointRoutes.js";
 
 const inMemoryAlertsByTrip = new Map<
   number,
@@ -25,6 +26,8 @@ export type LiveTripMapRoutesContext = {
   toPinType: (type: unknown) => "parking" | "fuel" | "attraction" | "hazard" | "road-damage";
   getHasTripMapPinsTable: () => boolean | null;
   setHasTripMapPinsTable: (v: boolean | null) => void;
+  /** Socket.IO bridge for checkpoint / map-pin broadcasts (null when Socket.IO disabled). */
+  socketBridge: TripCheckpointSocketBridge | null;
 };
 
 export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesContext): void {
@@ -314,27 +317,65 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
       };
     });
 
-    const { data: checkpointsRaw, error: cpErr } = await ctx.supabase
-      .from("checkpoints")
+    const { data: tcpRaw, error: tcpErr } = await ctx.supabase
+      .from("trip_checkpoints")
       .select("*")
       .eq("trip_id", tripId)
-      .order("id", { ascending: true });
+      .order("order_index", { ascending: true });
 
-    if (cpErr) {
-      console.error("Supabase checkpoints error:", cpErr.message);
-      return res.status(500).json({ error: "Failed to fetch checkpoints" });
+    let checkpoints: Array<{
+      id: string;
+      name: string;
+      lat: number;
+      lng: number;
+      reached: boolean;
+      badge: string;
+      xp: number;
+      order_index?: number;
+      source?: string;
+    }>;
+
+    const tcpOk = !tcpErr && Array.isArray(tcpRaw) && tcpRaw.length > 0;
+    if (tcpErr && !ctx.isMissingTableError(tcpErr.message)) {
+      console.warn("trip_checkpoints read:", tcpErr.message);
     }
 
-    const badges = ["🚀", "🛣️", "🏔️", "🏖️", "📍", "🎯", "🏁"];
-    const checkpoints = (checkpointsRaw ?? []).map((cp: any, i: number) => ({
-      id: String(cp.id),
-      name: String(cp.name || `Checkpoint ${i + 1}`),
-      lat: Number(cp.lat) || 0,
-      lng: Number(cp.lng) || 0,
-      reached: Boolean(cp.reached ?? cp.is_reached ?? cp.completed_at),
-      badge: String(cp.badge || badges[i % badges.length]),
-      xp: Number(cp.xp ?? 50),
-    }));
+    if (tcpOk) {
+      const badges = ["🚀", "🛣️", "🏔️", "🏖️", "📍", "🎯", "🏁"];
+      checkpoints = (tcpRaw ?? []).map((cp: any, i: number) => ({
+        id: String(cp.id),
+        name: String(cp.name || `Checkpoint ${i + 1}`),
+        lat: Number(cp.latitude ?? cp.lat) || 0,
+        lng: Number(cp.longitude ?? cp.lng) || 0,
+        reached: Boolean(cp.reached ?? cp.is_reached ?? cp.completed_at),
+        badge: String(cp.badge || badges[i % badges.length]),
+        xp: Number(cp.xp ?? 50),
+        order_index: Number(cp.order_index ?? i + 1),
+        source: cp.source != null ? String(cp.source) : undefined,
+      }));
+    } else {
+      const { data: checkpointsRaw, error: cpErr } = await ctx.supabase
+        .from("checkpoints")
+        .select("*")
+        .eq("trip_id", tripId)
+        .order("id", { ascending: true });
+
+      if (cpErr) {
+        console.error("Supabase checkpoints error:", cpErr.message);
+        return res.status(500).json({ error: "Failed to fetch checkpoints" });
+      }
+
+      const badges = ["🚀", "🛣️", "🏔️", "🏖️", "📍", "🎯", "🏁"];
+      checkpoints = (checkpointsRaw ?? []).map((cp: any, i: number) => ({
+        id: String(cp.id),
+        name: String(cp.name || `Checkpoint ${i + 1}`),
+        lat: Number(cp.lat) || 0,
+        lng: Number(cp.lng) || 0,
+        reached: Boolean(cp.reached ?? cp.is_reached ?? cp.completed_at),
+        badge: String(cp.badge || badges[i % badges.length]),
+        xp: Number(cp.xp ?? 50),
+      }));
+    }
 
     let mapPins: any[] = [];
     const hasPinsTable = ctx.getHasTripMapPinsTable();
@@ -613,6 +654,18 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
     const mem = inMemoryAlertsByTrip.get(tripId) ?? [];
     const filtered = since ? mem.filter((a) => a.created_at > since) : mem;
     return res.json({ alerts: filtered.slice(0, limit) });
+  });
+
+  // Checkpoints, map-pin requests, nearby-attractions, GET `/api/maps/community-route-suggestions`, etc. (see `tripCheckpointRoutes.ts`).
+  // `ctx.supabase` is the same service-role client as `backend/lib/supabase.js` (SUPABASE_SERVICE_ROLE_KEY) — not the anon key.
+  registerTripCheckpointRoutes(app, {
+    supabase: ctx.supabase,
+    getTripById: ctx.getTripById,
+    getUserById: ctx.getUserById,
+    toFiniteNumber: ctx.toFiniteNumber,
+    isValidLatLng: ctx.isValidLatLng,
+    isMissingTableError: ctx.isMissingTableError,
+    socketBridge: ctx.socketBridge,
   });
 }
 

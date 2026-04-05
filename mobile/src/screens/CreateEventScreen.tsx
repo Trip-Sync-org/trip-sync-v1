@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
   TextInput,
   Pressable,
+  TouchableOpacity,
   StyleSheet,
   ScrollView,
   Alert,
@@ -16,6 +17,7 @@ import {
   Switch,
   ActivityIndicator,
   Keyboard,
+  useWindowDimensions,
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import * as ImagePicker from "expo-image-picker";
@@ -24,6 +26,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { WebView } from "react-native-webview";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { apiFetch, readApiErrorMessage } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { colors, typography } from "../theme";
@@ -252,11 +255,41 @@ export function CreateEventScreen({ navigation }: Props) {
     coupons: false,
   });
 
-  type CpDraft = { name: string; lat: number; lng: number; xp: number; badge?: string };
+  type CpDraft = {
+    name: string;
+    lat: number;
+    lng: number;
+    description?: string;
+    source: "manual" | "nearby_attraction" | "map_pin";
+    nearby_attraction_id?: string | null;
+    images?: string[];
+  };
+
+  type CommunityAttractionRow = {
+    id: string;
+    name: string;
+    description?: string | null;
+    lat: number;
+    lng: number;
+    images?: string[] | null;
+  };
+
   const [checkpointDrafts, setCheckpointDrafts] = useState<CpDraft[]>([]);
-  const [nearbyAttractions, setNearbyAttractions] = useState<
-    { id: string; name: string; description?: string | null; lat: number; lng: number }[]
+  const [cpSearch, setCpSearch] = useState("");
+  const [cpSearchResults, setCpSearchResults] = useState<
+    { id: string; place_name: string; center: [number, number] }[]
   >([]);
+  const [routePolyline, setRoutePolyline] = useState<[number, number][]>([]);
+  const [communitySuggestions, setCommunitySuggestions] = useState<CommunityAttractionRow[]>([]);
+  const [communityAttractionsLoading, setCommunityAttractionsLoading] = useState(false);
+  const [attractionDetail, setAttractionDetail] = useState<CommunityAttractionRow | null>(null);
+  const [showAttractionDetail, setShowAttractionDetail] = useState(false);
+  const [fullscreenImage, setFullscreenImage] = useState<string[] | null>(null);
+  const [fullscreenIndex, setFullscreenIndex] = useState(0);
+
+  const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const cpSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const toggleSection = (s: keyof typeof sections) =>
     setSections((p) => ({ ...p, [s]: !p[s] }));
@@ -273,16 +306,144 @@ export function CreateEventScreen({ navigation }: Props) {
 
   useEffect(() => {
     void (async () => {
+      if (!startCoords || !endCoords || !user?.id) {
+        setRoutePolyline([]);
+        return;
+      }
       try {
-        const res = await apiFetch("/api/nearby-attractions");
-        if (!res.ok) return;
-        const j = (await res.json()) as { attractions?: typeof nearbyAttractions };
-        if (Array.isArray(j.attractions)) setNearbyAttractions(j.attractions);
+        const res = await apiFetch("/api/maps/route", {
+          method: "POST",
+          body: JSON.stringify({
+            origin: { lat: startCoords.lat, lng: startCoords.lng },
+            destination: { lat: endCoords.lat, lng: endCoords.lng },
+            profile: "driving",
+            waypoints: [],
+          }),
+        });
+        if (!res.ok) {
+          setRoutePolyline([]);
+          return;
+        }
+        const j = (await res.json()) as {
+          routes?: Array<{ geometry?: { coordinates?: [number, number][] } }>;
+        };
+        const coords = j.routes?.[0]?.geometry?.coordinates;
+        if (!coords?.length) {
+          setRoutePolyline([]);
+          return;
+        }
+        const latLng = coords.map(([lng, lat]) => [lat, lng] as [number, number]);
+        setRoutePolyline(latLng);
       } catch {
-        /* optional */
+        setRoutePolyline([]);
       }
     })();
-  }, []);
+  }, [startCoords, endCoords, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || user.role !== "organizer") {
+      setCommunitySuggestions([]);
+      setCommunityAttractionsLoading(false);
+      return;
+    }
+    if (!startCoords || !endCoords) {
+      setCommunitySuggestions([]);
+      setCommunityAttractionsLoading(false);
+      return;
+    }
+    const routePoly: [number, number][] =
+      routePolyline.length >= 2
+        ? routePolyline
+        : [
+            [startCoords.lat, startCoords.lng],
+            [endCoords.lat, endCoords.lng],
+          ];
+    const t = setTimeout(() => {
+      void (async () => {
+        setCommunityAttractionsLoading(true);
+        try {
+          const enc = encodeURIComponent(JSON.stringify(routePoly));
+          const res = await apiFetch(
+            `/api/maps/community-route-suggestions?user_id=${encodeURIComponent(String(user.id))}&routeCoords=${enc}`,
+          );
+          if (!res.ok) {
+            setCommunitySuggestions([]);
+            return;
+          }
+          const rows = (await res.json()) as Array<{
+            id?: string;
+            name?: string;
+            description?: string | null;
+            lat?: number;
+            lng?: number;
+            images?: string[] | null;
+          }>;
+          const mapped = (Array.isArray(rows) ? rows : []).map((r) => ({
+            id: String(r.id ?? ""),
+            name: String(r.name ?? "Place"),
+            description: r.description ?? null,
+            lat: Number(r.lat) || 0,
+            lng: Number(r.lng) || 0,
+            images: r.images ?? null,
+          }));
+          setCommunitySuggestions(mapped.filter((x) => x.id));
+        } catch {
+          setCommunitySuggestions([]);
+        } finally {
+          setCommunityAttractionsLoading(false);
+        }
+      })();
+    }, 500);
+    return () => clearTimeout(t);
+  }, [routePolyline, startCoords, endCoords, user?.id, user?.role]);
+
+  useEffect(() => {
+    const q = cpSearch.trim();
+    if (cpSearchTimer.current) clearTimeout(cpSearchTimer.current);
+    if (q.length < 2) {
+      setCpSearchResults([]);
+      return;
+    }
+    cpSearchTimer.current = setTimeout(() => {
+      void (async () => {
+        const token = getMapboxPublicToken();
+        if (mapboxTokenConfigError(token)) {
+          setCpSearchResults([]);
+          return;
+        }
+        try {
+          const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${encodeURIComponent(token)}&limit=6`;
+          const res = await fetch(url);
+          if (!res.ok) {
+            setCpSearchResults([]);
+            return;
+          }
+          const data = (await res.json()) as {
+            features?: Array<{ id?: string; place_name?: string; text?: string; center?: [number, number] }>;
+          };
+          const feats = data.features ?? [];
+          setCpSearchResults(
+            feats
+              .map((f, i) => {
+                const lng = f.center && f.center.length >= 2 ? Number(f.center[0]) : 0;
+                const lat = f.center && f.center.length >= 2 ? Number(f.center[1]) : 0;
+                return {
+                  id: String(f.id ?? `mb-${i}`),
+                  place_name: String(f.place_name ?? f.text ?? "Place"),
+                  center: [lng, lat] as [number, number],
+                };
+              })
+              .filter((x) => x.center[0] !== 0 || x.center[1] !== 0),
+          );
+        } catch {
+          setCpSearchResults([]);
+        }
+      })();
+    }, 400);
+    return () => {
+      if (cpSearchTimer.current) clearTimeout(cpSearchTimer.current);
+    };
+  }, [cpSearch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -631,15 +792,23 @@ export function CreateEventScreen({ navigation }: Props) {
         return;
       }
       if (checkpointDrafts.length > 0) {
-        const cpRes = await apiFetch(`/api/trips/${createdId}/checkpoints`, {
-          method: "POST",
-          body: JSON.stringify({
-            user_id: Number(user.id),
-            checkpoints: checkpointDrafts,
-          }),
-        });
-        if (!cpRes.ok) {
-          Alert.alert("Checkpoints", await readApiErrorMessage(cpRes));
+        for (const cp of checkpointDrafts) {
+          const cpRes = await apiFetch(`/api/trips/${createdId}/checkpoints`, {
+            method: "POST",
+            body: JSON.stringify({
+              user_id: Number(user.id),
+              name: cp.name,
+              description: cp.description ?? "",
+              latitude: cp.lat,
+              longitude: cp.lng,
+              source: cp.source,
+              nearby_attraction_id: cp.nearby_attraction_id ?? null,
+            }),
+          });
+          if (!cpRes.ok) {
+            Alert.alert("Checkpoints", await readApiErrorMessage(cpRes));
+            break;
+          }
         }
       }
       navigation.replace("TripDetail", { id: String(createdId) });
@@ -727,6 +896,37 @@ export function CreateEventScreen({ navigation }: Props) {
         t.city.toLowerCase().includes(q) || t.label.toLowerCase().includes(q),
     );
   }, [tzSearch]);
+
+  const routeIsSet = startCoords != null && endCoords != null;
+
+  const addCheckpointFromAttraction = useCallback((attraction: CommunityAttractionRow) => {
+    setCheckpointDrafts((prev) => {
+      const already = prev.some((cp) => cp.nearby_attraction_id === attraction.id);
+      if (already) {
+        Alert.alert("Checkpoint", "Already added as a checkpoint.");
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          name: attraction.name,
+          description: attraction.description ?? undefined,
+          lat: attraction.lat,
+          lng: attraction.lng,
+          source: "nearby_attraction" as const,
+          nearby_attraction_id: attraction.id,
+          images: (attraction.images ?? []).filter(
+            (u): u is string => typeof u === "string" && u.length > 0,
+          ),
+        },
+      ];
+    });
+  }, []);
+
+  const closeAttractionDetail = useCallback(() => {
+    setShowAttractionDetail(false);
+    setAttractionDetail(null);
+  }, []);
 
   const androidInlinePicker =
     pickerSlot && Platform.OS === "android" ? (
@@ -1017,40 +1217,126 @@ export function CreateEventScreen({ navigation }: Props) {
             Add stops along the route. Tap community-saved attractions, or build the list from the web editor for
             precise pins.
           </Text>
-          {nearbyAttractions.length > 0 ? (
-            <>
-              <Text style={[typography.label, { marginTop: 12 }]}>Nearby attractions (database)</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-                {nearbyAttractions.map((a) => (
+          <Text style={[typography.label, { marginTop: 10 }]}>Search places (Mapbox)</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Search address or place"
+            placeholderTextColor="rgba(255,255,255,0.35)"
+            value={cpSearch}
+            onChangeText={setCpSearch}
+          />
+          {cpSearchResults.length > 0 ? (
+            <View style={styles.cpSuggestBox}>
+              {cpSearchResults.map((item) => (
+                <Pressable
+                  key={item.id}
+                  style={styles.suggestRow}
+                  onPress={() => {
+                    setCheckpointDrafts((p) => [
+                      ...p,
+                      {
+                        name: item.place_name,
+                        lat: item.center[1],
+                        lng: item.center[0],
+                        source: "manual",
+                      },
+                    ]);
+                    setCpSearch("");
+                    setCpSearchResults([]);
+                    Keyboard.dismiss();
+                  }}
+                >
+                  <Text style={styles.suggestText} numberOfLines={2}>
+                    {item.place_name}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+
+          <Text style={[typography.label, { marginTop: 12 }]}>Community attractions</Text>
+          <Text style={[styles.mutedXs, { marginBottom: 6 }]}>
+            Within 50 km of your route (straight line until directions load, then OSRM path).
+          </Text>
+          {!routeIsSet ? (
+            <Text style={[styles.emptyHint, { marginTop: 6 }]}>
+              Set a route above to see community-discovered attractions along your path
+            </Text>
+          ) : communityAttractionsLoading ? (
+            <ActivityIndicator style={{ marginTop: 14 }} color={colors.text} />
+          ) : communitySuggestions.length === 0 ? (
+            <Text style={[styles.emptyHint, { marginTop: 6 }]}>
+              No community attractions found along this route yet
+            </Text>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+              {communitySuggestions.map((a) => {
+                const isAlreadyAdded = checkpointDrafts.some(
+                  (cp) => cp.nearby_attraction_id === a.id,
+                );
+                return (
                   <Pressable
                     key={a.id}
-                    style={styles.attrChip}
+                    style={[styles.attrChip, isAlreadyAdded && styles.attrChipAdded]}
                     onPress={() => {
-                      setCheckpointDrafts((p) => [
-                        ...p,
-                        { name: a.name, lat: a.lat, lng: a.lng, xp: 50, badge: "📍" },
-                      ]);
+                      if (isAlreadyAdded) return;
+                      setAttractionDetail(a);
+                      setShowAttractionDetail(true);
                     }}
                   >
                     <Text style={styles.attrChipTxt} numberOfLines={2}>
-                      + {a.name}
+                      {isAlreadyAdded ? "✓ " : "+ "}
+                      {a.name}
                     </Text>
                   </Pressable>
-                ))}
-              </ScrollView>
-            </>
-          ) : null}
+                );
+              })}
+            </ScrollView>
+          )}
+
           <Text style={[typography.label, { marginTop: 14 }]}>Planned checkpoints ({checkpointDrafts.length})</Text>
           {checkpointDrafts.length === 0 ? (
-            <Text style={[styles.mutedXs, { marginTop: 6 }]}>None yet — tap attractions above when available.</Text>
+            <Text style={[styles.mutedXs, { marginTop: 6 }]}>None yet — search above or add community suggestions.</Text>
           ) : (
             checkpointDrafts.map((c, i) => (
-              <View key={`${c.name}-${i}`} style={styles.cpDraftRow}>
-                <Text style={styles.cpDraftTxt} numberOfLines={2}>
-                  {i + 1}. {c.name} ({c.lat.toFixed(4)}, {c.lng.toFixed(4)})
-                </Text>
+              <View key={`${c.name}-${i}-${c.lat}`} style={styles.cpDraftRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cpDraftTxt} numberOfLines={2}>
+                    {i + 1}. {c.name}
+                  </Text>
+                  <Text style={styles.mutedXs}>
+                    {c.lat.toFixed(4)}, {c.lng.toFixed(4)}
+                    {c.source === "nearby_attraction" ? " · community" : ""}
+                  </Text>
+                </View>
+                <View style={styles.cpReorder}>
+                  <Pressable
+                    onPress={() =>
+                      setCheckpointDrafts((p) => {
+                        if (i <= 0) return p;
+                        const n = [...p];
+                        [n[i - 1], n[i]] = [n[i], n[i - 1]];
+                        return n;
+                      })
+                    }
+                  >
+                    <Text style={styles.cpReorderTxt}>↑</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() =>
+                      setCheckpointDrafts((p) => {
+                        if (i >= p.length - 1) return p;
+                        const n = [...p];
+                        [n[i], n[i + 1]] = [n[i + 1], n[i]];
+                        return n;
+                      })
+                    }
+                  >
+                    <Text style={styles.cpReorderTxt}>↓</Text>
+                  </Pressable>
+                </View>
                 <Pressable onPress={() => setCheckpointDrafts((p) => p.filter((_, j) => j !== i))}>
-                  <Text style={{ color: colors.danger, fontWeight: "700" }}>Remove</Text>
+                  <Text style={{ color: colors.danger, fontWeight: "700" }}>✕</Text>
                 </Pressable>
               </View>
             ))
@@ -1510,6 +1796,156 @@ export function CreateEventScreen({ navigation }: Props) {
         onSelect={setDuration}
         onClose={() => setDurationModal(false)}
       />
+
+      <Modal
+        visible={showAttractionDetail}
+        transparent
+        animationType="slide"
+        onRequestClose={closeAttractionDetail}
+      >
+        <View style={styles.attractionModalOverlay}>
+          <Pressable style={StyleSheet.absoluteFillObject} onPress={closeAttractionDetail} />
+          <View
+            style={[
+              styles.attractionDetailCard,
+              { paddingBottom: Math.max(insets.bottom, 12) + 24 },
+            ]}
+          >
+            <View style={styles.attractionSheetHandle} />
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
+              bounces={false}
+            >
+              <Text style={styles.attractionDetailName}>{attractionDetail?.name}</Text>
+              <Text style={styles.attractionDetailCoords}>
+                {attractionDetail != null
+                  ? `${attractionDetail.lat.toFixed(5)}, ${attractionDetail.lng.toFixed(5)}`
+                  : ""}
+              </Text>
+              {attractionDetail?.description ? (
+                <Text style={styles.attractionDetailDesc}>{attractionDetail.description}</Text>
+              ) : (
+                <Text style={styles.attractionDetailDescEmpty}>No description added</Text>
+              )}
+              {attractionDetail?.images && attractionDetail.images.length > 0 ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.attractionPhotoRow}
+                  nestedScrollEnabled
+                >
+                  {attractionDetail.images.map((url, idx) => (
+                    <TouchableOpacity
+                      key={`${url}-${idx}`}
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        const imgs = attractionDetail.images ?? [];
+                        if (imgs.length === 0) return;
+                        setFullscreenImage(imgs);
+                        setFullscreenIndex(idx);
+                      }}
+                    >
+                      <Image
+                        source={{ uri: url }}
+                        style={styles.attractionPhoto}
+                        resizeMode="cover"
+                      />
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              ) : null}
+            </ScrollView>
+            <View style={styles.attractionDetailButtons}>
+              <TouchableOpacity
+                onPress={closeAttractionDetail}
+                style={styles.attractionCloseBtnSecondary}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.attractionCloseBtnSecondaryTxt}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  if (attractionDetail) addCheckpointFromAttraction(attractionDetail);
+                  closeAttractionDetail();
+                }}
+                style={styles.attractionAddBtnPrimary}
+                activeOpacity={0.9}
+              >
+                <Text style={styles.attractionAddBtnPrimaryTxt}>+ Add as checkpoint</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={fullscreenImage != null && fullscreenImage.length > 0}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setFullscreenImage(null)}
+      >
+        <View style={styles.fullscreenViewerRoot}>
+          <TouchableOpacity
+            onPress={() => setFullscreenImage(null)}
+            style={[styles.fullscreenCloseBtn, { top: insets.top + 12 }]}
+            hitSlop={12}
+            accessibilityLabel="Close image viewer"
+          >
+            <Text style={styles.fullscreenCloseBtnTxt}>✕</Text>
+          </TouchableOpacity>
+          <Text style={[styles.fullscreenCounter, { top: insets.top + 18 }]}>
+            {fullscreenIndex + 1} / {fullscreenImage?.length ?? 0}
+          </Text>
+          {fullscreenImage != null && fullscreenImage.length > 0 ? (
+            <FlatList
+              key={`fs-${fullscreenImage.join("|")}-${fullscreenIndex}`}
+              data={fullscreenImage}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              removeClippedSubviews={false}
+              initialScrollIndex={Math.min(fullscreenIndex, Math.max(0, fullscreenImage.length - 1))}
+              getItemLayout={(_, index) => ({
+                length: windowWidth,
+                offset: windowWidth * index,
+                index,
+              })}
+              onMomentumScrollEnd={(e) => {
+                const idx = Math.round(e.nativeEvent.contentOffset.x / windowWidth);
+                if (idx >= 0 && fullscreenImage && idx < fullscreenImage.length) {
+                  setFullscreenIndex(idx);
+                }
+              }}
+              keyExtractor={(item, idx) => `${item}-${idx}`}
+              renderItem={({ item }) => (
+                <View style={[styles.fullscreenImagePage, { width: windowWidth }]}>
+                  <Image
+                    source={{ uri: item }}
+                    style={{ width: windowWidth, height: windowHeight * 0.75 }}
+                    resizeMode="contain"
+                  />
+                </View>
+              )}
+            />
+          ) : null}
+          {fullscreenImage != null && fullscreenImage.length > 1 ? (
+            <View style={[styles.fullscreenDots, { bottom: Math.max(insets.bottom, 16) + 24 }]}>
+              {fullscreenImage.map((_, idx) => (
+                <View
+                  key={`dot-${idx}`}
+                  style={[
+                    styles.fullscreenDot,
+                    idx === fullscreenIndex ? styles.fullscreenDotActive : styles.fullscreenDotInactive,
+                  ]}
+                />
+              ))}
+            </View>
+          ) : null}
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -1539,6 +1975,145 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   attrChipTxt: { color: colors.text, fontSize: 12, fontWeight: "700" },
+  attrChipAdded: {
+    borderColor: "rgba(34,197,94,0.5)",
+    backgroundColor: "rgba(34,197,94,0.12)",
+  },
+  emptyHint: { fontSize: 12, color: colors.muted2, lineHeight: 18 },
+  attractionModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    justifyContent: "flex-end",
+    padding: 0,
+  },
+  attractionDetailCard: {
+    width: "100%",
+    backgroundColor: "#1C1C1E",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    maxHeight: "85%",
+  },
+  attractionSheetHandle: {
+    width: 36,
+    height: 4,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 2,
+    alignSelf: "center",
+    marginBottom: 20,
+  },
+  attractionDetailName: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    marginBottom: 4,
+  },
+  attractionDetailCoords: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.4)",
+    marginBottom: 12,
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  },
+  attractionDetailDesc: {
+    fontSize: 15,
+    color: "rgba(255,255,255,0.75)",
+    lineHeight: 22,
+    marginBottom: 4,
+  },
+  attractionDetailDescEmpty: {
+    fontSize: 14,
+    color: "rgba(255,255,255,0.3)",
+    fontStyle: "italic",
+  },
+  attractionPhotoRow: { marginVertical: 12 },
+  attractionPhoto: { width: 120, height: 90, borderRadius: 8, marginRight: 8, backgroundColor: "#111" },
+  attractionDetailButtons: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(255,255,255,0.1)",
+  },
+  attractionCloseBtnSecondary: {
+    flex: 0,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  attractionCloseBtnSecondaryTxt: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  attractionAddBtnPrimary: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: "#00E5B0",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
+  attractionAddBtnPrimaryTxt: {
+    color: "#000",
+    fontSize: 15,
+    fontWeight: "700",
+    letterSpacing: 0.2,
+  },
+  fullscreenViewerRoot: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.96)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  fullscreenCloseBtn: {
+    position: "absolute",
+    right: 20,
+    zIndex: 10,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fullscreenCloseBtnTxt: { color: "#fff", fontSize: 20, fontWeight: "300" },
+  fullscreenCounter: {
+    position: "absolute",
+    left: 20,
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 14,
+    zIndex: 10,
+  },
+  fullscreenImagePage: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  fullscreenDots: {
+    position: "absolute",
+    flexDirection: "row",
+    gap: 6,
+    alignSelf: "center",
+  },
+  fullscreenDot: {
+    height: 6,
+    borderRadius: 3,
+  },
+  fullscreenDotActive: {
+    width: 20,
+    backgroundColor: "#00E5B0",
+  },
+  fullscreenDotInactive: {
+    width: 6,
+    backgroundColor: "rgba(255,255,255,0.35)",
+  },
   cpDraftRow: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -1549,6 +2124,44 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   cpDraftTxt: { flex: 1, color: colors.text, fontSize: 13 },
+  cpSuggestBox: {
+    marginTop: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: "hidden",
+    maxHeight: 200,
+  },
+  communityCard: {
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 10,
+    gap: 8,
+  },
+  communityName: { color: colors.text, fontWeight: "800", fontSize: 14, flex: 1 },
+  badgeCommunity: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: "rgba(45,212,191,0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(45,212,191,0.35)",
+  },
+  badgeCommunityTxt: { fontSize: 9, fontWeight: "800", color: "#5eead4" },
+  communityThumb: { width: 56, height: 56, borderRadius: 10, backgroundColor: "#111" },
+  communityAddBtn: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: colors.text,
+  },
+  communityAddBtnTxt: { color: "#000", fontWeight: "800", fontSize: 12 },
+  cpReorder: { flexDirection: "column", gap: 2 },
+  cpReorderTxt: { color: colors.muted, fontSize: 14, fontWeight: "900" },
   bigName: {
     fontSize: 32,
     fontWeight: "800",

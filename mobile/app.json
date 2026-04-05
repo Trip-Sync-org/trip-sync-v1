@@ -14,13 +14,20 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Trip-Sync uses the microphone for waiting-room voice chat with your trip group.",
+        "NSMicrophoneUsageDescription": "Trip-Sync needs microphone for convoy voice chat",
+        "UIBackgroundModes": ["audio", "voip"],
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }
       }
     },
     "android": {
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_CONNECT"
+      ],
       "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",

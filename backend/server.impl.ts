@@ -406,6 +406,19 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     return "hazard";
   }
 
+  const checkpointSocketBridge: {
+    io: Server | null;
+    tripRiders: Map<number, Map<number, string>>;
+    tripUserRoles: Map<number, Map<number, string>>;
+    voiceRiders: Map<number, Set<number>>;
+  } = {
+    io: null,
+    tripRiders: new Map(),
+    tripUserRoles: new Map(),
+    voiceRiders: new Map(),
+  };
+  checkpointSocketBridge.io = io;
+
   registerLiveTripMapRoutes(app, {
     supabase,
     getTripById,
@@ -418,6 +431,11 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     getHasTripMapPinsTable: () => hasTripMapPinsTable,
     setHasTripMapPinsTable: (v) => {
       hasTripMapPinsTable = v;
+    },
+    socketBridge: {
+      getIo: () => checkpointSocketBridge.io,
+      tripRiders: checkpointSocketBridge.tripRiders,
+      tripUserRoles: checkpointSocketBridge.tripUserRoles,
     },
   });
 
@@ -1779,80 +1797,105 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     return res.json(data);
   });
 
-  /** Bulk set checkpoints when creating/editing a trip (organizer only). */
-  app.post("/api/trips/:id/checkpoints", async (req, res) => {
-    const tripId = Number(req.params.id);
-    const { user_id, checkpoints: cps } = req.body ?? {};
-    const userId = Number(user_id);
-    if (!Number.isFinite(tripId) || !Number.isFinite(userId)) {
-      return res.status(400).json({ error: "trip id and user_id are required" });
-    }
-    const actor = await getUserById(userId);
-    if (!actor || actor.role !== "organizer") {
-      return res.status(403).json({ error: "Only organizers can add checkpoints" });
-    }
-    const trip = await getTripById(tripId);
-    if (!trip) return res.status(404).json({ error: "Trip not found" });
-    if (Number(trip.organizer_id) !== userId) {
-      return res.status(403).json({ error: "You can only edit your own trip" });
-    }
-    const badges = ["🚀", "🛣️", "🏔️", "🏖️", "📍", "🎯", "🏁"];
-    const list = Array.isArray(cps) ? cps : [];
-    const rows = list.map((cp: Record<string, unknown>, i: number) => ({
-      trip_id: tripId,
-      name: String(cp.name ?? `Checkpoint ${i + 1}`).slice(0, 200),
-      lat: Number(cp.lat) || 0,
-      lng: Number(cp.lng) || 0,
-      xp: Number(cp.xp ?? 50),
-      badge: String(cp.badge ?? badges[i % badges.length]),
-    }));
-    if (rows.length === 0) {
-      return res.json({ ok: true, inserted: 0 });
-    }
-    const { error } = await supabase.from("checkpoints").insert(rows);
-    if (error) {
-      console.error("checkpoints bulk insert:", error.message);
-      return res.status(400).json({ error: error.message || "Failed to insert checkpoints" });
-    }
-    return res.json({ ok: true, inserted: rows.length });
-  });
-
   // Real-time Socket Logic
   if (shouldListen && io) {
+    const tripRiders = checkpointSocketBridge.tripRiders;
+    /** Key `tripId:userId` — cancel delayed disconnect when same rider reconnects (identify). */
+    const pendingDisconnectCleanup = new Map<string, ReturnType<typeof setTimeout>>();
+
+    async function resolveSocketTripRole(tripId: number, userId: number): Promise<string> {
+      const trip = await getTripById(tripId);
+      if (trip && Number((trip as { organizer_id?: unknown }).organizer_id) === userId) {
+        return "organizer";
+      }
+      const { data: tm } = await supabase
+        .from("trip_members")
+        .select("role")
+        .eq("trip_id", String(tripId))
+        .eq("user_id", String(userId))
+        .maybeSingle();
+      const raw = String((tm as { role?: string } | null)?.role ?? "")
+        .toLowerCase()
+        .replace(/-/g, "_");
+      if (raw === "organizer") return "organizer";
+      if (raw === "co_admin" || raw === "coadmin") return "co_admin";
+      if (raw === "moderator") return "moderator";
+      if (raw === "member") return "member";
+      return "member";
+    }
+
     io.on("connection", (socket) => {
       console.log("User connected:", socket.id);
 
-      socket.on("join-trip", (payload: unknown) => {
-        let tid: number;
-        let userId: number | null = null;
-        if (typeof payload === "number") {
-          tid = Number(payload);
-        } else if (payload && typeof payload === "object") {
-          const p = payload as { tripId?: unknown; userId?: unknown };
-          tid = Number(p.tripId);
-          const u = Number(p.userId);
-          userId = Number.isFinite(u) ? u : null;
-        } else {
-          return;
-        }
+      let myTripId: number | null = null;
+      let myUserId: number | null = null;
+
+      socket.on("join-trip", (tripId: unknown) => {
+        const tid = Number(tripId);
         if (!Number.isFinite(tid)) return;
+        myTripId = tid;
         const room = `trip-${Number(tid)}`;
+        socket.rooms.forEach((r) => {
+          if (r !== socket.id) socket.leave(r);
+        });
         socket.join(room);
-        const data = socket.data as { liveTripId?: number; liveUserId?: number | null };
-        data.liveTripId = tid;
-        data.liveUserId = userId;
-        console.log(`[socket] ${socket.id} joined ${room}`, userId ?? "");
-        if (userId != null && Number.isFinite(userId)) {
-          socket.to(room).emit("trip-member-presence", { userId, online: true });
+        if (myUserId != null && Number.isFinite(myUserId)) {
+          if (!tripRiders.has(tid)) tripRiders.set(tid, new Map());
+          tripRiders.get(tid)!.set(myUserId, socket.id);
         }
+        console.log(`[socket] ${socket.id} joined ${room}`);
+      });
+
+      socket.on("identify", async (payload: { userId?: unknown; tripId?: unknown; role?: unknown }) => {
+        const uid = Number(payload?.userId);
+        const tid = Number(payload?.tripId);
+        if (!Number.isFinite(uid) || !Number.isFinite(tid)) return;
+        myUserId = uid;
+        myTripId = tid;
+        const room = `trip-${Number(tid)}`;
+        if (!tripRiders.has(tid)) tripRiders.set(tid, new Map());
+        tripRiders.get(tid)!.set(uid, socket.id);
+        let tripRole: string;
+        try {
+          tripRole = await resolveSocketTripRole(tid, uid);
+        } catch (e) {
+          console.warn("[socket] resolveSocketTripRole failed:", e);
+          tripRole = String(payload?.role ?? "member")
+            .toLowerCase()
+            .replace(/-/g, "_");
+        }
+        const s = socket as import("socket.io").Socket & {
+          tripRole?: string;
+          tripId?: number;
+          userId?: number;
+        };
+        s.tripRole = tripRole;
+        s.tripId = tid;
+        s.userId = uid;
+        const roleNorm = tripRole;
+        if (!checkpointSocketBridge.tripUserRoles.has(tid)) {
+          checkpointSocketBridge.tripUserRoles.set(tid, new Map());
+        }
+        checkpointSocketBridge.tripUserRoles.get(tid)!.set(uid, roleNorm);
+        const pendKey = `${tid}:${uid}`;
+        const pending = pendingDisconnectCleanup.get(pendKey);
+        if (pending) {
+          clearTimeout(pending);
+          pendingDisconnectCleanup.delete(pendKey);
+          console.log(`[socket] cancelled pending disconnect for user ${uid} (reconnect)`);
+        }
+        socket.to(room).emit("trip-member-presence", { userId: uid, online: true });
       });
 
       socket.on("request-positions", (payload: unknown) => {
-        const p = payload as { tripId?: unknown };
-        const tid = Number(p?.tripId);
-        if (!Number.isFinite(tid)) return;
-        const room = `trip-${Number(tid)}`;
-        socket.to(room).emit("broadcast-position-now");
+        const p = payload as { tripId?: unknown; userId?: unknown };
+        const tripId = Number(p?.tripId);
+        if (!Number.isFinite(tripId)) return;
+        const room = `trip-${Number(tripId)}`;
+        socket.to(room).emit("broadcast-position-now", {
+          requestedByUserId: Number.isFinite(Number(p?.userId)) ? Number(p.userId) : null,
+        });
+        console.log(`[socket] position request in trip ${tripId}`);
       });
 
       socket.on("convoy-action", (payload: {
@@ -1898,7 +1941,12 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
           return;
         }
 
+        myTripId = tripIdNum;
+        myUserId = userIdNum;
         const room = `trip-${Number(tripIdNum)}`;
+        if (!tripRiders.has(tripIdNum)) tripRiders.set(tripIdNum, new Map());
+        tripRiders.get(tripIdNum)!.set(userIdNum, socket.id);
+
         const speedMps = toFiniteNumber(speed);
         const headingNum =
           heading != null && Number.isFinite(Number(heading)) ? Number(heading) : null;
@@ -1909,6 +1957,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
           lng: Number(lngNum),
           speed: speedMps,
           heading: headingNum,
+          ts: Date.now(),
         });
 
         const nowIso = new Date().toISOString();
@@ -1949,26 +1998,83 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
         io.to(`trip-${tripId}`).emit("new-message", { userId, message, timestamp: new Date() });
       });
 
-      socket.on("disconnect", async () => {
-        const data = socket.data as { liveTripId?: number; liveUserId?: number | null };
-        const tid = data?.liveTripId;
-        const uid = data?.liveUserId;
-        if (tid != null && uid != null && Number.isFinite(tid) && Number.isFinite(uid)) {
-          const room = `trip-${Number(tid)}`;
+      const voiceRiders = checkpointSocketBridge.voiceRiders;
+
+      socket.on("voice-join", (payload: { tripId?: unknown; userId?: unknown }) => {
+        const tripId = Number(payload?.tripId);
+        const userId = Number(payload?.userId);
+        if (!Number.isFinite(tripId) || !Number.isFinite(userId)) return;
+        const room = `trip-${tripId}`;
+        if (!voiceRiders.has(tripId)) voiceRiders.set(tripId, new Set());
+        voiceRiders.get(tripId)!.add(userId);
+        const existing = Array.from(voiceRiders.get(tripId)!).filter((id) => id !== userId);
+        socket.emit("voice-peers", { peers: existing });
+        socket.to(room).emit("voice-rider-joined", { userId });
+      });
+
+      socket.on("voice-leave", (payload: { tripId?: unknown; userId?: unknown }) => {
+        const tripId = Number(payload?.tripId);
+        const userId = Number(payload?.userId);
+        if (!Number.isFinite(tripId) || !Number.isFinite(userId)) return;
+        const room = `trip-${tripId}`;
+        voiceRiders.get(tripId)?.delete(userId);
+        io.to(room).emit("voice-rider-left", { userId });
+      });
+
+      socket.on(
+        "voice-signal",
+        (payload: { tripId?: unknown; toUserId?: unknown; fromUserId?: unknown; signal?: unknown }) => {
+          const tripId = Number(payload?.tripId);
+          if (!Number.isFinite(tripId)) return;
+          const room = `trip-${Number(tripId)}`;
+          io.to(room).emit("voice-signal", {
+            fromUserId: Number(payload.fromUserId),
+            toUserId: Number(payload.toUserId),
+            signal: payload.signal,
+          });
+        },
+      );
+
+      socket.on("disconnect", (reason: string) => {
+        const tid = myTripId;
+        const uid = myUserId;
+        const disconnectedSocketId = socket.id;
+        console.log(`[socket] ${socket.id} disconnected (${reason})`);
+
+        if (tid == null || uid == null || !Number.isFinite(tid) || !Number.isFinite(uid)) {
+          return;
+        }
+
+        const room = `trip-${Number(tid)}`;
+        voiceRiders.get(tid)?.delete(uid);
+        io.to(room).emit("voice-rider-left", { userId: uid });
+        const pendKey = `${tid}:${uid}`;
+        const prevPend = pendingDisconnectCleanup.get(pendKey);
+        if (prevPend) clearTimeout(prevPend);
+
+        const timer = setTimeout(async () => {
+          pendingDisconnectCleanup.delete(pendKey);
+          const currentSocketId = tripRiders.get(tid)?.get(uid);
+          if (currentSocketId != null && currentSocketId !== disconnectedSocketId) {
+            console.log(`[socket] rider ${uid} reconnected, skip cleanup`);
+            return;
+          }
+          console.log(`[socket] rider ${uid} confirmed gone from trip ${tid}`);
+          tripRiders.get(tid)?.delete(uid);
           io.to(room).emit("trip-member-presence", { userId: uid, online: false });
           io.to(room).emit("rider-left", { userId: uid });
           try {
             const { error: delErr } = await supabase
               .from("trip_participant_locations")
               .delete()
-              .eq("trip_id", Number(tid))
-              .eq("user_id", Number(uid));
-            if (delErr) console.error("[socket] location delete on disconnect:", delErr.message);
+              .eq("trip_id", tid)
+              .eq("user_id", uid);
+            if (delErr) console.error("[socket] location delete after disconnect:", delErr.message);
           } catch (err) {
-            console.error("[socket] location delete on disconnect:", err);
+            console.error("[socket] location delete after disconnect:", err);
           }
-        }
-        console.log("User disconnected");
+        }, 12000);
+        pendingDisconnectCleanup.set(pendKey, timer);
       });
     });
   }

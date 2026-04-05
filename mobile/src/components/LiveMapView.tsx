@@ -16,8 +16,16 @@ import { getMapboxPublicToken, mapboxTokenConfigError } from "../lib/mapboxPubli
 // ─── Types (public API — unchanged from original) ─────────────────────────────
 
 export type MapPoint  = { lat: number; lng: number };
-export type MapMember = { id: string; name: string; lat: number; lng: number; speed: number; color: string };
-export type MapPin    = { id: string; label: string; lat: number; lng: number };
+export type MapMember = {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  speed: number;
+  color: string;
+  status?: string;
+};
+export type MapPin    = { id: string; label: string; lat: number; lng: number; color?: string };
 export type UserGeo   = {
   lat: number;
   lng: number;
@@ -33,6 +41,8 @@ type Props = {
   end:            MapPoint | null;
   members:        MapMember[];
   pins:           MapPin[];
+  /** Highlight next-leg segment (e.g. to upcoming checkpoint) */
+  activeRouteSegment?: MapPoint[] | null;
   fitTick?:       number;
   recenterPoint?: MapPoint | null;
   userGeo?:       UserGeo | null;
@@ -164,6 +174,27 @@ function upsertRouteLayers(coords) {
   routeLayerReady = true;
 }
 
+function upsertActiveSegment(coords) {
+  if (!map || !map.isStyleLoaded() || !coords || coords.length < 2) {
+    if (map && map.getLayer("active-seg")) {
+      try { map.removeLayer("active-seg"); } catch {}
+    }
+    if (map && map.getSource("active-segment")) {
+      try { map.removeSource("active-segment"); } catch {}
+    }
+    return;
+  }
+  const gj = { type:"Feature", properties:{}, geometry:{ type:"LineString", coordinates: coords } };
+  if (!map.getSource("active-segment")) {
+    map.addSource("active-segment", { type:"geojson", data: gj });
+    map.addLayer({ id:"active-seg", type:"line", source:"active-segment",
+      layout:{ "line-join":"round","line-cap":"round" },
+      paint:{ "line-color":"#00E5B0","line-width":6,"line-opacity":0.95 }});
+  } else {
+    map.getSource("active-segment").setData(gj);
+  }
+}
+
 function updateRouteProgress(lng, lat) {
   if (!map || !map.isStyleLoaded() || sourceRouteCoords.length < 2 || !window.turf) return;
   const snapped = turf.nearestPointOnLine(turf.lineString(sourceRouteCoords), turf.point([lng, lat]));
@@ -190,6 +221,12 @@ function apply(data) {
     return Number.isFinite(la) && Number.isFinite(ln);
   }).map(p => [Number(p.lng), Number(p.lat)]);
   upsertRouteLayers(routeCoords);
+
+  const activeSeg = (data.activeRouteSegment || []).filter(p => {
+    const la = Number(p?.lat); const ln = Number(p?.lng);
+    return Number.isFinite(la) && Number.isFinite(ln);
+  }).map(p => [Number(p.lng), Number(p.lat)]);
+  upsertActiveSegment(activeSeg);
 
   if (startMarker) { startMarker.remove(); startMarker = null; }
   if (endMarker) { endMarker.remove(); endMarker = null; }
@@ -241,13 +278,15 @@ function apply(data) {
   (data.pins || []).forEach((p) => {
     const la = Number(p?.lat); const ln = Number(p?.lng);
     if (!Number.isFinite(la) || !Number.isFinite(ln)) return;
-    pinMarkers.push(new mapboxgl.Marker({ element: mkDot("#a78bfa"), anchor: "bottom" }).setLngLat([ln, la]).addTo(map));
+    const col = (p && p.color) ? String(p.color) : "#a78bfa";
+    pinMarkers.push(new mapboxgl.Marker({ element: mkDot(col), anchor: "bottom" }).setLngLat([ln, la]).addTo(map));
   });
 
 }
 
 function fitAll(data) {
   if (!map || !data) return;
+  apply(data);
   const pts = [];
   (data.route || []).forEach((p) => {
     const la = Number(p?.lat); const ln = Number(p?.lng);
@@ -408,6 +447,7 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
   end,
   members,
   pins,
+  activeRouteSegment = null,
   fitTick      = 0,
   recenterPoint = null,
   userGeo       = null,
@@ -416,10 +456,9 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
 }: Props, ref) {
   const webRef             = useRef<WebView>(null);
   const [ready, setReady]  = useState(false);
-  const latestRef          = useRef<object | null>(null);
-  const memberVersionRef   = useRef(0);
-  const prevMemberCoordsRef = useRef<string | null>(null);
-  const prevRestDataRef    = useRef<string | null>(null);
+  const latestRef           = useRef<object | null>(null);
+  const memberVersionRef    = useRef(0);
+  const prevFingerprintRef  = useRef("");
   const mapboxToken = getMapboxPublicToken();
   const tokenErr = useMemo(() => mapboxTokenConfigError(mapboxToken), [mapboxToken]);
   const tokenErrReported = useRef(false);
@@ -449,26 +488,20 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
     }
   }, []);
 
-  // Push route/members/pins when ready; skip redundant WebView updates if coords + static map props unchanged
+  // set-data only when member coords/status or route/pins changed (userGeo handled below)
   useEffect(() => {
     if (!ready) return;
 
-    const coordsFingerprint = members
-      .map((m) => `${m.id}:${(m.lat ?? 0).toFixed(4)},${(m.lng ?? 0).toFixed(4)}`)
+    const memberFp = members
+      .filter((m) => m.lat !== 0 && m.lng !== 0)
+      .map((m) => `${m.id}:${(m.lat ?? 0).toFixed(5)},${(m.lng ?? 0).toFixed(5)},${m.status ?? ""}`)
       .sort()
       .join("|");
-    const restFingerprint = [JSON.stringify(route), JSON.stringify(start), JSON.stringify(end), JSON.stringify(pins)].join(
-      "||",
-    );
-    const unchanged =
-      prevMemberCoordsRef.current != null &&
-      prevRestDataRef.current != null &&
-      coordsFingerprint === prevMemberCoordsRef.current &&
-      restFingerprint === prevRestDataRef.current;
-    if (unchanged) return;
+    const restFp = [JSON.stringify(route), JSON.stringify(start), JSON.stringify(end), JSON.stringify(pins), JSON.stringify(activeRouteSegment)].join("||");
+    const full = `${restFp}::${memberFp}`;
 
-    prevMemberCoordsRef.current = coordsFingerprint;
-    prevRestDataRef.current = restFingerprint;
+    if (full === prevFingerprintRef.current) return;
+    prevFingerprintRef.current = full;
 
     memberVersionRef.current += 1;
     const payload = {
@@ -479,11 +512,12 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
       end,
       members,
       pins,
+      activeRouteSegment: activeRouteSegment ?? [],
     };
     latestRef.current = payload;
     post(payload);
     injectSetData(payload);
-  }, [route, start, end, members, pins, ready, injectSetData]);
+  }, [route, start, end, members, pins, activeRouteSegment, ready, injectSetData]);
 
   useEffect(() => {
     if (!ready || !userGeo) return;
@@ -493,7 +527,7 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
   // Fit bounds
   useEffect(() => {
     if (!fitTick) return;
-    post({ type:"fit", route, start, end, members, pins, userGeo });
+    post({ type:"fit", route, start, end, members, pins, activeRouteSegment: activeRouteSegment ?? [], userGeo });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitTick]);
 
@@ -508,7 +542,7 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
     ref,
     () => ({
       fitConvoy: () => {
-        post({ type:"fit", route, start, end, members, pins, userGeo });
+        post({ type:"fit", route, start, end, members, pins, activeRouteSegment: activeRouteSegment ?? [], userGeo });
       },
       recenter: (point) => {
         const fallback = point ?? recenterPoint ?? userGeo ?? null;
@@ -525,7 +559,7 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
         post({ type: "reset-north" });
       },
     }),
-    [route, start, end, members, pins, userGeo, recenterPoint],
+    [route, start, end, members, pins, activeRouteSegment, userGeo, recenterPoint],
   );
 
   if (tokenErr) {

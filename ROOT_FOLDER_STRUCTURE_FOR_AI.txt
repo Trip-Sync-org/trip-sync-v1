@@ -1,51 +1,67 @@
-Trip-Sync repo map (folders + key file names for AI)
+Trip-Sync repo map (folders + key files for AI / navigation)
 
 Root
 - `.env`, `.env.example`, `.gitignore`
-- `api/` → `index.ts`
+- `ROOT_FOLDER_STRUCTURE_FOR_AI.txt` (this file)
+- `api/` → Vercel-style serverless entry
+  - `index.ts`, `tsconfig.json`
+
+`shared/`
+- `voiceConstants.js` (shared with mobile copy under `mobile/shared/`)
 
 `backend/`
-- `server.ts`, `server.impl.ts`, `tsconfig.json`, `package.json`, `vercel.json`
-- `api/` → `index.ts`
-- `livetripmap/` → `registerLiveTripMapRoutes.ts`
+- `server.ts`, `server.impl.ts` (HTTP + Socket.IO + route wiring)
+- `package.json`, `package-lock.json`, `tsconfig.json`, `vercel.json`
+- `.env.example`, `README.md`
+- `api/`
+  - `signal/` → `ice.js`
+  - `voice/` → `kick.js`, `mode.js`, `mute.js`, `role.js`
+- `lib/` → `permissions.js`, `realtime.js`, `supabase.js`
+- `livetripmap/` → `registerLiveTripMapRoutes.ts` (live trip REST: routes, live-state, etc.)
 - `src/lib/` → `supabaseServerClient.ts`
+- `supabase/` → `schema.sql`
 
-`frontend/`
-- `index.html`
+`frontend/` (Vite React)
+- `index.html`, `package.json`, `tsconfig.json`, `vercel.json`
+- `.env.example`
 - `src/`
   - `main.tsx`, `App.tsx`, `index.css`, `vite-env.d.ts`
-  - `components/` → `LiveTripMap.tsx`, `LiveTripMapNoProvider.tsx`, `MapboxRouteMap.tsx`, `RoutePreviewMap.tsx`
-  - `lib/` → `auth.ts`, `keepAlive.ts`, `supabaseClient.ts`, `supabaseServerClient.ts`, `utils.ts`
+  - `components/`
+    - `LiveTripMap.tsx`, `LiveTripMapNoProvider.tsx`, `LiveTripMapNoProviderMapbox.tsx`
+    - `MapboxRouteMap.tsx`, `RoutePreviewMap.tsx`
+    - `VoiceChannel/` → `VoiceChannel.jsx`, `VoiceChannel.css`, `ParticipantRow.jsx`, `index.js`
+  - `hooks/` → `useParticipants.js`, `useVoiceChannel.js`
+  - `lib/` → `auth.ts`, `keepAlive.ts`, `micAccess.ts`, `supabaseClient.js`, `supabaseClient.ts`, `supabaseServerClient.ts`, `utils.ts`
+  - `services/` → `voiceApi.js`
 - `api/` → `proxy.js`
 
-`mobile/`
-- `App.tsx`, `index.ts`, `app.json`, `metro.config.js`, `tsconfig.json`
+`mobile/` (Expo / React Native)
+- `App.tsx`, `index.ts`
+- `app.json`, `app.config.js`, `metro.config.js`, `tsconfig.json`, `package.json`
+- `.env.example` (local: `.env` — not committed)
+- `shared/` → `voiceConstants.js` (copy of repo `shared/`)
+- `assets/`
 - `src/`
   - `config.ts`, `theme.ts`, `types.ts`
   - `api/` → `client.ts`
-  - `components/` → `LiveMapView.tsx`, `ui.tsx`
+  - `components/` → `LiveMapView.tsx`, `ui.tsx`, `VoiceChannel/ParticipantRow.tsx`
   - `constants/` → `createEvent.ts`
   - `context/` → `AuthContext.tsx`, `ThemeContext.tsx`
-  - `lib/` → `createEventFormat.ts`, `mapStyles.ts`, `supabase.ts`, `tripNormalize.ts`, `weather.ts`
+  - `hooks/` → `useParticipants.js`
+  - `lib/` → `createEventFormat.ts`, `mapboxPublicToken.ts`, `mapStyles.ts`, `supabase.ts`, `supabaseClient.js`, `tripNormalize.ts`, `weather.ts`
   - `navigation/` → `AppNavigator.tsx`
-  - `screens/` (mobile screens)
-    - `LandingScreen.tsx`
-    - `LoginScreen.tsx`
-    - `SignupScreen.tsx`
-    - `OrganizerScreen.tsx`
-    - `UserDashboardScreen.tsx`
-    - `TripDetailScreen.tsx`
-    - `LiveTripScreen.tsx`
-    - `EndTripDashboardScreen.tsx`
-    - `ExploreScreen.tsx`
-    - `CreateEventScreen.tsx`
-    - `ProfileScreen.tsx`
+  - `services/` → `voiceApi.js`
+  - `voice/` → `useWaitingRoomVoice.ts`, `waitingRoomP2P.ts`
+  - `screens/`
+    - `LandingScreen.tsx`, `LoginScreen.tsx`, `SignupScreen.tsx`
+    - `OrganizerScreen.tsx`, `UserDashboardScreen.tsx`, `ExploreScreen.tsx`
+    - `TripDetailScreen.tsx`, `CreateEventScreen.tsx`, `ProfileScreen.tsx`
+    - `LiveTripScreen.tsx`, `EndTripDashboardScreen.tsx`
 
 `sql/`
-- `fix_organizer_coupons_rls.sql`
-- `fix_users_rls_signup.sql`
-- `nearby_attractions_schema.sql`
-- `organizer_coupons_schema.sql`
+- `004_trip_participant_locations.sql`
+- `fix_organizer_coupons_rls.sql`, `fix_users_rls_signup.sql`
+- `nearby_attractions_schema.sql`, `organizer_coupons_schema.sql`
 
 `scripts/`
-
+- (empty or ad-hoc tooling — add files here as needed)

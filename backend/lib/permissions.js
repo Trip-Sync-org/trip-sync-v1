@@ -8,6 +8,20 @@
 
 import { VOICE_PERMISSIONS, STAFF_ROLES } from '../../shared/voiceConstants.js';
 
+/** Roles that may manage checkpoints and review map pins (trip context). */
+export const TRIP_STAFF_ROLES = ['organizer', 'co_admin', 'moderator'];
+
+/**
+ * @param {unknown} role - voice / trip_members role
+ */
+export function isTripStaffRole(role) {
+  const r = String(role || '')
+    .toLowerCase()
+    .replace(/-/g, '_');
+  if (r === 'co_admin' || r === 'coadmin') return true;
+  return TRIP_STAFF_ROLES.includes(r);
+}
+
 /**
  * Check if a role has a specific capability. Throws 403 if not.
  */

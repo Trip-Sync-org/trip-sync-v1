@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  AppState,
   Dimensions,
   Image,
   Modal,
@@ -17,18 +18,26 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import * as Location from "expo-location";
+import * as ImagePicker from "expo-image-picker";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { io, type Socket } from "socket.io-client";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { API_BASE_URL } from "../config";
-import { apiFetch, readApiErrorMessage } from "../api/client";
+import { apiFetch, isAbortLikeError, readApiErrorMessage } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { normalizeTripFromApi, type Trip } from "../lib/tripNormalize";
 import { fetchWeatherNow, type WeatherNow } from "../lib/weather";
 import { useAppTheme } from "../context/ThemeContext";
 import { colors } from "../theme";
-import { LiveMapView, type LiveMapViewRef, type MapMember, type UserGeo } from "../components/LiveMapView";
+import { LiveMapView, type LiveMapViewRef, type MapMember, type MapPoint, type UserGeo } from "../components/LiveMapView";
+import {
+  formatDistance,
+  haversineDistance,
+} from "../lib/checkpointUtils";
+import { supabase } from "../lib/supabase";
+import { useConvoyVoice } from "../hooks/useConvoyVoice";
 import { useWaitingRoomVoice } from "../voice/useWaitingRoomVoice";
 
 type Props = NativeStackScreenProps<RootStackParamList, "LiveTrip">;
@@ -63,6 +72,14 @@ type Checkpoint = {
   reached: boolean;
   badge: string;
   xp: number;
+  /** Server ordering (trip_checkpoints.order_index) — tiebreaker when distances tie */
+  order_index?: number;
+  /** Per-device distance from local GPS (meters), recalculated client-side */
+  clientDistanceM?: number;
+  /** True when very close (<50m) and not yet genuinely passed — "you are here" */
+  clientIsCurrent?: boolean;
+  source?: string;
+  description?: string | null;
 };
 
 type MapPin = {
@@ -169,6 +186,70 @@ function dedupeMembersForMapPins(rows: LiveMember[]): LiveMember[] {
     if (tc >= tp) byUid.set(u, m);
   }
   return [...byUid.values(), ...noUid];
+}
+
+/** Decode ImagePicker `base64` field for Supabase upload (RN `fetch(uri).blob()` often fails on gallery URIs). */
+function uint8ArrayFromBase64(b64: string): Uint8Array {
+  const raw = (b64.includes(",") ? (b64.split(",").pop() ?? b64) : b64).trim();
+  const bin = globalThis.atob(raw);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function uploadAttractionImagesToStorage(
+  client: SupabaseClient,
+  tripIdNum: number,
+  assets: ImagePicker.ImagePickerAsset[],
+): Promise<string[]> {
+  const urls: string[] = [];
+  for (let i = 0; i < Math.min(5, assets.length); i++) {
+    const asset = assets[i];
+    const extGuess =
+      asset.fileName?.split(".").pop()?.toLowerCase() ||
+      asset.uri.split(".").pop()?.split("?")[0]?.toLowerCase() ||
+      "jpg";
+    const safeExt = ["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(extGuess) ? extGuess : "jpg";
+    const filePath = `attractions/attr-${tripIdNum}-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 10)}.${safeExt}`;
+    const contentType =
+      asset.mimeType ||
+      (safeExt === "png" ? "image/png" : safeExt === "webp" ? "image/webp" : "image/jpeg");
+
+    try {
+      let uploadBody: Blob | Uint8Array;
+      if (asset.base64 && asset.base64.length > 0) {
+        uploadBody = uint8ArrayFromBase64(asset.base64);
+        if (__DEV__) console.log("[attraction] upload", i, "via base64", filePath);
+      } else {
+        if (__DEV__) console.log("[attraction] upload", i, "via fetch", asset.uri?.slice(0, 48));
+        const imgRes = await fetch(asset.uri);
+        if (!imgRes.ok) continue;
+        uploadBody = await imgRes.blob();
+      }
+
+      const { data, error } = await client.storage.from("attraction-images").upload(filePath, uploadBody, {
+        contentType,
+        upsert: false,
+      });
+
+      if (__DEV__) console.log("[attraction] upload result:", { path: data?.path, error: error?.message });
+
+      if (error) {
+        console.warn("[attraction] storage upload failed:", error.message);
+        continue;
+      }
+      if (data?.path) {
+        const { data: pub } = client.storage.from("attraction-images").getPublicUrl(data.path);
+        if (pub?.publicUrl) {
+          urls.push(pub.publicUrl);
+          if (__DEV__) console.log("[attraction] public URL:", pub.publicUrl);
+        }
+      }
+    } catch (e) {
+      console.warn("[attraction] upload error:", e);
+    }
+  }
+  return urls;
 }
 
 /** Public.users id for API + Socket.IO (`user.id` is string; must never be NaN or live-state/rooms break). */
@@ -335,6 +416,16 @@ type AlertApiRow = {
   details?: string | null;
 };
 
+type MapPinRequestSocketPayload = {
+  pinId: string;
+  requestedBy: { userId: number; displayName: string };
+  lat: number;
+  lng: number;
+  reason: string;
+  label: string;
+  tripId: number;
+};
+
 /** Distinct pin colors so riders read like a racing grid. */
 const RIDER_PIN_COLORS = ["#22c55e", "#3b82f6", "#dc2626", "#a855f7", "#ec4899", "#14b8a6", "#eab308", "#ef4444"];
 
@@ -381,18 +472,42 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const [showSosModal, setShowSosModal] = useState(false);
   const [sosOtherReason, setSosOtherReason] = useState("");
   const [showPinModal, setShowPinModal] = useState(false);
+  const [mapPinCrosshair, setMapPinCrosshair] = useState(false);
+  const [showMapPinRequestModal, setShowMapPinRequestModal] = useState(false);
+  const [mapPinReason, setMapPinReason] = useState("");
   const [pinType, setPinType] = useState<"parking" | "fuel" | "attraction" | "hazard" | "road-damage">("parking");
   const [pinLabel, setPinLabel] = useState("");
   const [showAttractionModal, setShowAttractionModal] = useState(false);
   const [attrName, setAttrName] = useState("");
   const [attrDesc, setAttrDesc] = useState("");
+  const [attrImages, setAttrImages] = useState<ImagePicker.ImagePickerAsset[]>([]);
+  const [attrSaving, setAttrSaving] = useState(false);
   const [sheetDragging, setSheetDragging] = useState(false);
   const [alertHistory, setAlertHistory] = useState<LiveAlert[]>([]);
   const [activeAlert, setActiveAlert] = useState<LiveAlert | null>(null);
   const [sentAlertPopup, setSentAlertPopup] = useState<LiveAlert | null>(null);
   const [showAlertHistoryModal, setShowAlertHistoryModal] = useState(false);
   const [unreadAlertCount, setUnreadAlertCount] = useState(0);
+  const [mapPinLabel, setMapPinLabel] = useState("");
+  const [mapPinSubmitting, setMapPinSubmitting] = useState(false);
+  const [checkpointSortTick, setCheckpointSortTick] = useState(0);
+  const [pinReviewFlash, setPinReviewFlash] = useState<"approve" | "deny" | null>(null);
+  const [pinReviewUiLock, setPinReviewUiLock] = useState(false);
+  const pinReviewBusyRef = useRef(false);
+  const [pendingMemberPins, setPendingMemberPins] = useState<Array<{ id: string; lat: number; lng: number; label: string }>>(
+    [],
+  );
+  const [pinRequestQueue, setPinRequestQueue] = useState<MapPinRequestSocketPayload[]>([]);
+  const [transientToast, setTransientToast] = useState<{ message: string; tone: "success" | "warning" | "error" } | null>(
+    null,
+  );
+  const [checkpointsSectionOpen, setCheckpointsSectionOpen] = useState(false);
+  const [liveSocket, setLiveSocket] = useState<Socket | null>(null);
   const socketRef = useRef<Socket | null>(null);
+  /** Last socket location-updated time per peer — survives socket reconnects (not reset with new io() closure). */
+  const lastSeenRef = useRef<Record<number, number>>({});
+  const isTripStaffRef = useRef(false);
+  const pinRequestQueueRef = useRef<MapPinRequestSocketPayload[]>([]);
   const liveMapRef = useRef<LiveMapViewRef | null>(null);
   const [mapFitTick, setMapFitTick] = useState(0);
   const [mapRecenterPoint, setMapRecenterPoint] = useState<{ lat: number; lng: number } | null>(null);
@@ -400,6 +515,14 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const convoyFitDoneRef = useRef(false);
   const initialAutoCenterDoneRef = useRef(false);
   const lastPosRef = useRef<{ lat: number; lng: number } | null>(null);
+  /** Raw device GPS (lat/lng) for checkpoint distance — updated every fix, not smoothed, not from socket. */
+  const currentPositionRef = useRef<{ lat: number; lng: number } | null>(null);
+  /** Fetched checkpoints + sticky reached; `applyCheckpointSort` writes sorted list + distances to state. */
+  const checkpointsRawRef = useRef<Checkpoint[]>([]);
+  /** Genuinely passed checkpoint ids: must have been >300m away then <150m (not distance-only). */
+  const passedCheckpointIdsRef = useRef<Set<string>>(new Set());
+  /** Per checkpoint id: rider has been farther than 300m at least once (enables pass detection). */
+  const hasBeenFarRef = useRef<Map<string, boolean>>(new Map());
   /** Smoothed fix for map + broadcasts — updated only when raw fix passes drift gates. */
   const mapSmoothedRef = useRef<{ lat: number; lng: number } | null>(null);
   const lastLocTsRef = useRef<number | null>(null);
@@ -414,6 +537,10 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const lastEmitLocationLogRef = useRef<number>(0);
 
   const tripIdNum = Number(id);
+  const tripIdRef = useRef(tripIdNum);
+  useEffect(() => {
+    tripIdRef.current = tripIdNum;
+  }, [tripIdNum]);
   const appUid = appUserNumericId(user);
   const localMemberId = appUid != null ? `m${appUid}` : null;
   const localMember =
@@ -430,6 +557,25 @@ export function LiveTripScreen({ route, navigation }: Props) {
     localRole === "co-admin" ||
     localRole === "moderator" ||
     user?.role === "organizer";
+  const canSaveNearbyAttraction = canSendLineupFormation;
+  useEffect(() => {
+    isTripStaffRef.current = canSendLineupFormation;
+  }, [canSendLineupFormation]);
+  useEffect(() => {
+    pinRequestQueueRef.current = pinRequestQueue;
+  }, [pinRequestQueue]);
+  useEffect(() => {
+    if (!transientToast) return;
+    const t = setTimeout(() => setTransientToast(null), 3200);
+    return () => clearTimeout(t);
+  }, [transientToast]);
+  const prevMapPinModalOpenRef = useRef(false);
+  useEffect(() => {
+    if (showMapPinRequestModal && !prevMapPinModalOpenRef.current) {
+      setMapPinSubmitting(false);
+    }
+    prevMapPinModalOpenRef.current = showMapPinRequestModal;
+  }, [showMapPinRequestModal]);
   const isOrganizer =
     user?.role === "organizer" || localRole === "organizer" || localRole === "admin";
   const localMuted = localMember?.muted ?? true;
@@ -437,12 +583,10 @@ export function LiveTripScreen({ route, navigation }: Props) {
     voiceMode,
     setVoiceMode,
     videoCallActive,
-    joinVoice,
-    leaveVoice,
+    joinVoice: broadcastJoinVoice,
+    leaveVoice: broadcastLeaveVoice,
     speakRequests,
     approvedSpeakers,
-    webrtcStatus,
-    webrtcError,
     requestToSpeak: emitSpeakRequest,
     allowSpeaker,
     denySpeaker,
@@ -458,11 +602,70 @@ export function LiveTripScreen({ route, navigation }: Props) {
     canModerateVoice ||
     (localMemberId != null && approvedSpeakers.includes(localMemberId));
 
+  const blockedIds = useMemo(
+    () =>
+      members
+        .filter((m) => m.blocked && m.userId != null && Number.isFinite(Number(m.userId)))
+        .map((m) => Number(m.userId)),
+    [members],
+  );
+
+  const canSpeakConvoy =
+    voiceMode === "open" ||
+    localRole === "organizer" ||
+    localRole === "admin" ||
+    localRole === "co-admin" ||
+    localRole === "moderator" ||
+    (localMemberId != null && approvedSpeakers.includes(localMemberId));
+
+  const onVoiceMemberMuteChange = useCallback((userId: number, muted: boolean) => {
+    setMembers((prev) =>
+      prev.map((m) => (Number(m.userId) === userId ? { ...m, muted } : m)),
+    );
+  }, []);
+
+  const {
+    isInVoice,
+    isConnecting: voiceConnecting,
+    voiceRiders,
+    joinVoice: joinConvoyVoice,
+    leaveVoice: leaveConvoyVoice,
+    toggleMute: toggleConvoyMute,
+    setMuted: setConvoyMuted,
+    setBlocked: setConvoyBlocked,
+    muteRemoteRider,
+  } = useConvoyVoice({
+    socket: liveSocket,
+    tripId: tripIdNum,
+    myUserId: Number(user?.id ?? 0),
+    voiceMode,
+    canSpeak: canSpeakConvoy,
+    isMuted: localMuted,
+    blockedIds,
+    onMemberMuteChange: onVoiceMemberMuteChange,
+  });
+
+  const joinVoiceChannel = useCallback(async () => {
+    const ok = await joinConvoyVoice();
+    if (ok) await broadcastJoinVoice();
+  }, [joinConvoyVoice, broadcastJoinVoice]);
+
+  const leaveVoiceChannel = useCallback(() => {
+    leaveConvoyVoice();
+    void broadcastLeaveVoice();
+  }, [leaveConvoyVoice, broadcastLeaveVoice]);
+
   useEffect(() => {
-    if (phase !== "waiting" && videoCallActive) {
-      void leaveVoice();
+    if (phase !== "waiting" && (isInVoice || videoCallActive)) {
+      leaveConvoyVoice();
+      void broadcastLeaveVoice();
     }
-  }, [phase, videoCallActive, leaveVoice]);
+  }, [phase, isInVoice, videoCallActive, leaveConvoyVoice, broadcastLeaveVoice]);
+
+  useEffect(() => {
+    if (!isInVoice) return;
+    setConvoyMuted(localMuted);
+  }, [isInVoice, localMuted, setConvoyMuted]);
 
   const requestToSpeak = () => {
     void emitSpeakRequest();
@@ -527,6 +730,13 @@ export function LiveTripScreen({ route, navigation }: Props) {
     },
     [nameByUserId],
   );
+
+  const phaseRef = useRef(phase);
+  const isOrganizerRef = useRef(isOrganizer);
+  const pushIncomingAlertRef = useRef(pushIncomingAlert);
+  phaseRef.current = phase;
+  isOrganizerRef.current = isOrganizer;
+  pushIncomingAlertRef.current = pushIncomingAlert;
 
   const showSentAlertPopup = useCallback(
     (kind: string, details?: string) => {
@@ -700,12 +910,209 @@ export function LiveTripScreen({ route, navigation }: Props) {
       if (Array.isArray(body.members) && body.members.length > 0) {
         setMembers((prev) => mergeLiveMembersFromApi(prev, body.members!));
       }
-      if (Array.isArray(body.checkpoints)) setCheckpoints(body.checkpoints);
+      /* Checkpoints come from GET /api/trips/:id/checkpoints (trip_checkpoints) + socket */
       if (Array.isArray(body.mapPins)) setMapPins(body.mapPins);
     } catch {
       /* keep UI stable */
     }
   }, [id, user?.id, accessDenied]);
+
+  /**
+   * Per-device: distance from `currentPositionRef`, approach-then-pass (300m → 150m), "current" (<50m)
+   * for new/nearby pins that are not passed yet. Sort: current first, then upcoming by distance, passed last.
+   */
+  const applyCheckpointSort = useCallback(() => {
+    const FAR_M = 300;
+    const PASS_M = 150;
+    const CURRENT_M = 50;
+
+    const pos = currentPositionRef.current;
+    let raw = checkpointsRawRef.current;
+    if (!raw.length) {
+      setCheckpoints([]);
+      setCheckpointSortTick((x) => x + 1);
+      return;
+    }
+    if (!pos) {
+      setCheckpoints(
+        raw.map((c) => ({ ...c, clientDistanceM: undefined, clientIsCurrent: undefined })),
+      );
+      setCheckpointSortTick((x) => x + 1);
+      return;
+    }
+
+    type Row = Checkpoint & {
+      _passed: boolean;
+      _current: boolean;
+      _seq: number;
+      clientDistanceM: number;
+    };
+
+    const withD: Row[] = raw.map((cp) => {
+      const id = String(cp.id);
+      const distM = haversineDistance(pos.lat, pos.lng, cp.lat, cp.lng);
+
+      if (!passedCheckpointIdsRef.current.has(id)) {
+        if (distM > FAR_M) {
+          hasBeenFarRef.current.set(id, true);
+        }
+        if (hasBeenFarRef.current.get(id) === true && distM < PASS_M) {
+          passedCheckpointIdsRef.current.add(id);
+        }
+      }
+
+      const isPassed = passedCheckpointIdsRef.current.has(id);
+      const seq = cp.order_index ?? 0;
+
+      return {
+        ...cp,
+        reached: isPassed,
+        clientDistanceM: distM,
+        clientIsCurrent: false,
+        _passed: isPassed,
+        _current: false,
+        _seq: seq,
+      };
+    });
+
+    const nonPassed = withD.filter((r) => !r._passed);
+    const minDist =
+      nonPassed.length > 0 ? Math.min(...nonPassed.map((r) => r.clientDistanceM)) : Infinity;
+    /** Tie at ~same meters as minDist — only first in list order gets "current". */
+    const AT_MIN_EPS_M = 0.5;
+
+    let currentAssigned = false;
+    const finalRows: Row[] = withD.map((cp) => {
+      if (
+        !cp._passed &&
+        !currentAssigned &&
+        minDist < CURRENT_M &&
+        Math.abs(cp.clientDistanceM - minDist) <= AT_MIN_EPS_M
+      ) {
+        currentAssigned = true;
+        return { ...cp, clientIsCurrent: true, _current: true };
+      }
+      return { ...cp, clientIsCurrent: false, _current: false };
+    });
+
+    checkpointsRawRef.current = finalRows.map(({ _passed, _current, _seq, ...cp }) => cp);
+
+    const sorted = [...finalRows].sort((a, b) => {
+      if (a._current && !b._current) return -1;
+      if (!a._current && b._current) return 1;
+      if (a._passed && !b._passed) return 1;
+      if (!a._passed && b._passed) return -1;
+      if (!a._passed && !b._passed) {
+        if (a.clientDistanceM !== b.clientDistanceM) return a.clientDistanceM - b.clientDistanceM;
+        return a._seq - b._seq;
+      }
+      return a._seq - b._seq;
+    });
+
+    const clean: Checkpoint[] = sorted.map(({ _passed, _current, _seq, ...cp }) => cp);
+    setCheckpoints(clean);
+    setCheckpointSortTick((x) => x + 1);
+  }, []);
+
+  const applyCheckpointSortRef = useRef(applyCheckpointSort);
+  useEffect(() => {
+    applyCheckpointSortRef.current = applyCheckpointSort;
+  }, [applyCheckpointSort]);
+
+  const mapApiRowToCheckpoint = useCallback((r: Record<string, unknown>, i: number): Checkpoint => {
+    const cid = String(r.id ?? i);
+    return {
+      id: cid,
+      name: String(r.name ?? `Stop ${i + 1}`),
+      lat: Number(r.latitude ?? r.lat) || 0,
+      lng: Number(r.longitude ?? r.lng) || 0,
+      reached: passedCheckpointIdsRef.current.has(cid),
+      badge: "📍",
+      xp: 50,
+      order_index: Number(r.order_index ?? i + 1),
+      source: r.source != null ? String(r.source) : undefined,
+      description: r.description != null ? String(r.description) : null,
+    };
+  }, []);
+
+  const loadTripCheckpoints = useCallback(async () => {
+    if (!user?.id || accessDenied) return;
+    const uid = appUserNumericId(user);
+    if (uid == null) return;
+    try {
+      const res = await apiFetch(`/api/trips/${id}/checkpoints?user_id=${encodeURIComponent(String(uid))}`);
+      if (!res.ok) return;
+      const rows = (await res.json().catch(() => [])) as Array<Record<string, unknown>>;
+      if (!Array.isArray(rows)) return;
+      const mapped: Checkpoint[] = rows.map((r, i) => mapApiRowToCheckpoint(r, i));
+      checkpointsRawRef.current = mapped;
+      applyCheckpointSort();
+    } catch {
+      /* ignore */
+    }
+  }, [accessDenied, applyCheckpointSort, id, mapApiRowToCheckpoint, user]);
+
+  const loadTripCheckpointsRef = useRef(loadTripCheckpoints);
+  loadTripCheckpointsRef.current = loadTripCheckpoints;
+
+  useEffect(() => {
+    if (!user?.id || accessDenied) return;
+    void loadTripCheckpoints();
+  }, [accessDenied, loadTripCheckpoints, user?.id]);
+
+  useEffect(() => {
+    checkpointsRawRef.current = [];
+    currentPositionRef.current = null;
+    passedCheckpointIdsRef.current = new Set();
+    hasBeenFarRef.current = new Map();
+    setCheckpoints([]);
+  }, [id]);
+
+  /** Fallback if a socket event is missed (brief disconnect / background). */
+  useEffect(() => {
+    if (!user?.id || accessDenied || phase !== "live") return;
+    const uid = appUserNumericId(user);
+    if (uid == null) return;
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await apiFetch(
+          `/api/trips/${tripIdRef.current}/checkpoints?user_id=${encodeURIComponent(String(uid))}`,
+        );
+        if (!res.ok) return;
+        const rows = (await res.json().catch(() => [])) as unknown;
+        if (!Array.isArray(rows)) return;
+        if (rows.length !== checkpointsRawRef.current.length) {
+          await loadTripCheckpointsRef.current();
+        }
+      } catch {
+        /* silent — socket is primary */
+      }
+    }, 30000);
+    return () => clearInterval(pollInterval);
+  }, [accessDenied, phase, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || accessDenied) return;
+    const uid = appUserNumericId(user);
+    if (uid == null) return;
+    const sub = AppState.addEventListener("change", async (state) => {
+      if (state !== "active") return;
+      try {
+        const res = await apiFetch(
+          `/api/trips/${tripIdRef.current}/checkpoints?user_id=${encodeURIComponent(String(uid))}`,
+        );
+        if (!res.ok) return;
+        const rows = (await res.json().catch(() => [])) as unknown;
+        if (!Array.isArray(rows)) return;
+        if (rows.length !== checkpointsRawRef.current.length) {
+          await loadTripCheckpointsRef.current();
+        }
+      } catch {
+        /* silent */
+      }
+    });
+    return () => sub.remove();
+  }, [accessDenied, user?.id]);
 
   const fetchLiveStateRef = useRef(fetchAndMergeLiveState);
   fetchLiveStateRef.current = fetchAndMergeLiveState;
@@ -724,7 +1131,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
   }, [accessDenied, fetchAndMergeLiveState, phase, user?.id]);
 
   useEffect(() => {
-    if (!videoCallActive) return;
+    if (!isInVoice) return;
     setMembers((prev) =>
       prev.map((m) => {
         const isStaff =
@@ -735,23 +1142,25 @@ export function LiveTripScreen({ route, navigation }: Props) {
         return { ...m, muted: false };
       }),
     );
-  }, [voiceMode, videoCallActive]);
+  }, [voiceMode, isInVoice]);
 
   useEffect(() => {
-    const lastSeenPeer: Record<number, number> = {};
-
-    const socket = io(API_BASE_URL, {
-      transports: ["websocket", "polling"],
-      path: "/socket.io/",
-      reconnection: true,
-      reconnectionAttempts: 20,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 10000,
-    });
-    socketRef.current = socket;
+    if (!user?.id || accessDenied) return;
 
     const selfUid = appUserNumericId(user);
+
+    const socket = io(API_BASE_URL, {
+      transports: ["polling", "websocket"],
+      path: "/socket.io/",
+      reconnection: true,
+      reconnectionAttempts: 999,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 10000,
+      timeout: 20000,
+      upgrade: true,
+    });
+    socketRef.current = socket;
+    setLiveSocket(socket);
 
     const emitLastKnownPosition = () => {
       const pos = lastPosRef.current;
@@ -767,6 +1176,33 @@ export function LiveTripScreen({ route, navigation }: Props) {
       });
     };
 
+    const joinAndAnnounce = () => {
+      setMapDiag((d) => (d?.includes("Live socket") ? null : d));
+      socket.emit("join-trip", tripIdNum);
+      const uid = appUserNumericId(user);
+      if (uid != null) {
+        const roleForSocket = (() => {
+          const r = String(localRole || "member").toLowerCase();
+          if (r === "co-admin") return "co_admin";
+          if (r === "admin" || r === "organizer") return "organizer";
+          if (r === "moderator") return "moderator";
+          return "member";
+        })();
+        socket.emit("identify", { userId: uid, tripId: tripIdNum, role: roleForSocket });
+      }
+      setTimeout(() => {
+        socket.emit("request-positions", {
+          tripId: tripIdNum,
+          userId: uid ?? Number(user.id),
+        });
+      }, 500);
+      setTimeout(() => {
+        emitLastKnownPosition();
+      }, 800);
+      void fetchLiveStateRef.current();
+      if (__DEV__) console.log("[socket] joined + announced, tripId:", tripIdNum);
+    };
+
     const onConnectErr = (err: Error) => {
       setMapDiag(
         `Live socket: ${err.message || "cannot connect"}. Same Wi‑Fi/LAN as the API? EXPO_PUBLIC_API_URL must be http://<PC-IP>:3000 not localhost.`,
@@ -774,46 +1210,24 @@ export function LiveTripScreen({ route, navigation }: Props) {
       if (__DEV__) console.log("[socket] connect error:", err.message);
     };
 
-    const joinTripRoom = () => {
-      socket.emit("join-trip", Number(tripIdNum));
-      const uid = appUserNumericId(user);
-      if (uid != null) {
-        socket.emit("join-trip", { tripId: tripIdNum, userId: uid });
-      }
-      socket.emit("request-positions", { tripId: tripIdNum });
-      if (__DEV__) console.log("[socket] joined trip room:", tripIdNum);
-    };
-
-    const onConnect = () => {
-      setMapDiag((d) => (d?.includes("Live socket") ? null : d));
-      joinTripRoom();
-      if (__DEV__) console.log("[socket] connected + joined trip", tripIdNum);
-      void fetchLiveStateRef.current();
-      setTimeout(() => {
-        emitLastKnownPosition();
-      }, 500);
-    };
-
-    if (socket.connected) onConnect();
-    socket.on("connect", onConnect);
-
-    socket.on("trip-member-presence", (payload: { userId?: number; online?: boolean }) => {
+    const onTripMemberPresence = (payload: { userId?: number; online?: boolean }) => {
       const uid = Number(payload?.userId);
       if (!Number.isFinite(uid)) return;
-      const selfId = appUserNumericId(user);
-      if (selfId != null && uid === selfId) return;
+      if (selfUid != null && uid === selfUid) return;
       void fetchLiveStateRef.current();
-    });
+    };
 
-    const onBroadcastPositionNow = () => {
+    const onBroadcastPositionNow = (_payload?: unknown) => {
       emitLastKnownPosition();
     };
 
     const onRiderLeft = (payload: { userId?: number }) => {
       const uid = Number(payload?.userId);
       if (!Number.isFinite(uid)) return;
-      delete lastSeenPeer[uid];
+      if (selfUid != null && uid === selfUid) return;
+      delete lastSeenRef.current[uid];
       const memberId = `m${uid}`;
+      if (__DEV__) console.log("[convoy] rider left:", uid);
       setMembers((prev) =>
         prev.map((m) =>
           m.id === memberId ? { ...m, lat: 0, lng: 0, status: "absent" as const } : m,
@@ -821,128 +1235,240 @@ export function LiveTripScreen({ route, navigation }: Props) {
       );
     };
 
-    socket.on("broadcast-position-now", onBroadcastPositionNow);
-    socket.on("rider-left", onRiderLeft);
+    const onLocationUpdated = (payload: {
+      userId: number;
+      lat: number;
+      lng: number;
+      speed?: number | null;
+      heading?: number | null;
+      ts?: number;
+    }) => {
+      const puid = Number(payload.userId);
+      if (selfUid != null && puid === selfUid) return;
+      const plat = toNum(payload.lat);
+      const plng = toNum(payload.lng);
+      if (!Number.isFinite(puid) || plat == null || plng == null) return;
+      if (Math.abs(plat) <= 1e-5 && Math.abs(plng) <= 1e-5) return;
 
-    const STALE_MS = 15000;
-    const staleTimer = setInterval(() => {
-      const now = Date.now();
-      Object.entries(lastSeenPeer).forEach(([userIdStr, lastSeen]) => {
-        const peerUserId = Number(userIdStr);
-        if (!Number.isFinite(peerUserId)) return;
-        if (selfUid != null && peerUserId === selfUid) return;
-        if (now - lastSeen <= STALE_MS) return;
-        const memberId = `m${peerUserId}`;
-        if (__DEV__) console.log("[convoy] rider stale, hiding from map:", memberId);
-        delete lastSeenPeer[peerUserId];
-        setMembers((prev) =>
-          prev.map((m) =>
-            m.id === memberId ? { ...m, lat: 0, lng: 0, status: "absent" as const } : m,
-          ),
+      lastSeenRef.current[puid] = Date.now();
+      if (__DEV__) {
+        console.log("📍 location-updated:", puid, plat, plng);
+      }
+
+      const kmh =
+        payload.speed != null && Number.isFinite(Number(payload.speed))
+          ? Number((Number(payload.speed) * 3.6).toFixed(1))
+          : undefined;
+
+      setMembers((prev) => {
+        const targetKey = `m${puid}`;
+        const idx = prev.findIndex(
+          (m) => canonicalMemberIdStr(m) === targetKey || memberUserId(m) === puid,
         );
+        if (idx >= 0) {
+          const cur = prev[idx];
+          if (
+            Math.abs(cur.lat - plat) < 0.000005 &&
+            Math.abs(cur.lng - plng) < 0.000005 &&
+            cur.status !== "absent"
+          ) {
+            return prev;
+          }
+          const next = [...prev];
+          next[idx] = {
+            ...cur,
+            id: targetKey,
+            userId: puid,
+            lat: plat,
+            lng: plng,
+            locationUpdatedAt: new Date().toISOString(),
+            status: cur.status === "absent" ? "on-way" : cur.status,
+            ...(kmh != null ? { speed: kmh } : {}),
+          };
+          return next;
+        }
+        return [
+          ...prev,
+          {
+            id: targetKey,
+            userId: puid,
+            name: `Rider ${puid}`,
+            avatar: `rider-${puid}`,
+            status: "on-way" as const,
+            role: "member" as const,
+            muted: true,
+            blocked: false,
+            speed: kmh ?? 0,
+            distanceCovered: 0,
+            checkpoints: 0,
+            xpGained: 0,
+            lat: plat,
+            lng: plng,
+            locationUpdatedAt: new Date().toISOString(),
+          },
+        ];
       });
-    }, 5000);
+    };
 
-    socket.on(
-      "location-updated",
-      (payload: {
-        userId: number;
-        lat: number;
-        lng: number;
-        speed?: number | null;
-        heading?: number | null;
-      }) => {
-        const puid = Number(payload.userId);
-        const plat = toNum(payload.lat);
-        const plng = toNum(payload.lng);
-        if (!Number.isFinite(puid) || plat == null || plng == null) return;
-        if (Math.abs(plat) <= 1e-5 && Math.abs(plng) <= 1e-5) return;
-        lastSeenPeer[puid] = Date.now();
-        if (__DEV__) {
-          console.log("📍 location-updated:", puid, plat, plng);
+    const onConvoyAction = (payload: {
+      kind?: string;
+      userId?: number | null;
+      actorName?: string;
+      at?: string;
+      reason?: string;
+      details?: string;
+    }) => {
+      const k = String(payload?.kind || "");
+      const selfId = user?.id != null ? Number(user.id) : null;
+      const isSelf = selfId != null && payload.userId != null && Number(payload.userId) === selfId;
+      if (k === "trip-started") {
+        setTripStarted(true);
+        if (!isOrganizerRef.current && phaseRef.current === "waiting" && !isSelf) {
+          pushIncomingAlertRef.current(payload);
         }
-        const kmh =
-          payload.speed != null && Number.isFinite(Number(payload.speed))
-            ? Number((Number(payload.speed) * 3.6).toFixed(1))
-            : undefined;
-        setMembers((prev) => {
-          const targetKey = `m${puid}`;
-          const idx = prev.findIndex(
-            (m) => canonicalMemberIdStr(m) === targetKey || memberUserId(m) === puid,
-          );
-          if (idx >= 0) {
-            const next = [...prev];
-            const cur = next[idx];
-            next[idx] = {
-              ...cur,
-              id: targetKey,
-              userId: puid,
-              lat: plat,
-              lng: plng,
-              locationUpdatedAt: new Date().toISOString(),
-              status: cur.status === "absent" ? "on-way" : cur.status,
-              ...(kmh != null ? { speed: kmh } : {}),
-            };
-            return next;
-          }
-          return [
-            ...prev,
-            {
-              id: targetKey,
-              userId: puid,
-              name: `Rider ${puid}`,
-              avatar: `rider-${puid}`,
-              status: "on-way" as const,
-              role: "member" as const,
-              muted: true,
-              blocked: false,
-              speed: kmh ?? 0,
-              distanceCovered: 0,
-              checkpoints: 0,
-              xpGained: 0,
-              lat: plat,
-              lng: plng,
-              locationUpdatedAt: new Date().toISOString(),
-            },
-          ];
-        });
-      },
-    );
-
-    socket.on(
-      "convoy-action",
-      (payload: { kind?: string; userId?: number | null; actorName?: string; at?: string; reason?: string; details?: string }) => {
-        const k = String(payload?.kind || "");
-        const selfId = user?.id != null ? Number(user.id) : null;
-        const isSelf = selfId != null && payload.userId != null && Number(payload.userId) === selfId;
-        if (k === "trip-started") {
-          setTripStarted(true);
-          if (!isOrganizer && phase === "waiting" && !isSelf) {
-            pushIncomingAlert(payload);
-          }
-          return;
-        }
-        if (k && !isSelf) pushIncomingAlert(payload);
-      },
-    );
+        return;
+      }
+      if (k && !isSelf) pushIncomingAlertRef.current(payload);
+    };
 
     const onDisconnect = (reason: string) => {
       if (__DEV__) console.log("[socket] disconnected:", reason);
     };
 
+    socket.on("connect", joinAndAnnounce);
+    if (socket.connected) joinAndAnnounce();
+    socket.on("connect_error", onConnectErr);
+    socket.on("trip-member-presence", onTripMemberPresence);
+    socket.on("broadcast-position-now", onBroadcastPositionNow);
+    socket.on("rider-left", onRiderLeft);
+    socket.on("location-updated", onLocationUpdated);
+    socket.on("convoy-action", onConvoyAction);
     socket.on("disconnect", onDisconnect);
 
+    const onCheckpointsUpdated = (payload?: {
+      tripId?: number;
+      action?: string;
+      checkpoint?: Record<string, unknown>;
+    }) => {
+      const tid = payload?.tripId != null ? Number(payload.tripId) : null;
+      if (tid != null && Number.isFinite(tid) && tid !== tripIdRef.current) return;
+
+      if (payload?.action === "added" && payload.checkpoint && typeof payload.checkpoint === "object") {
+        const row = payload.checkpoint;
+        const cid = String(row.id ?? "");
+        if (!cid) {
+          void loadTripCheckpointsRef.current();
+          return;
+        }
+        if (checkpointsRawRef.current.some((c) => c.id === cid)) {
+          void loadTripCheckpointsRef.current();
+          return;
+        }
+        const cp = mapApiRowToCheckpoint(row, checkpointsRawRef.current.length);
+        checkpointsRawRef.current = [...checkpointsRawRef.current, cp];
+        applyCheckpointSortRef.current();
+        return;
+      }
+
+      void loadTripCheckpointsRef.current();
+    };
+    const onMapPinRequested = (payload: MapPinRequestSocketPayload) => {
+      if (!isTripStaffRef.current) return;
+      setPinRequestQueue((q) => {
+        const exists = q.some((x) => x.pinId === payload.pinId);
+        if (exists) return q;
+        return [...q, payload];
+      });
+    };
+    const onMapPinReviewed = (payload: { pinId?: string; status?: string; checkpointName?: string }) => {
+      const pid = payload.pinId != null ? String(payload.pinId) : "";
+      if (pid) setPendingMemberPins((prev) => prev.filter((x) => x.id !== pid));
+      const st = String(payload.status || "").toLowerCase();
+      if (st === "approved") {
+        setTransientToast({
+          message: "Your pin was approved and added as a checkpoint!",
+          tone: "success",
+        });
+        void loadTripCheckpointsRef.current();
+      } else if (st === "denied") {
+        setTransientToast({ message: "Your pin request was denied", tone: "error" });
+      }
+    };
+    socket.on("checkpoints:updated", onCheckpointsUpdated);
+    socket.on("map_pin:requested", onMapPinRequested);
+    socket.on("map_pin:reviewed", onMapPinReviewed);
+
     return () => {
-      clearInterval(staleTimer);
+      socket.off("connect", joinAndAnnounce);
       socket.off("connect_error", onConnectErr);
-      socket.off("connect", onConnect);
+      socket.off("trip-member-presence", onTripMemberPresence);
       socket.off("broadcast-position-now", onBroadcastPositionNow);
       socket.off("rider-left", onRiderLeft);
+      socket.off("location-updated", onLocationUpdated);
+      socket.off("convoy-action", onConvoyAction);
       socket.off("disconnect", onDisconnect);
+      socket.off("checkpoints:updated", onCheckpointsUpdated);
+      socket.off("map_pin:requested", onMapPinRequested);
+      socket.off("map_pin:reviewed", onMapPinReviewed);
       socket.disconnect();
       socketRef.current = null;
+      setLiveSocket(null);
     };
-  }, [tripIdNum, isOrganizer, phase, user?.id]);
+  }, [accessDenied, mapApiRowToCheckpoint, tripIdNum, user?.id]);
+
+  /** REST fallback when socket drops updates — only patches rows with no fresh socket fix in the last 8s. */
+  useEffect(() => {
+    if (!user?.id || accessDenied || phase !== "live") return;
+    const recovery = setInterval(async () => {
+      try {
+        const res = await apiFetch(`/api/trips/${id}/live-state?user_id=${encodeURIComponent(String(user.id))}`);
+        if (!res.ok) return;
+        const body = (await res.json().catch(() => ({}))) as { members?: LiveMember[] };
+        if (!Array.isArray(body.members)) return;
+
+        setMembers((prev) => {
+          let changed = false;
+          const next = prev.map((existing) => {
+            const fresh = body.members!.find(
+              (m) => canonicalMemberIdStr(m) === canonicalMemberIdStr(existing),
+            );
+            if (!fresh) return existing;
+            const nu = memberUserId(existing);
+            if (!Number.isFinite(nu)) return existing;
+            const lastSocket = lastSeenRef.current[nu];
+            const socketFresh = lastSocket != null && Date.now() - lastSocket < 8000;
+            if (socketFresh) return existing;
+
+            const flat = toNum(fresh.lat);
+            const flng = toNum(fresh.lng);
+            if (flat == null || flng == null) return existing;
+            if (Math.abs(flat) <= 1e-5 && Math.abs(flng) <= 1e-5) return existing;
+
+            if (
+              Math.abs(flat - existing.lat) > 0.000005 ||
+              Math.abs(flng - existing.lng) > 0.000005 ||
+              existing.status === "absent"
+            ) {
+              changed = true;
+              return {
+                ...existing,
+                lat: flat,
+                lng: flng,
+                speed: fresh.speed ?? existing.speed,
+                status: existing.status === "absent" ? "on-way" : existing.status,
+                locationUpdatedAt: fresh.locationUpdatedAt ?? existing.locationUpdatedAt,
+              };
+            }
+            return existing;
+          });
+          return changed ? next : prev;
+        });
+      } catch {
+        /* non-critical */
+      }
+    }, 8000);
+    return () => clearInterval(recovery);
+  }, [accessDenied, id, phase, user?.id]);
 
   useEffect(() => {
     if (phase !== "live" || !user?.id || !Number.isFinite(tripIdNum)) return;
@@ -996,6 +1522,14 @@ export function LiveTripScreen({ route, navigation }: Props) {
   }, [phase, user?.id]);
 
   useEffect(() => {
+    if (accessDenied) return;
+    const t = setInterval(() => {
+      applyCheckpointSort();
+    }, 5000);
+    return () => clearInterval(t);
+  }, [accessDenied, applyCheckpointSort]);
+
+  useEffect(() => {
     if (phase !== "live" || !user?.id) {
       return;
     }
@@ -1039,8 +1573,10 @@ export function LiveTripScreen({ route, navigation }: Props) {
           initialAutoCenterDoneRef.current = true;
         }
         lastPosRef.current = { lat, lng };
+        currentPositionRef.current = { lat, lng };
         mapSmoothedRef.current = { lat, lng };
         lastLocTsRef.current = first.timestamp;
+        applyCheckpointSort();
       } catch {
         // watcher below can still provide the first fix
       }
@@ -1056,6 +1592,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
           const { latitude, longitude, accuracy, speed, heading } = loc.coords;
           const lat = latitude;
           const lng = longitude;
+          currentPositionRef.current = { lat, lng };
           const accM = Math.max(0, accuracy ?? 50);
           const prev = lastPosRef.current;
           const dKmFromPrev = prev ? haversineKm(prev, { lat, lng }) : 0;
@@ -1174,7 +1711,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
     return () => {
       sub?.remove();
     };
-  }, [phase, tripIdNum, user?.id, localMemberId]);
+  }, [applyCheckpointSort, phase, tripIdNum, user?.id, localMemberId]);
 
   const hWin = Dimensions.get("window").height;
   const peekH = 200;
@@ -1243,19 +1780,60 @@ export function LiveTripScreen({ route, navigation }: Props) {
     void denySpeaker(targetId);
   };
 
-  const toggleMuteWithVoiceRules = (targetId: string) => {
-    if (!localMemberId) {
-      setMembers((p) => p.map((m) => (m.id === targetId ? { ...m, muted: !m.muted } : m)));
-      return;
-    }
-    const isSelf = targetId === localMemberId;
-    if (voiceMode === "controlled" && isSelf && localMuted && !localAllowedInControlled) return;
-    if (!canModerateVoice && !isSelf) return;
-    setMembers((p) => p.map((m) => (m.id === targetId ? { ...m, muted: !m.muted } : m)));
-  };
+  const toggleMuteWithVoiceRules = useCallback(
+    (targetId: string) => {
+      if (!localMemberId) {
+        setMembers((p) => p.map((m) => (m.id === targetId ? { ...m, muted: !m.muted } : m)));
+        return;
+      }
+      const isSelf = targetId === localMemberId;
+      const member = members.find((m) => m.id === targetId);
+      if (!member) return;
+      if (voiceMode === "controlled" && isSelf && localMuted && !localAllowedInControlled) return;
+      if (!canModerateVoice && !isSelf) return;
 
-  const toggleBlock = (mid: string) =>
-    setMembers((p) => p.map((m) => (m.id === mid ? { ...m, blocked: !m.blocked } : m)));
+      const newMuted = !member.muted;
+
+      if (isInVoice) {
+        if (isSelf) {
+          const nowMuted = toggleConvoyMute() ?? newMuted;
+          setMembers((p) => p.map((m) => (m.id === targetId ? { ...m, muted: nowMuted } : m)));
+        } else if (canModerateVoice && member.userId != null) {
+          muteRemoteRider(member.userId, newMuted);
+          setMembers((p) => p.map((m) => (m.id === targetId ? { ...m, muted: newMuted } : m)));
+        }
+      } else {
+        setMembers((p) => p.map((m) => (m.id === targetId ? { ...m, muted: newMuted } : m)));
+      }
+    },
+    [
+      localMemberId,
+      members,
+      voiceMode,
+      localMuted,
+      localAllowedInControlled,
+      canModerateVoice,
+      isInVoice,
+      toggleConvoyMute,
+      muteRemoteRider,
+    ],
+  );
+
+  const toggleBlock = useCallback(
+    (mid: string) => {
+      setMembers((p) =>
+        p.map((m) => {
+          if (m.id !== mid) return m;
+          const blocked = !m.blocked;
+          if (isInVoice && m.userId != null) {
+            setConvoyBlocked(m.userId, blocked);
+          }
+          return { ...m, blocked };
+        }),
+      );
+    },
+    [isInVoice, setConvoyBlocked],
+  );
 
   const assignRole = (mid: string, role: MemberRole) =>
     setMembers((p) => p.map((m) => (m.id === mid ? { ...m, role } : m)));
@@ -1288,6 +1866,23 @@ export function LiveTripScreen({ route, navigation }: Props) {
     }
   };
 
+  const emitLiveLocationSnapshot = useCallback(() => {
+    setTimeout(() => {
+      const pos = lastPosRef.current;
+      if (!pos || !user?.id || !socketRef.current) return;
+      const uid = appUserNumericId(user);
+      if (uid == null) return;
+      socketRef.current.emit("update-location", {
+        tripId: tripIdNum,
+        userId: uid,
+        lat: pos.lat,
+        lng: pos.lng,
+        speed: null,
+        heading: null,
+      });
+    }, 800);
+  }, [tripIdNum, user?.id]);
+
   const startTripLive = useCallback(async () => {
     if (!user?.id) return;
     if (!isOrganizer && !tripStarted) {
@@ -1299,6 +1894,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
       setMyDistanceKm(0);
       mapSmoothedRef.current = null;
       setPhase("live");
+      emitLiveLocationSnapshot();
       return;
     }
     try {
@@ -1323,55 +1919,211 @@ export function LiveTripScreen({ route, navigation }: Props) {
         userId: Number(user.id),
       });
       setPhase("live");
+      emitLiveLocationSnapshot();
     } catch {
       Alert.alert("Start trip", "Could not start trip right now.");
     }
-  }, [id, isOrganizer, tripIdNum, tripStarted, user?.id]);
+  }, [emitLiveLocationSnapshot, id, isOrganizer, tripIdNum, tripStarted, user?.id]);
 
-  const nextCheckpointInfo = useMemo(() => {
-    if (!checkpoints.length) return null;
-    const sorted = [...checkpoints].sort((a, b) => String(a.id).localeCompare(String(b.id)));
-    const unreached = sorted.filter((c) => !c.reached);
-    const seq = unreached.length ? unreached : sorted;
-    const pos =
-      lastPosRef.current ??
-      (localMember && localMember.lat !== 0 && localMember.lng !== 0
-        ? { lat: localMember.lat, lng: localMember.lng }
-        : null);
-    if (!pos) return { next: seq[0], distanceKm: 0, etaMin: null as number | null };
-    let best = seq[0];
-    let bestD = haversineKm(pos, { lat: best.lat, lng: best.lng });
-    for (const c of seq) {
-      const d = haversineKm(pos, { lat: c.lat, lng: c.lng });
-      if (d < bestD) {
-        bestD = d;
-        best = c;
-      }
+  /**
+   * Timeline + top card: sorted order = current (<50m) → upcoming → passed.
+   * "Next" card prefers `clientIsCurrent`, else first upcoming (not passed, not current).
+   */
+  const { nextCheckpointInfo, routeTimeline } = useMemo(() => {
+    const spd = Math.max(currentSpeedKmh, 6);
+    if (!checkpoints.length) {
+      return {
+        nextCheckpointInfo: null as {
+          next: Checkpoint;
+          distanceM: number;
+          etaMin: number | null;
+          isCurrent: boolean;
+        } | null,
+        routeTimeline: [] as Array<{
+          cp: Checkpoint;
+          order: number;
+          distM: number;
+          distKm: number;
+          etaMin: number;
+          reached: boolean;
+          isCurrent: boolean;
+          isNext: boolean;
+        }>,
+      };
     }
-    const spd = Math.max(currentSpeedKmh, 6);
-    const etaMin = bestD > 0.005 ? (bestD / spd) * 60 : 0;
-    return { next: best, distanceKm: bestD, etaMin };
-  }, [checkpoints, localMember, posTick, currentSpeedKmh]);
+    const hasGps = checkpoints.some((cp) => cp.clientDistanceM != null);
+    const currentCp = checkpoints.find((cp) => cp.clientIsCurrent) ?? null;
+    const nextUpcoming = checkpoints.find((cp) => !cp.reached && !cp.clientIsCurrent) ?? null;
 
-  const routeTimeline = useMemo(() => {
+    let nextForCard: Checkpoint | null = null;
+    if (currentCp) nextForCard = currentCp;
+    else if (nextUpcoming) nextForCard = nextUpcoming;
+    else if (!hasGps && checkpoints[0]) nextForCard = checkpoints[0];
+
+    let nextCheckpointInfo: {
+      next: Checkpoint;
+      distanceM: number;
+      etaMin: number | null;
+      isCurrent: boolean;
+    } | null = null;
+    if (nextForCard) {
+      const distM = nextForCard.clientDistanceM ?? 0;
+      const distKm = distM / 1000;
+      const etaMin =
+        nextForCard.clientDistanceM != null && distKm > 0.005 ? (distKm / spd) * 60 : null;
+      nextCheckpointInfo = {
+        next: nextForCard,
+        distanceM: distM,
+        etaMin,
+        isCurrent: Boolean(nextForCard.clientIsCurrent),
+      };
+    }
+
+    const routeTimeline = checkpoints.map((cp, i) => {
+      const distM = cp.clientDistanceM ?? 0;
+      const reached = cp.reached === true;
+      const isCurrent = cp.clientIsCurrent === true;
+      const isNext =
+        Boolean(nextUpcoming) &&
+        !isCurrent &&
+        !reached &&
+        String(cp.id) === String(nextUpcoming!.id);
+      const distKm = distM / 1000;
+      const etaMin =
+        cp.clientDistanceM != null && distKm > 0.005 ? (distKm / spd) * 60 : 0;
+      return {
+        cp,
+        order: i + 1,
+        distM,
+        distKm,
+        etaMin,
+        reached,
+        isCurrent,
+        isNext,
+      };
+    });
+    return { nextCheckpointInfo, routeTimeline };
+  }, [checkpoints, checkpointSortTick, currentSpeedKmh]);
+
+  /** Waiting-room list uses same sorted `checkpoints`; falls back to meetup distance if no GPS yet. */
+  const waitingCheckpointList = useMemo(() => {
+    if (!checkpoints.length) return [];
+    return checkpoints.map((cp, i) => {
+      let distM = cp.clientDistanceM ?? 0;
+      let distKind: "you" | "meetup" | "none" = "none";
+      if (cp.clientDistanceM != null) {
+        distKind = "you";
+      } else if (trip?.meetupLat != null && trip?.meetupLng != null) {
+        const ml = Number(trip.meetupLat);
+        const mg = Number(trip.meetupLng);
+        if (Number.isFinite(ml) && Number.isFinite(mg)) {
+          distM = haversineDistance(ml, mg, cp.lat, cp.lng);
+          distKind = "meetup";
+        }
+      }
+      const reached = cp.reached === true;
+      return { cp, distM, reached, distKind };
+    });
+  }, [checkpoints, checkpointSortTick, trip?.meetupLat, trip?.meetupLng]);
+
+  /** Must run every render (before any early return) — used for live map + active segment. */
+  const mapRouteGeometry = useMemo(() => {
+    const liveRoutePointsRaw =
+      drivingRoute?.coordinates
+        ?.map((c) => {
+          const lat = toNum(c.latitude);
+          const lng = toNum(c.longitude);
+          if (lat == null || lng == null) return null;
+          return { lat, lng };
+        })
+        .filter((x): x is { lat: number; lng: number } => x != null) ?? [];
+    const startPoint =
+      (drivingRoute?.start && toNum(drivingRoute.start.lat) != null && toNum(drivingRoute.start.lng) != null
+        ? { lat: Number(drivingRoute.start.lat), lng: Number(drivingRoute.start.lng) }
+        : null) ??
+      (toNum(trip?.meetupLat) != null && toNum(trip?.meetupLng) != null
+        ? { lat: Number(trip?.meetupLat), lng: Number(trip?.meetupLng) }
+        : null);
+    const endPoint =
+      (drivingRoute?.end && toNum(drivingRoute.end.lat) != null && toNum(drivingRoute.end.lng) != null
+        ? { lat: Number(drivingRoute.end.lat), lng: Number(drivingRoute.end.lng) }
+        : null) ??
+      (toNum(trip?.endLat) != null && toNum(trip?.endLng) != null
+        ? { lat: Number(trip?.endLat), lng: Number(trip?.endLng) }
+        : null);
+    const liveRoutePoints =
+      liveRoutePointsRaw.length >= 2
+        ? liveRoutePointsRaw
+        : startPoint && endPoint
+          ? [startPoint, endPoint]
+          : [];
+    return { liveRoutePoints, startPoint, endPoint };
+  }, [drivingRoute, trip]);
+
+  const activeRouteSegmentPoints = useMemo((): MapPoint[] | null => {
+    const { liveRoutePoints } = mapRouteGeometry;
+    if (liveRoutePoints.length < 2 || !nextCheckpointInfo) return null;
     const pos =
       lastPosRef.current ??
-      (localMember && localMember.lat !== 0 && localMember.lng !== 0
-        ? { lat: localMember.lat, lng: localMember.lng }
-        : null);
-    const sorted = [...checkpoints].sort((a, b) => String(a.id).localeCompare(String(b.id)));
-    const spd = Math.max(currentSpeedKmh, 6);
-    return sorted.map((cp, i) => {
-      const distKm = pos ? haversineKm(pos, { lat: cp.lat, lng: cp.lng }) : 0;
-      const etaMin = pos && distKm > 0.005 ? (distKm / spd) * 60 : 0;
-      return { cp, order: i + 1, distKm, etaMin, reached: cp.reached };
-    });
-  }, [checkpoints, localMember, posTick, currentSpeedKmh]);
+      (userGeo ? { lat: userGeo.lat, lng: userGeo.lng } : null);
+    if (!pos) return null;
+    const next = nextCheckpointInfo.next;
+    const nearest = (pts: { lat: number; lng: number }[], la: number, ln: number) => {
+      let bi = 0;
+      let bd = Infinity;
+      for (let i = 0; i < pts.length; i++) {
+        const d = haversineKm({ lat: la, lng: ln }, pts[i]);
+        if (d < bd) {
+          bd = d;
+          bi = i;
+        }
+      }
+      return bi;
+    };
+    const ui = nearest(liveRoutePoints, pos.lat, pos.lng);
+    const ci = nearest(liveRoutePoints, next.lat, next.lng);
+    const lo = Math.min(ui, ci);
+    const hi = Math.max(ui, ci);
+    return liveRoutePoints.slice(lo, hi + 1);
+  }, [mapRouteGeometry, nextCheckpointInfo, posTick, userGeo]);
+
+  const mapOverlayPins = useMemo(() => {
+    const fromServer = mapPins.map((p) => ({
+      id: p.id,
+      label: p.label,
+      lat: p.lat,
+      lng: p.lng,
+      color: "#a78bfa",
+    }));
+    const pending = pendingMemberPins.map((p) => ({
+      id: p.id,
+      label: p.label,
+      lat: p.lat,
+      lng: p.lng,
+      color: "#fbbf24",
+    }));
+    const q0 = pinRequestQueue[0];
+    const staff =
+      canSendLineupFormation && q0
+        ? [
+            {
+              id: `pin-req-${q0.pinId}`,
+              label: q0.label || "Pin request",
+              lat: q0.lat,
+              lng: q0.lng,
+              color: "#f59e0b",
+            },
+          ]
+        : [];
+    return [...fromServer, ...pending, ...staff];
+  }, [mapPins, pendingMemberPins, pinRequestQueue, canSendLineupFormation]);
 
   const onLeave = useCallback(() => {
     setShowExitConfirm(false);
+    if (isInVoice) leaveConvoyVoice();
+    if (videoCallActive) void broadcastLeaveVoice();
     navigation.goBack();
-  }, [navigation]);
+  }, [navigation, isInVoice, leaveConvoyVoice, videoCallActive, broadcastLeaveVoice]);
 
   const fitConvoy = useCallback(() => {
     setMapFitTick((n) => n + 1);
@@ -1491,7 +2243,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
             details: extras?.details,
           }),
         });
-      } catch {
+      } catch (e: unknown) {
+        if (isAbortLikeError(e)) return;
         // Socket fallback still runs for near-realtime UX.
       }
       socketRef.current?.emit("convoy-action", payload);
@@ -1513,6 +2266,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
     try {
       const res = await apiFetch(`/api/trips/${id}/map-pins`, {
         method: "POST",
+        skipApiTimeout: true,
         body: JSON.stringify({
           user_id: Number(user.id),
           type: pinType,
@@ -1542,14 +2296,18 @@ export function LiveTripScreen({ route, navigation }: Props) {
       setPinLabel("");
       setShowPinModal(false);
       Alert.alert("Map pin", "Pin added for the convoy.");
-    } catch {
+    } catch (e: unknown) {
+      if (isAbortLikeError(e)) return;
       Alert.alert("Map pin", "Could not add pin.");
     }
   }, [id, pinLabel, pinType, user]);
 
-  const submitAttraction = useCallback(async () => {
-    if (!user?.id || !attrName.trim()) {
-      Alert.alert("Attraction", "Enter a name for this place.");
+  const submitMapPinRequest = useCallback(async () => {
+    if (!user?.id || mapPinSubmitting) return;
+    const reasonT = mapPinReason.trim();
+    const labelT = mapPinLabel.trim();
+    if (!reasonT && !labelT) {
+      Alert.alert("Pin request", "Enter a label or reason.");
       return;
     }
     const pos = lastPosRef.current;
@@ -1557,29 +2315,233 @@ export function LiveTripScreen({ route, navigation }: Props) {
       Alert.alert("Location", "Wait for a GPS fix.");
       return;
     }
+    const uid = appUserNumericId(user);
+    if (uid == null) {
+      Alert.alert("Pin request", "Sign in again — your profile id could not be read.");
+      return;
+    }
+    const lat = Number(pos.lat);
+    const lng = Number(pos.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      Alert.alert("Location", "Invalid GPS coordinates — wait for a fix and try again.");
+      return;
+    }
+    setMapPinSubmitting(true);
     try {
-      const res = await apiFetch("/api/nearby-attractions", {
+      const res = await apiFetch(`/api/trips/${tripIdNum}/map-pin-requests`, {
         method: "POST",
+        skipApiTimeout: true,
         body: JSON.stringify({
-          name: attrName.trim(),
-          description: attrDesc.trim(),
-          lat: pos.lat,
-          lng: pos.lng,
-          user_id: Number(user.id),
+          user_id: uid,
+          latitude: lat,
+          longitude: lng,
+          reason: reasonT,
+          label: labelT,
         }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        autoApproved?: boolean;
+        status?: string;
+        pinId?: string;
+        error?: string;
+        details?: string;
+        message?: string;
+      };
+      if (res.status === 409 && body.error === "duplicate") {
+        setShowMapPinRequestModal(false);
+        setMapPinReason("");
+        setMapPinLabel("");
+        setMapPinCrosshair(false);
+        return;
+      }
+      if (!res.ok) {
+        const errMsg =
+          (typeof body.details === "string" && body.details.trim()) ||
+          body.error ||
+          body.message ||
+          (await readApiErrorMessage(res));
+        Alert.alert("Pin request", errMsg);
+        return;
+      }
+      setShowMapPinRequestModal(false);
+      setMapPinReason("");
+      setMapPinLabel("");
+      setMapPinCrosshair(false);
+      if (body.autoApproved) {
+        setTransientToast({ message: "Pin added as checkpoint", tone: "success" });
+        void loadTripCheckpoints();
+        return;
+      }
+      if (body.status === "pending" && body.pinId) {
+        setTransientToast({ message: "Pin submitted — waiting for approval", tone: "warning" });
+        setPendingMemberPins((p) => [
+          ...p,
+          {
+            id: String(body.pinId),
+            lat,
+            lng,
+            label: labelT || reasonT.slice(0, 40) || "Pending",
+          },
+        ]);
+      }
+    } catch (e: unknown) {
+      if (isAbortLikeError(e)) {
+        if (__DEV__) console.log("Pin request aborted client-side — server may still have received it");
+        return;
+      }
+      console.error("Pin submit error:", e);
+      const errMsg = e instanceof Error ? e.message : "Could not submit";
+      Alert.alert("Pin request", errMsg);
+    } finally {
+      setMapPinSubmitting(false);
+    }
+  }, [mapPinLabel, mapPinReason, mapPinSubmitting, tripIdNum, user, loadTripCheckpoints]);
+
+  const reviewQueuedPinRequest = useCallback(
+    (action: "approve" | "deny") => {
+      if (pinReviewBusyRef.current) return;
+      const current = pinRequestQueueRef.current[0];
+      if (!current || !user?.id) return;
+      pinReviewBusyRef.current = true;
+      setPinReviewUiLock(true);
+      setPinReviewFlash(action);
+      const pinId = current.pinId;
+      const uid = Number(user.id);
+      setTimeout(() => {
+        setPinReviewFlash(null);
+        setPinRequestQueue((q) => (q[0]?.pinId === pinId ? q.slice(1) : q));
+        pinReviewBusyRef.current = false;
+        setPinReviewUiLock(false);
+      }, 150);
+      void (async () => {
+        try {
+          const res = await apiFetch(`/api/trips/${tripIdNum}/map-pin-requests/${pinId}/review`, {
+            method: "PATCH",
+            skipApiTimeout: true,
+            body: JSON.stringify({
+              user_id: uid,
+              action,
+            }),
+          });
+          if (!res.ok) {
+            setTransientToast({ message: "Action failed — please try again", tone: "error" });
+          }
+        } catch (e: unknown) {
+          if (isAbortLikeError(e)) return;
+          setTransientToast({ message: "Action failed — please try again", tone: "error" });
+        }
+      })();
+    },
+    [tripIdNum, user?.id],
+  );
+
+  const closeAttractionModal = useCallback(() => {
+    setShowAttractionModal(false);
+    setAttrName("");
+    setAttrDesc("");
+    setAttrImages([]);
+  }, []);
+
+  const pickAttractionImages = useCallback(async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Permission needed", "Allow photo access to add images.");
+      return;
+    }
+    const r = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: true,
+      selectionLimit: Math.max(1, 5 - attrImages.length),
+      quality: 0.7,
+      base64: true,
+    });
+    if (__DEV__) {
+      console.log("[attraction] picker:", r.canceled ? "canceled" : `${r.assets?.length ?? 0} asset(s)`);
+    }
+    if (r.canceled || !r.assets?.length) return;
+    const picked = r.assets.slice(0, 5);
+    if (__DEV__) {
+      console.log(
+        "[attraction] selected:",
+        picked.map((a) => ({ uri: a.uri?.slice(0, 48), hasBase64: Boolean(a.base64?.length) })),
+      );
+    }
+    setAttrImages((prev) => [...prev, ...picked].slice(0, 5));
+  }, [attrImages.length]);
+
+  const submitAttraction = useCallback(async () => {
+    if (!user?.id || !attrName.trim()) {
+      Alert.alert("Attraction", "Enter a name for this place.");
+      return;
+    }
+    const uid = appUserNumericId(user);
+    if (uid == null) {
+      Alert.alert("Attraction", "Sign in again — your profile id could not be read.");
+      return;
+    }
+    const pos = lastPosRef.current;
+    if (!pos) {
+      Alert.alert("Location", "Wait for a GPS fix.");
+      return;
+    }
+    const lat = Number(pos.lat);
+    const lng = Number(pos.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      Alert.alert("Location", "Invalid GPS coordinates — wait for a fix and try again.");
+      return;
+    }
+    setAttrSaving(true);
+    try {
+      let imageUrls: string[] = [];
+      if (attrImages.length > 0) {
+        if (!supabase) {
+          Alert.alert(
+            "Photos",
+            "Supabase is not configured in mobile (.env). Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to upload photos.",
+          );
+        } else {
+          if (__DEV__) console.log("[attraction] uploading", attrImages.length, "image(s)");
+          imageUrls = await uploadAttractionImagesToStorage(supabase, tripIdNum, attrImages);
+          if (__DEV__) console.log("[attraction] uploaded URLs:", imageUrls);
+        }
+      }
+
+      const body = {
+        name: attrName.trim(),
+        description: attrDesc.trim(),
+        latitude: lat,
+        longitude: lng,
+        images: imageUrls,
+        user_id: uid,
+        trip_id: tripIdNum,
+      };
+      if (__DEV__) console.log("[attraction] API body:", { ...body, images: imageUrls });
+
+      const res = await apiFetch(`/api/trips/${tripIdNum}/nearby-attractions`, {
+        method: "POST",
+        skipApiTimeout: true,
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         Alert.alert("Attraction", await readApiErrorMessage(res));
         return;
       }
-      setAttrName("");
-      setAttrDesc("");
-      setShowAttractionModal(false);
-      Alert.alert("Saved", "Nearby attraction saved. Organizers can pick it when adding checkpoints.");
-    } catch {
-      Alert.alert("Attraction", "Could not save.");
+      closeAttractionModal();
+      const n = imageUrls.length;
+      Alert.alert(
+        "Saved!",
+        n > 0
+          ? `Organizers can use this as a checkpoint. ${n} photo(s) attached.`
+          : "Organizers can use this as a checkpoint.",
+      );
+    } catch (e: unknown) {
+      if (isAbortLikeError(e)) return;
+      const msg = e instanceof Error ? e.message : "Network error while saving.";
+      Alert.alert("Attraction", msg);
+    } finally {
+      setAttrSaving(false);
     }
-  }, [attrDesc, attrName, user?.id]);
+  }, [attrDesc, attrImages, attrName, closeAttractionModal, tripIdNum, user]);
 
   // Keep camera stable: avoid continuous auto-recenter / auto-fit loops.
   // Camera actions stay user-driven (locate/fit/zoom) plus initial one-time fit.
@@ -1683,27 +2645,19 @@ export function LiveTripScreen({ route, navigation }: Props) {
                     {members.filter((m) => m.status !== "absent").length} members active
                   </Text>
                 </View>
-                <View style={[styles.connBadge, videoCallActive && styles.connBadgeOn]}>
-                  <Text style={[styles.connBadgeText, videoCallActive && { color: "#34d399" }]}>
-                    {videoCallActive ? "Voice Connected" : "Not Connected"}
+                <View style={[styles.connBadge, isInVoice && styles.connBadgeOn]}>
+                  <Text style={[styles.connBadgeText, isInVoice && { color: "#34d399" }]}>
+                    {isInVoice ? "Voice Connected" : "Not Connected"}
                   </Text>
                 </View>
               </View>
-              {webrtcError ? (
-                isExpoGo ? (
-                  <Text style={[styles.mutedSmall, { marginTop: 6, color: "rgba(255,255,255,0.42)" }]} numberOfLines={4}>
-                    Expo Go does not include WebRTC, so there is no live mic audio here. Talk mode, raise hand, and
-                    other controls still sync over the network. For real voice, build a dev client:{" "}
-                    <Text style={{ fontWeight: "700", color: "rgba(255,255,255,0.55)" }}>npx expo run:android</Text> or{" "}
-                    <Text style={{ fontWeight: "700", color: "rgba(255,255,255,0.55)" }}>npx expo run:ios</Text>.
-                  </Text>
-                ) : (
-                  <Text style={[styles.mutedSmall, { marginTop: 6, color: "#fbbf24" }]} numberOfLines={5}>
-                    {webrtcError}
-                  </Text>
-                )
-              ) : webrtcStatus === "connecting" ? (
-                <Text style={[styles.mutedSmall, { marginTop: 6 }]}>Connecting peer audio…</Text>
+              {isExpoGo ? (
+                <Text style={[styles.mutedSmall, { marginTop: 6, color: "rgba(255,255,255,0.42)" }]} numberOfLines={4}>
+                  Expo Go does not include WebRTC, so there is no live mic audio here. Talk mode, raise hand, and other
+                  controls still sync over the network. For real voice, build a dev client:{" "}
+                  <Text style={{ fontWeight: "700", color: "rgba(255,255,255,0.55)" }}>npx expo run:android</Text> or{" "}
+                  <Text style={{ fontWeight: "700", color: "rgba(255,255,255,0.55)" }}>npx expo run:ios</Text>.
+                </Text>
               ) : null}
 
               <View style={styles.voiceRow}>
@@ -1729,15 +2683,21 @@ export function LiveTripScreen({ route, navigation }: Props) {
                 </Pressable>
               </View>
 
-              {!videoCallActive ? (
-                <Pressable style={styles.joinVoice} onPress={() => void joinVoice()}>
-                  <Text style={styles.joinVoiceText}>Join Voice Channel</Text>
+              {!isInVoice ? (
+                <Pressable
+                  style={styles.joinVoice}
+                  onPress={() => void joinVoiceChannel()}
+                  disabled={voiceConnecting}
+                >
+                  <Text style={styles.joinVoiceText}>
+                    {voiceConnecting ? "Connecting…" : "Join Voice Channel"}
+                  </Text>
                 </Pressable>
               ) : (
                 <View style={styles.row}>
                   <Pressable
                     style={[styles.joinVoice, { flex: 1, backgroundColor: "rgba(255,255,255,0.06)" }]}
-                    onPress={() => void leaveVoice()}
+                    onPress={() => leaveVoiceChannel()}
                   >
                     <Text style={[styles.joinVoiceText, { color: "rgba(255,255,255,0.75)" }]}>
                       Disconnect
@@ -1755,7 +2715,15 @@ export function LiveTripScreen({ route, navigation }: Props) {
                 </View>
               )}
 
-              {videoCallActive && voiceMode === "controlled" && (
+              {isInVoice ? (
+                <View style={[styles.connBadge, styles.connBadgeOn, { marginTop: 8 }]}>
+                  <Text style={[styles.connBadgeText, { color: "#34d399" }]}>
+                    🎙 {voiceRiders.length + 1} in voice
+                  </Text>
+                </View>
+              ) : null}
+
+              {isInVoice && voiceMode === "controlled" && (
                 <>
                   {!canModerateVoice ? (
                     localMemberId ? (
@@ -1833,22 +2801,77 @@ export function LiveTripScreen({ route, navigation }: Props) {
             </View>
 
             <View style={[styles.card, { marginTop: 12 }]}>
-              <Text style={styles.cardTitle}>CHECKPOINTS ({checkpoints.length})</Text>
-              {checkpoints.length === 0 ? (
-                <Text style={[styles.mutedSmall, { marginTop: 8 }]}>No checkpoints yet.</Text>
-              ) : (
-                checkpoints.map((cp, i) => (
-                  <View key={cp.id} style={styles.cpRow}>
-                    <View style={[styles.cpIdx, cp.reached && styles.cpIdxOn]}>
-                      <Text style={{ fontSize: 10, fontWeight: "700" }}>{i + 1}</Text>
-                    </View>
-                    <Text style={{ flex: 1, color: "rgba(255,255,255,0.65)", fontSize: 12 }} numberOfLines={1}>
-                      {cp.name}
-                    </Text>
-                    <Text style={{ color: "#fbbf24", fontSize: 10, fontWeight: "700" }}>+{cp.xp}XP</Text>
-                  </View>
-                ))
-              )}
+              <Pressable
+                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
+                onPress={() => setCheckpointsSectionOpen((s) => !s)}
+              >
+                <Text style={styles.cardTitle}>CHECKPOINTS ({checkpoints.length})</Text>
+                <Text style={{ color: "rgba(255,255,255,0.45)" }}>{checkpointsSectionOpen ? "▼" : "▶"}</Text>
+              </Pressable>
+              {checkpointsSectionOpen ? (
+                checkpoints.length === 0 ? (
+                  <Text style={[styles.mutedSmall, { marginTop: 8 }]}>No checkpoints yet.</Text>
+                ) : (
+                  waitingCheckpointList.map(({ cp, distM, reached, distKind }, i) => {
+                      const startLat = trip?.meetupLat;
+                      const startLng = trip?.meetupLng;
+                      let distLabel = "";
+                      if (
+                        startLat != null &&
+                        startLng != null &&
+                        Number.isFinite(Number(startLat)) &&
+                        Number.isFinite(Number(startLng))
+                      ) {
+                        const fromStart = haversineDistance(
+                          Number(startLat),
+                          Number(startLng),
+                          cp.lat,
+                          cp.lng,
+                        );
+                        distLabel = ` · ${formatDistance(fromStart)} from start`;
+                      }
+                      const sortDistLabel =
+                        distKind === "you"
+                          ? ` · ${formatDistance(distM)} from you`
+                          : distKind === "meetup"
+                            ? ` · ${formatDistance(distM)} from meetup`
+                            : "";
+                      return (
+                        <View key={cp.id} style={[styles.cpRow, reached && { opacity: 0.45 }]}>
+                          <View style={[styles.cpIdx, reached && styles.cpIdxOn]}>
+                            <Text style={{ fontSize: 10, fontWeight: "700" }}>{reached ? "✓" : i + 1}</Text>
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }} numberOfLines={2}>
+                              {cp.name}
+                            </Text>
+                            {cp.description ? (
+                              <Text style={[styles.mutedSmall, { marginTop: 2 }]} numberOfLines={2}>
+                                {cp.description}
+                              </Text>
+                            ) : null}
+                            <Text style={[styles.mutedSmall, { marginTop: 2 }]}>
+                              {cp.source === "nearby_attraction" ? "★ Community discovery" : ""}
+                              {cp.source === "map_pin" ? "📌 Member pin" : ""}
+                              {distLabel}
+                              {sortDistLabel}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })
+                )
+              ) : null}
+              {checkpointsSectionOpen && canSendLineupFormation ? (
+                <Pressable
+                  style={[styles.primaryBtn, styles.outlineBtn, { marginTop: 10 }]}
+                  onPress={() =>
+                    Alert.alert("Manage checkpoints", "Reorder and delete from the trip tools on web for now.")
+                  }
+                >
+                  <Text style={styles.outlineBtnText}>Manage</Text>
+                </Pressable>
+              ) : null}
             </View>
 
             <View style={styles.attendanceHeader}>
@@ -1991,6 +3014,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
               onPress={() => {
                 setPausedFromLive(false);
                 setPhase("live");
+                emitLiveLocationSnapshot();
               }}
             >
               <Ionicons name="play" size={18} color="#000" />
@@ -2039,35 +3063,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
 
   /* ─── LIVE PHASE ─── */
   const h = Dimensions.get("window").height;
-  const liveRoutePointsRaw =
-    drivingRoute?.coordinates
-      ?.map((c) => {
-        const lat = toNum(c.latitude);
-        const lng = toNum(c.longitude);
-        if (lat == null || lng == null) return null;
-        return { lat, lng };
-      })
-      .filter((x): x is { lat: number; lng: number } => x != null) ?? [];
-  const startPoint =
-    (drivingRoute?.start && toNum(drivingRoute.start.lat) != null && toNum(drivingRoute.start.lng) != null
-      ? { lat: Number(drivingRoute.start.lat), lng: Number(drivingRoute.start.lng) }
-      : null) ??
-    (toNum(trip?.meetupLat) != null && toNum(trip?.meetupLng) != null
-      ? { lat: Number(trip?.meetupLat), lng: Number(trip?.meetupLng) }
-      : null);
-  const endPoint =
-    (drivingRoute?.end && toNum(drivingRoute.end.lat) != null && toNum(drivingRoute.end.lng) != null
-      ? { lat: Number(drivingRoute.end.lat), lng: Number(drivingRoute.end.lng) }
-      : null) ??
-    (toNum(trip?.endLat) != null && toNum(trip?.endLng) != null
-      ? { lat: Number(trip?.endLat), lng: Number(trip?.endLng) }
-      : null);
-  const liveRoutePoints =
-    liveRoutePointsRaw.length >= 2
-      ? liveRoutePointsRaw
-      : startPoint && endPoint
-        ? [startPoint, endPoint]
-        : [];
+  const { liveRoutePoints, startPoint, endPoint } = mapRouteGeometry;
   /** Plot other riders whenever we have a non-zero fix. */
   const convoyMarkerCoords = (m: LiveMember): { lat: number; lng: number } | null => {
     const lat = toNum(m.lat);
@@ -2096,7 +3092,6 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const selfPinForSpread =
     userGeo != null ? { lat: userGeo.lat, lng: userGeo.lng } : lastPosRef.current;
   const mapMembers = spreadPeersForMap(mapMembersRaw, selfPinForSpread);
-  const mapOverlayPins = mapPins.map((p) => ({ id: p.id, label: p.label, lat: p.lat, lng: p.lng }));
   const effectiveUserGeo =
     userGeo ??
     (lastPosRef.current
@@ -2119,11 +3114,36 @@ export function LiveTripScreen({ route, navigation }: Props) {
         end={endPoint}
         members={mapMembers}
         pins={mapOverlayPins}
+        activeRouteSegment={activeRouteSegmentPoints}
         fitTick={mapFitTick}
         recenterPoint={mapRecenterPoint}
         userGeo={effectiveUserGeo}
         onMapError={(msg) => setMapDiag(msg)}
       />
+
+      {mapPinCrosshair ? (
+        <View style={styles.crosshairWrap} pointerEvents="box-none">
+          <Pressable
+            delayLongPress={500}
+            onLongPress={() => {
+              const pos = lastPosRef.current;
+              if (!pos) {
+                Alert.alert("Location", "Wait for GPS or use Re-centre.");
+                return;
+              }
+              setShowMapPinRequestModal(true);
+            }}
+            style={styles.crosshairHit}
+          >
+            <View style={styles.crosshairRing} />
+            <View style={styles.crosshairH} />
+            <View style={styles.crosshairV} />
+          </Pressable>
+          <Text style={styles.crosshairHint}>
+            Move map to your desired location, then long-press the crosshair (uses your GPS for this build).
+          </Text>
+        </View>
+      ) : null}
 
       {mapDiag ? (
         <View style={[styles.mapDiagBadge, { top: insets.top + 52 }]}>
@@ -2322,8 +3342,16 @@ export function LiveTripScreen({ route, navigation }: Props) {
                   </View>
                 </View>
               </Pressable>
-              <Pressable style={styles.roundIcon} onPress={() => setShowPinModal(true)}>
+              <Pressable
+                style={[styles.roundIcon, mapPinCrosshair && { borderWidth: 2, borderColor: "#c084fc" }]}
+                onPress={() => setMapPinCrosshair((x) => !x)}
+              >
                 <Ionicons name="location" size={22} color="#c084fc" />
+                {pinRequestQueue.length > 0 && canSendLineupFormation ? (
+                  <View style={[styles.alertBadgeInline, { position: "absolute", top: -4, right: -4 }]}>
+                    <Text style={styles.alertBadgeText}>{Math.min(9, pinRequestQueue.length)}</Text>
+                  </View>
+                ) : null}
               </Pressable>
               <Pressable
                 style={[styles.roundIcon, !canSendLineupFormation && { opacity: 0.35 }]}
@@ -2369,18 +3397,36 @@ export function LiveTripScreen({ route, navigation }: Props) {
             <View style={styles.settingsCard}>
               <View style={styles.setRowTall}>
                 <View style={styles.setIconCol}>
-                  <Ionicons name="flag-outline" size={22} color="rgba(255,255,255,0.75)" />
+                  <Ionicons
+                    name="flag-outline"
+                    size={22}
+                    color={nextCheckpointInfo?.isCurrent ? "#fbbf24" : "#2dd4bf"}
+                  />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.setLabel}>Next checkpoint</Text>
+                  <Text
+                    style={[
+                      styles.setLabel,
+                      nextCheckpointInfo?.isCurrent ? { color: "#fbbf24" } : null,
+                    ]}
+                  >
+                    {nextCheckpointInfo?.isCurrent ? "You are here" : "Next checkpoint"}
+                  </Text>
                   {nextCheckpointInfo ? (
                     <>
                       <Text style={styles.setSub} numberOfLines={2}>
                         {nextCheckpointInfo.next.name}
                       </Text>
                       <Text style={styles.setSub}>
-                        {nextCheckpointInfo.distanceKm.toFixed(1)} km away
-                        {nextCheckpointInfo.etaMin != null
+                        {nextCheckpointInfo.next.clientDistanceM == null
+                          ? "Waiting for GPS…"
+                          : nextCheckpointInfo.isCurrent
+                            ? `You are here · ${formatDistance(nextCheckpointInfo.distanceM)}`
+                            : `${formatDistance(nextCheckpointInfo.distanceM)} from you`}
+                        {nextCheckpointInfo.next.clientDistanceM != null &&
+                        !nextCheckpointInfo.isCurrent &&
+                        nextCheckpointInfo.etaMin != null &&
+                        nextCheckpointInfo.etaMin > 0
                           ? ` · ~${Math.max(1, Math.round(nextCheckpointInfo.etaMin))} min at current pace`
                           : ""}
                       </Text>
@@ -2407,16 +3453,18 @@ export function LiveTripScreen({ route, navigation }: Props) {
                   )}
                 </View>
               </View>
-              <Pressable style={styles.setRowTall} onPress={() => setShowAttractionModal(true)}>
-                <View style={styles.setIconCol}>
-                  <Ionicons name="star-outline" size={22} color="rgba(255,255,255,0.75)" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.setLabel}>Mark nearby attraction</Text>
-                  <Text style={styles.setSub}>Save a discovered place for organizers (checkpoints).</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.35)" />
-              </Pressable>
+              {canSaveNearbyAttraction ? (
+                <Pressable style={styles.setRowTall} onPress={() => setShowAttractionModal(true)}>
+                  <View style={styles.setIconCol}>
+                    <Ionicons name="star-outline" size={22} color="rgba(255,255,255,0.75)" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.setLabel}>Mark nearby attraction</Text>
+                    <Text style={styles.setSub}>Save a discovered place for organizers (checkpoints).</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.35)" />
+                </Pressable>
+              ) : null}
             </View>
             <Text style={[styles.sectionRouteTitle, { marginBottom: 8 }]}>ROUTE · CHECKPOINT TIMELINE</Text>
             {routeTimeline.length === 0 ? (
@@ -2425,17 +3473,43 @@ export function LiveTripScreen({ route, navigation }: Props) {
               </Text>
             ) : (
               routeTimeline.map((row) => (
-                <View key={row.cp.id} style={styles.timelineRow}>
+                <View key={row.cp.id} style={[styles.timelineRow, row.reached && { opacity: 0.45 }]}>
                   <View style={styles.timelineDot}>
-                    <Text style={styles.timelineOrder}>{row.order}</Text>
+                    <Text
+                      style={[
+                        styles.timelineOrder,
+                        row.isCurrent && { color: "#fbbf24", fontSize: 14 },
+                        row.isNext && !row.isCurrent && { color: "#00E5B0" },
+                      ]}
+                    >
+                      {row.reached ? "✓" : row.isCurrent ? "●" : row.isNext ? "→" : "○"}
+                    </Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.timelineName}>{row.cp.name}</Text>
+                    <Text
+                      style={[
+                        styles.timelineName,
+                        row.isCurrent && { color: "#fbbf24" },
+                        row.isNext && !row.isCurrent && { color: "#00E5B0" },
+                        row.reached && { color: "rgba(255,255,255,0.45)" },
+                      ]}
+                    >
+                      {row.order}. {row.cp.name}
+                    </Text>
                     <Text style={styles.setSub}>
-                      {row.reached ? "Reached · " : ""}
-                      {row.distKm.toFixed(1)} km from you · ~{Math.max(1, Math.round(row.etaMin))} min
-                      {row.cp.badge ? ` · ${row.cp.badge}` : ""}
-                      {row.cp.xp ? ` · +${row.cp.xp} XP` : ""}
+                      {row.reached
+                        ? `Passed · ${
+                            row.cp.clientDistanceM == null ? "—" : `${formatDistance(row.distM)} from you`
+                          }`
+                        : row.isCurrent
+                          ? `You are here · ${
+                              row.cp.clientDistanceM == null ? "—" : formatDistance(row.distM)
+                            }`
+                          : row.cp.clientDistanceM == null
+                            ? "—"
+                            : `${formatDistance(row.distM)} from you`}
+                      {row.cp.source === "nearby_attraction" ? " · ★ community" : ""}
+                      {row.cp.source === "map_pin" ? " · 📌 member pin" : ""}
                     </Text>
                   </View>
                 </View>
@@ -2615,10 +3689,18 @@ export function LiveTripScreen({ route, navigation }: Props) {
       </Modal>
 
       <Modal visible={showAttractionModal} transparent animationType="slide">
-        <Pressable style={styles.modalBackdrop} onPress={() => setShowAttractionModal(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => closeAttractionModal()}>
           <Pressable style={[styles.modalCard, { maxHeight: "85%" }]} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.modalTitle}>Nearby attraction</Text>
             <Text style={styles.mutedSmall}>Name and description — saved for organizers.</Text>
+            <Text style={[styles.mutedSmall, { marginTop: 6 }]}>
+              GPS:{" "}
+              {userGeo
+                ? `${userGeo.lat.toFixed(5)}, ${userGeo.lng.toFixed(5)}`
+                : lastPosRef.current
+                  ? `${lastPosRef.current.lat.toFixed(5)}, ${lastPosRef.current.lng.toFixed(5)}`
+                  : "—"}
+            </Text>
             <TextInput
               style={styles.textInputDark}
               placeholder="Place name"
@@ -2634,16 +3716,179 @@ export function LiveTripScreen({ route, navigation }: Props) {
               onChangeText={setAttrDesc}
               multiline
             />
+            <Pressable
+              style={[styles.primaryBtn, styles.outlineBtn, { marginTop: 10 }]}
+              onPress={() => void pickAttractionImages()}
+              disabled={attrSaving || attrImages.length >= 5}
+            >
+              <Text style={styles.outlineBtnText}>
+                {attrImages.length > 0
+                  ? `${attrImages.length} photo(s) selected — tap to add more`
+                  : "+ Add photos (max 5)"}
+              </Text>
+            </Pressable>
+            {attrImages.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={{ marginTop: 10 }}
+                keyboardShouldPersistTaps="handled"
+              >
+                {attrImages.map((asset, idx) => (
+                  <View key={`${asset.uri}-${idx}`} style={{ marginRight: 10 }}>
+                    <Image
+                      source={{ uri: asset.uri }}
+                      style={{ width: 80, height: 60, borderRadius: 6, backgroundColor: "#111" }}
+                      resizeMode="cover"
+                    />
+                    <Pressable
+                      onPress={() => setAttrImages((prev) => prev.filter((_, i) => i !== idx))}
+                      style={{
+                        position: "absolute",
+                        top: -6,
+                        right: -6,
+                        backgroundColor: "#dc2626",
+                        borderRadius: 10,
+                        width: 22,
+                        height: 22,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                      hitSlop={6}
+                    >
+                      <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>×</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : null}
             <View style={styles.modalActions}>
-              <Pressable style={[styles.primaryBtn, styles.outlineBtn]} onPress={() => setShowAttractionModal(false)}>
+              <Pressable
+                style={[styles.primaryBtn, styles.outlineBtn]}
+                onPress={() => closeAttractionModal()}
+                disabled={attrSaving}
+              >
                 <Text style={styles.outlineBtnText}>Cancel</Text>
               </Pressable>
-              <Pressable style={styles.primaryBtn} onPress={() => void submitAttraction()}>
-                <Text style={styles.primaryBtnText}>Save</Text>
+              <Pressable
+                style={[styles.primaryBtn, attrSaving && { opacity: 0.65 }]}
+                onPress={() => void submitAttraction()}
+                disabled={attrSaving}
+              >
+                {attrSaving ? (
+                  <Text style={styles.primaryBtnText}>
+                    {attrImages.length > 0 ? "Uploading…" : "Saving…"}
+                  </Text>
+                ) : (
+                  <Text style={styles.primaryBtnText}>Save</Text>
+                )}
               </Pressable>
             </View>
           </Pressable>
         </Pressable>
+      </Modal>
+
+      <Modal visible={showMapPinRequestModal} transparent animationType="slide">
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowMapPinRequestModal(false)}>
+          <Pressable style={[styles.modalCard, { maxHeight: "85%" }]} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Request map pin</Text>
+            <Text style={styles.mutedSmall}>
+              {canSendLineupFormation
+                ? "Adds a checkpoint immediately for organizers and staff."
+                : "Submit for organizer approval."}
+            </Text>
+            <TextInput
+              style={[styles.textInputDark, { marginTop: 10 }]}
+              placeholder="Label (checkpoint name)"
+              placeholderTextColor="rgba(255,255,255,0.35)"
+              value={mapPinLabel}
+              onChangeText={setMapPinLabel}
+            />
+            <TextInput
+              style={[styles.textInputDark, { marginTop: 8, minHeight: 72 }]}
+              placeholder="Reason / notes"
+              placeholderTextColor="rgba(255,255,255,0.35)"
+              value={mapPinReason}
+              onChangeText={setMapPinReason}
+              multiline
+            />
+            <View style={styles.modalActions}>
+              <Pressable
+                style={[styles.primaryBtn, styles.outlineBtn]}
+                onPress={() => {
+                  setShowMapPinRequestModal(false);
+                  setMapPinReason("");
+                  setMapPinLabel("");
+                }}
+              >
+                <Text style={styles.outlineBtnText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.primaryBtn, mapPinSubmitting && styles.primaryBtnDisabled]}
+                disabled={mapPinSubmitting}
+                onPress={() => void submitMapPinRequest()}
+              >
+                <Text style={[styles.primaryBtnText, mapPinSubmitting && { opacity: 0.75 }]}>
+                  {mapPinSubmitting ? "Submitting…" : "Submit for approval"}
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={canSendLineupFormation && pinRequestQueue.length > 0} transparent animationType="fade">
+        <View style={styles.modalBackdrop}>
+          <Pressable style={[styles.modalCard, { maxHeight: "88%" }]} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Pin request</Text>
+            {pinRequestQueue[0] ? (
+              <>
+                <Text style={[styles.mutedSmall, { marginTop: 4 }]}>
+                  From {pinRequestQueue[0].requestedBy.displayName}
+                </Text>
+                {pinRequestQueue.length > 1 ? (
+                  <Text style={[styles.mutedSmall, { marginTop: 4 }]}>
+                    {pinRequestQueue.length} pending pins — review the oldest first
+                  </Text>
+                ) : null}
+                <Text style={{ marginTop: 10, color: "#fff", fontWeight: "700" }}>
+                  {pinRequestQueue[0].label || "Map pin"}
+                </Text>
+                <Text style={{ marginTop: 8, color: "rgba(255,255,255,0.85)" }}>{pinRequestQueue[0].reason}</Text>
+                <View style={{ flexDirection: "row", gap: 12, marginTop: 18 }}>
+                  <Pressable
+                    disabled={pinReviewUiLock}
+                    style={[
+                      styles.primaryBtn,
+                      {
+                        backgroundColor: pinReviewFlash === "deny" ? "#dc2626" : "#b91c1c",
+                        flex: 1,
+                        opacity: pinReviewUiLock && pinReviewFlash !== "deny" ? 0.4 : 1,
+                      },
+                    ]}
+                    onPress={() => reviewQueuedPinRequest("deny")}
+                  >
+                    <Text style={[styles.primaryBtnText, { color: "#fff" }]}>Deny</Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={pinReviewUiLock}
+                    style={[
+                      styles.primaryBtn,
+                      {
+                        backgroundColor: pinReviewFlash === "approve" ? "#22c55e" : "#15803d",
+                        flex: 1,
+                        opacity: pinReviewUiLock && pinReviewFlash !== "approve" ? 0.4 : 1,
+                      },
+                    ]}
+                    onPress={() => reviewQueuedPinRequest("approve")}
+                  >
+                    <Text style={[styles.primaryBtnText, { color: "#fff" }]}>Approve</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : null}
+          </Pressable>
+        </View>
       </Modal>
 
       <Modal visible={showExitConfirm} transparent animationType="fade">
@@ -2662,11 +3907,77 @@ export function LiveTripScreen({ route, navigation }: Props) {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {transientToast ? (
+        <View
+          style={[
+            styles.toastBar,
+            transientToast.tone === "success" && { backgroundColor: "rgba(22, 101, 52, 0.94)" },
+            transientToast.tone === "warning" && { backgroundColor: "rgba(161, 98, 7, 0.94)" },
+            transientToast.tone === "error" && { backgroundColor: "rgba(127, 29, 29, 0.94)" },
+          ]}
+          pointerEvents="none"
+        >
+          <Text style={styles.toastText}>{transientToast.message}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  toastBar: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    bottom: 112,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    zIndex: 50,
+  },
+  toastText: { color: "#fff", fontSize: 14, fontWeight: "600", textAlign: "center" },
+  crosshairWrap: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center",
+    pointerEvents: "box-none",
+  },
+  crosshairHit: {
+    width: 120,
+    height: 120,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  crosshairRing: {
+    position: "absolute",
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.85)",
+  },
+  crosshairH: {
+    position: "absolute",
+    width: 72,
+    height: 2,
+    backgroundColor: "rgba(255,255,255,0.85)",
+  },
+  crosshairV: {
+    position: "absolute",
+    width: 2,
+    height: 72,
+    backgroundColor: "rgba(255,255,255,0.85)",
+  },
+  crosshairHint: {
+    position: "absolute",
+    bottom: "38%",
+    left: 16,
+    right: 16,
+    textAlign: "center",
+    color: "rgba(255,255,255,0.75)",
+    fontSize: 12,
+  },
   root: { flex: 1, backgroundColor: "#000" },
   flex: { flex: 1 },
   centered: { flex: 1, backgroundColor: "#000", justifyContent: "center", alignItems: "center" },
@@ -2927,6 +4238,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderRadius: 12,
     alignItems: "center",
+  },
+  primaryBtnDisabled: {
+    opacity: 0.45,
   },
   primaryBtnText: { color: "#000", fontWeight: "800" },
   outlineBtn: { backgroundColor: "transparent", borderWidth: 1, borderColor: "rgba(255,255,255,0.2)" },

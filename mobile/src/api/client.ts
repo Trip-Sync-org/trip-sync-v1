@@ -5,6 +5,31 @@ export function apiUrl(path: string): string {
   return `${API_BASE_URL}${p}`;
 }
 
+/** True for fetch AbortError / user abort — often benign if the server already processed the request. */
+export function isAbortLikeError(e: unknown): boolean {
+  if (e == null) return false;
+  if (typeof e === "object") {
+    const name = (e as { name?: string }).name;
+    if (name === "AbortError") return true;
+  }
+  try {
+    if (typeof DOMException !== "undefined" && e instanceof DOMException && e.name === "AbortError") {
+      return true;
+    }
+  } catch {
+    /* DOMException may not exist in some RN runtimes */
+  }
+  const msg = e instanceof Error ? e.message : String(e);
+  return /\b(abort|canceled|cancelled)\b/i.test(msg);
+}
+
+export type ApiFetchOptions = RequestInit & {
+  /** When true, do not attach the client-side timeout AbortController (avoids spurious aborts on slow responses). */
+  skipApiTimeout?: boolean;
+};
+
+const API_FETCH_TIMEOUT_MS = 30000;
+
 export async function readApiErrorMessage(res: Response): Promise<string> {
   try {
     const text = (await res.clone().text()).trim();
@@ -26,24 +51,27 @@ export async function readApiErrorMessage(res: Response): Promise<string> {
   return `Request failed (HTTP ${res.status})`;
 }
 
-export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+export async function apiFetch(path: string, init?: ApiFetchOptions): Promise<Response> {
+  const skipApiTimeout = init?.skipApiTimeout === true;
+  const { skipApiTimeout: _skip, ...restInit } = init ?? {};
   const url = apiUrl(path);
-  const controller = !init?.signal ? new AbortController() : null;
-  const timeout = setTimeout(() => controller?.abort(), 12000);
+  const useInternalAbort = !restInit.signal && !skipApiTimeout;
+  const controller = useInternalAbort ? new AbortController() : null;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), API_FETCH_TIMEOUT_MS) : null;
   try {
     return await fetch(url, {
-      ...init,
-      signal: init?.signal ?? controller?.signal,
+      ...restInit,
+      signal: restInit.signal ?? controller?.signal,
       headers: {
         "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
+        ...(restInit.headers ?? {}),
       },
     });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (msg.includes("aborted") || msg.includes("AbortError")) {
-      throw new Error(`API request timed out. Trying: ${API_BASE_URL}`);
+    if (isAbortLikeError(e)) {
+      throw e instanceof Error ? e : new Error(String(e));
     }
+    const msg = e instanceof Error ? e.message : String(e);
     const isNetwork =
       msg === "Network request failed" ||
       msg.includes("Failed to fetch") ||
@@ -59,6 +87,6 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
     }
     throw e;
   } finally {
-    clearTimeout(timeout);
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }
