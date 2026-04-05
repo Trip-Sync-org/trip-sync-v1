@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { Alert, PermissionsAndroid, Platform } from "react-native";
 import type { Socket } from "socket.io-client";
 import { createVoiceManager, type VoiceManagerApi, type VoiceMode } from "../lib/voiceManager";
 
 type UseConvoyVoiceProps = {
-  socket: Socket | null;
+  socketRef: MutableRefObject<Socket | null>;
   tripId: number;
   myUserId: number;
   voiceMode: VoiceMode;
@@ -27,7 +27,7 @@ async function requestMicPermission(): Promise<boolean> {
 }
 
 export function useConvoyVoice({
-  socket,
+  socketRef,
   tripId,
   myUserId,
   voiceMode,
@@ -43,6 +43,7 @@ export function useConvoyVoice({
   const [isConnecting, setIsConnecting] = useState(false);
 
   const joinVoice = useCallback(async (): Promise<boolean> => {
+    const socket = socketRef.current;
     if (isInVoice || isConnecting || !socket?.connected) return false;
     if (!Number.isFinite(myUserId) || myUserId <= 0) {
       Alert.alert("Voice error", "Sign in again to use convoy voice.");
@@ -60,16 +61,17 @@ export function useConvoyVoice({
       const manager = createVoiceManager(myUserId, tripId);
 
       manager.onSignal = (payload) => {
-        if (!socket?.connected) return;
+        const s = socketRef.current;
+        if (!s?.connected) return;
         if (payload.type === "voice-offer" || payload.type === "voice-answer" || payload.type === "voice-ice") {
-          socket.emit("voice-signal", {
+          s.emit("voice-signal", {
             tripId,
             toUserId: payload.toUserId,
             fromUserId: myUserId,
             signal: payload,
           });
         } else if (payload.type === "voice-muted") {
-          socket.emit("voice-signal", {
+          s.emit("voice-signal", {
             tripId,
             toUserId: -1,
             fromUserId: myUserId,
@@ -106,7 +108,7 @@ export function useConvoyVoice({
     isInVoice,
     isMuted,
     myUserId,
-    socket,
+    socketRef,
     tripId,
     voiceMode,
   ]);
@@ -114,12 +116,13 @@ export function useConvoyVoice({
   const leaveVoice = useCallback(() => {
     managerRef.current?.stop();
     managerRef.current = null;
-    if (socket?.connected) {
-      socket.emit("voice-leave", { tripId, userId: myUserId });
+    const s = socketRef.current;
+    if (s?.connected) {
+      s.emit("voice-leave", { tripId, userId: myUserId });
     }
     setIsInVoice(false);
     setVoiceRiders([]);
-  }, [myUserId, socket, tripId]);
+  }, [myUserId, socketRef, tripId]);
 
   const toggleMute = useCallback(() => {
     const m = managerRef.current;
@@ -140,14 +143,14 @@ export function useConvoyVoice({
   const muteRemoteRider = useCallback(
     (userId: number, muted: boolean) => {
       managerRef.current?.setRemoteMuted(userId, muted);
-      socket?.emit("voice-signal", {
+      socketRef.current?.emit("voice-signal", {
         tripId,
         toUserId: userId,
         fromUserId: myUserId,
         signal: { type: "voice-force-mute", userId, muted },
       });
     },
-    [myUserId, socket, tripId],
+    [myUserId, socketRef, tripId],
   );
 
   useEffect(() => {
@@ -168,8 +171,9 @@ export function useConvoyVoice({
     blockedIds.forEach((id) => m.setBlocked(id, true));
   }, [blockedIds]);
 
+  /** Keep listeners on whatever `socketRef.current` points to without depending on socket identity (avoids teardown on reconnect / ref updates). */
   useEffect(() => {
-    if (!socket) return;
+    let attachedSocket: Socket | null = null;
 
     const onVoicePeers = (data: { peers?: number[] }) => {
       const peers = Array.isArray(data?.peers) ? data.peers : [];
@@ -200,20 +204,20 @@ export function useConvoyVoice({
 
       if (toUserId !== -1 && toUserId !== myUserId) return;
 
-      const m = managerRef.current;
-      if (!m) return;
+      const mgr = managerRef.current;
+      if (!mgr) return;
 
       const t = String(signal.type ?? "");
       if (t === "voice-offer") {
         const sdp = String(signal.sdp ?? "");
-        await m.handleOffer(fromUserId, sdp);
+        await mgr.handleOffer(fromUserId, sdp);
       } else if (t === "voice-answer") {
         const sdp = String(signal.sdp ?? "");
-        await m.handleAnswer(fromUserId, sdp);
+        await mgr.handleAnswer(fromUserId, sdp);
       } else if (t === "voice-ice") {
         const cand = signal.candidate;
         if (cand && typeof cand === "object") {
-          await m.handleIceCandidate(fromUserId, cand as Record<string, unknown>);
+          await mgr.handleIceCandidate(fromUserId, cand as Record<string, unknown>);
         }
       } else if (t === "voice-muted") {
         const uid = Number(signal.userId);
@@ -223,26 +227,43 @@ export function useConvoyVoice({
         const uid = Number(signal.userId);
         const muted = Boolean(signal.muted);
         if (uid === myUserId) {
-          m.setMuted(muted);
+          mgr.setMuted(muted);
           onMemberMuteChange?.(myUserId, muted);
         } else {
-          m.setRemoteMuted(uid, muted);
+          mgr.setRemoteMuted(uid, muted);
         }
       }
     };
 
-    socket.on("voice-peers", onVoicePeers);
-    socket.on("voice-rider-joined", onVoiceRiderJoined);
-    socket.on("voice-rider-left", onVoiceRiderLeft);
-    socket.on("voice-signal", onVoiceSignal);
+    const detach = (s: Socket | null) => {
+      if (!s) return;
+      s.off("voice-peers", onVoicePeers);
+      s.off("voice-rider-joined", onVoiceRiderJoined);
+      s.off("voice-rider-left", onVoiceRiderLeft);
+      s.off("voice-signal", onVoiceSignal);
+    };
+
+    const syncListeners = () => {
+      const s = socketRef.current;
+      if (s === attachedSocket) return;
+      detach(attachedSocket);
+      attachedSocket = s;
+      if (!s) return;
+      s.on("voice-peers", onVoicePeers);
+      s.on("voice-rider-joined", onVoiceRiderJoined);
+      s.on("voice-rider-left", onVoiceRiderLeft);
+      s.on("voice-signal", onVoiceSignal);
+    };
+
+    syncListeners();
+    const id = setInterval(syncListeners, 400);
 
     return () => {
-      socket.off("voice-peers", onVoicePeers);
-      socket.off("voice-rider-joined", onVoiceRiderJoined);
-      socket.off("voice-rider-left", onVoiceRiderLeft);
-      socket.off("voice-signal", onVoiceSignal);
+      clearInterval(id);
+      detach(attachedSocket);
+      attachedSocket = null;
     };
-  }, [myUserId, onMemberMuteChange, socket]);
+  }, [myUserId, onMemberMuteChange, socketRef]);
 
   useEffect(() => {
     return () => {

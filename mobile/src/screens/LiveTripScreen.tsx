@@ -502,7 +502,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
     null,
   );
   const [checkpointsSectionOpen, setCheckpointsSectionOpen] = useState(false);
-  const [liveSocket, setLiveSocket] = useState<Socket | null>(null);
+  const [, setLiveSocket] = useState<Socket | null>(null);
   const socketRef = useRef<Socket | null>(null);
   /** Last socket location-updated time per peer — survives socket reconnects (not reset with new io() closure). */
   const lastSeenRef = useRef<Record<number, number>>({});
@@ -635,7 +635,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
     setBlocked: setConvoyBlocked,
     muteRemoteRider,
   } = useConvoyVoice({
-    socket: liveSocket,
+    socketRef,
     tripId: tripIdNum,
     myUserId: Number(user?.id ?? 0),
     voiceMode,

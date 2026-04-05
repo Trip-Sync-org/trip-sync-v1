@@ -7,6 +7,7 @@
     "mobile": "npm run expo:start --prefix mobile",
     "expo": "npm run expo:start --prefix mobile",
     "expo:clear": "npm run expo:start --prefix mobile -- --clear",
+    "expo:android": "npm run run:android --prefix mobile",
     "expo:tunnel": "npm run expo:tunnel --prefix mobile",
     "frontend:dev": "vite --config frontend/vite.config.js",
     "backend:dev": "tsx backend/server.ts",

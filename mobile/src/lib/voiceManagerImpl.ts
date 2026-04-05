@@ -51,9 +51,15 @@ export class VoiceManager implements VoiceManagerApi {
       video: false,
     } as Parameters<typeof mediaDevices.getUserMedia>[0]);
 
-    InCallManager.start({ media: "audio", ringback: "" });
-    InCallManager.setForceSpeakerphoneOn(true);
-    InCallManager.setSpeakerphoneOn(true);
+    try {
+      InCallManager.start({ media: "audio", ringback: "" });
+      InCallManager.setForceSpeakerphoneOn(true);
+      InCallManager.setSpeakerphoneOn(true);
+    } catch (err) {
+      console.warn("[voice] InCallManager start failed (non-fatal):", err);
+    }
+
+    console.log("[voice] local stream started");
   }
 
   stop(): void {
@@ -69,9 +75,11 @@ export class VoiceManager implements VoiceManagerApi {
 
     try {
       InCallManager.stop();
-    } catch {
-      /* noop */
+    } catch (err) {
+      console.warn("[voice] InCallManager stop failed (non-fatal):", err);
     }
+
+    console.log("[voice] stopped");
   }
 
   private createPeer(remoteUserId: number): RTCPeerConnection {
