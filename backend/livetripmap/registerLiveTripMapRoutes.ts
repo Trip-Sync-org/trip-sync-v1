@@ -32,6 +32,15 @@ export type LiveTripMapRoutesContext = {
 
 export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesContext): void {
   let hasTripAlertsTable: boolean | null = null;
+  function hasAccessFromBookingRow(booking: { status?: unknown; payment_status?: unknown } | null): boolean {
+    if (!booking) return false;
+    const bookingStatus = String(booking.status ?? "").toLowerCase();
+    const paymentStatus = String(booking.payment_status ?? "").toLowerCase();
+    if (bookingStatus === "cancelled" || bookingStatus === "canceled") return false;
+    // Paid trips: require successful payment. Free/legacy trips may have null payment_status.
+    if (paymentStatus) return paymentStatus === "paid";
+    return bookingStatus === "confirmed";
+  }
   // Map API proxy routes (provider-neutral fallbacks)
   app.get("/api/maps/geocode", async (req, res) => {
     const query = String(req.query.query || req.query.q || "").trim();
@@ -199,12 +208,12 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
 
     const { data: booking } = await ctx.supabase
       .from("bookings")
-      .select("id")
+      .select("id, status, payment_status")
       .eq("trip_id", tripId)
       .eq("user_id", userId)
       .maybeSingle();
 
-    if (!booking) {
+    if (!hasAccessFromBookingRow(booking)) {
       return res.status(403).json({ allowed: false, error: "Book the trip before going live" });
     }
 
@@ -233,11 +242,11 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
     if (!isOrganizer) {
       const { data: booking } = await ctx.supabase
         .from("bookings")
-        .select("id")
+        .select("id, status, payment_status")
         .eq("trip_id", tripId)
         .eq("user_id", userId)
         .maybeSingle();
-      if (!booking) return res.status(403).json({ error: "Book the trip before going live" });
+      if (!hasAccessFromBookingRow(booking)) return res.status(403).json({ error: "Book the trip before going live" });
     }
 
     const { data: organizerRow } = await ctx.supabase
@@ -437,11 +446,11 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
     if (!isOrganizer) {
       const { data: booking } = await ctx.supabase
         .from("bookings")
-        .select("id")
+        .select("id, status, payment_status")
         .eq("trip_id", tripId)
         .eq("user_id", userId)
         .maybeSingle();
-      if (!booking) return res.status(403).json({ error: "Book the trip before sharing location" });
+      if (!hasAccessFromBookingRow(booking)) return res.status(403).json({ error: "Book the trip before sharing location" });
     }
 
     const nowIso = new Date().toISOString();
@@ -498,11 +507,11 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
     if (!isTripOrganizer) {
       const { data: booking } = await ctx.supabase
         .from("bookings")
-        .select("id")
+        .select("id, status, payment_status")
         .eq("trip_id", tripId)
         .eq("user_id", userId)
         .maybeSingle();
-      if (!booking) return res.status(403).json({ error: "Only participants can add pins" });
+      if (!hasAccessFromBookingRow(booking)) return res.status(403).json({ error: "Only participants can add pins" });
     }
 
     const row = {
@@ -559,11 +568,11 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
     if (!isTripOrganizer) {
       const { data: booking } = await ctx.supabase
         .from("bookings")
-        .select("id")
+        .select("id, status, payment_status")
         .eq("trip_id", tripId)
         .eq("user_id", userId)
         .maybeSingle();
-      if (!booking) return res.status(403).json({ error: "Only participants can send alerts" });
+      if (!hasAccessFromBookingRow(booking)) return res.status(403).json({ error: "Only participants can send alerts" });
     }
 
     const nowIso = new Date().toISOString();
@@ -624,11 +633,11 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
     if (!isTripOrganizer) {
       const { data: booking } = await ctx.supabase
         .from("bookings")
-        .select("id")
+        .select("id, status, payment_status")
         .eq("trip_id", tripId)
         .eq("user_id", userId)
         .maybeSingle();
-      if (!booking) return res.status(403).json({ error: "Only participants can view alerts" });
+      if (!hasAccessFromBookingRow(booking)) return res.status(403).json({ error: "Only participants can view alerts" });
     }
 
     if (hasTripAlertsTable !== false) {

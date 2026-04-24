@@ -55,6 +55,11 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     });
   }
 
+  app.use(
+    "/api/payments/webhook",
+    express.raw({ type: "application/json" }),
+    (_req, _res, next) => next(),
+  );
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
@@ -445,9 +450,6 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     process.env.BACKEND_URL || process.env.API_PUBLIC_URL || "http://localhost:3000",
   ).replace(/\/$/, "");
   const platformFeePercent = Math.min(100, Math.max(0, Number(process.env.PLATFORM_FEE_PERCENT ?? 10)));
-  const payuKey = String(process.env.PAYU_MERCHANT_KEY ?? "").trim();
-  const payuSalt = String(process.env.PAYU_MERCHANT_SALT ?? "").trim();
-  const payuBaseUrl = String(process.env.PAYU_BASE_URL ?? "https://test.payu.in").trim();
   const adminSecretKey = String(process.env.ADMIN_SECRET_KEY ?? "").trim();
 
   registerPaymentRoutes(app, {
@@ -455,19 +457,15 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     io,
     backendPublicUrl,
     platformFeePercent,
-    payuKey,
-    payuSalt,
-    payuBaseUrl,
     adminSecretKey,
     incrementOrganizerCouponUsage,
-    enablePayuCheckout: Boolean(payuKey && payuSalt),
     resolveOrganizerId: (input: unknown) => resolveUserNumericId(input, "organizer"),
   });
-  if (payuKey && payuSalt) {
-    console.log("[payments] PayU checkout enabled (initiate / success / failure).");
+  if (process.env.CASHFREE_APP_ID && process.env.CASHFREE_SECRET_KEY) {
+    console.log("[payments] Cashfree checkout enabled (create-order / webhook / verify).");
   } else {
     console.warn(
-      "[payments] PayU checkout disabled until PAYU_MERCHANT_KEY and PAYU_MERCHANT_SALT are set. Organizer payout APIs are active.",
+      "[payments] Cashfree checkout disabled until CASHFREE_APP_ID and CASHFREE_SECRET_KEY are set. Organizer payout APIs are active.",
     );
   }
 
@@ -1088,6 +1086,9 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
 
     const tripPrice = Number((trip as { price?: unknown }).price ?? 0);
     const isPaidTrip = tripPrice > 0;
+    const rawCode = typeof coupon_code === "string" ? coupon_code.trim() : "";
+    let couponValidated: Awaited<ReturnType<typeof validateOrganizerCouponForTrip>> | null =
+      null;
 
     const { data: existingBooking } = await supabase
       .from("bookings")
@@ -1100,10 +1101,73 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       const ps = String((existingBooking as { payment_status?: string }).payment_status ?? "");
       const fid = Number((existingBooking as { final_amount?: unknown }).final_amount ?? NaN);
       if (isPaidTrip && ps === "pending") {
+        let resolvedFinalAmount = Number.isFinite(fid) ? fid : Math.round(tripPrice * participants);
+        if (rawCode) {
+          const v = await validateOrganizerCouponForTrip(tripId, rawCode, participants);
+          if (v.ok === false) {
+            return res.status(v.status).json({ error: v.error });
+          }
+          couponValidated = v;
+          resolvedFinalAmount = Math.max(0, Math.round(tripPrice * participants) - v.discount_amount);
+          const updatePayload: Record<string, unknown> = {
+            final_amount: resolvedFinalAmount,
+            coupon_id: v.coupon.id,
+            discount_amount: v.discount_amount,
+          };
+          if (resolvedFinalAmount <= 0) {
+            updatePayload.payment_status = "paid";
+            updatePayload.status = "confirmed";
+            updatePayload.amount_paid = 0;
+            updatePayload.paid_at = new Date().toISOString();
+            updatePayload.platform_fee_amount = 0;
+            updatePayload.organizer_net_amount = 0;
+          } else {
+            updatePayload.payment_status = "pending";
+            updatePayload.status = "pending";
+          }
+          const { error: repriceErr } = await supabase
+            .from("bookings")
+            .update(updatePayload)
+            .eq("id", Number(existingBooking.id));
+          if (repriceErr) {
+            console.error("Supabase update pending booking coupon error:", repriceErr.message);
+            return res.status(400).json({ error: "Failed to apply coupon to pending booking" });
+          }
+          if (resolvedFinalAmount <= 0) {
+            const ok = await incrementOrganizerCouponUsage(v.coupon.id);
+            if (!ok) {
+              console.warn(
+                "Pending booking auto-confirmed but coupon usage was not incremented (id:",
+                v.coupon.id,
+                ")",
+              );
+            }
+            return res.status(200).json({ id: existingBooking.id, needs_payment: false, amount: 0 });
+          }
+        }
+        if (resolvedFinalAmount <= 0) {
+          const paidAtIso = new Date().toISOString();
+          const { error: settleErr } = await supabase
+            .from("bookings")
+            .update({
+              payment_status: "paid",
+              status: "confirmed",
+              amount_paid: 0,
+              paid_at: paidAtIso,
+              platform_fee_amount: 0,
+              organizer_net_amount: 0,
+            })
+            .eq("id", Number(existingBooking.id));
+          if (settleErr) {
+            console.error("Supabase settle zero-amount booking error:", settleErr.message);
+            return res.status(400).json({ error: "Failed to confirm free booking" });
+          }
+          return res.status(200).json({ id: existingBooking.id, needs_payment: false, amount: 0 });
+        }
         return res.status(200).json({
           id: existingBooking.id,
           needs_payment: true,
-          amount: Number.isFinite(fid) ? fid : tripPrice,
+          amount: resolvedFinalAmount,
           resume: true,
         });
       }
@@ -1119,10 +1183,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       return res.status(400).json({ error: "Trip is full" });
     }
 
-    let couponValidated: Awaited<ReturnType<typeof validateOrganizerCouponForTrip>> | null =
-      null;
-    const rawCode = typeof coupon_code === "string" ? coupon_code.trim() : "";
-    if (rawCode) {
+    if (rawCode && !couponValidated) {
       const v = await validateOrganizerCouponForTrip(tripId, rawCode, participants);
       if (v.ok === false) {
         return res.status(v.status).json({ error: v.error });
@@ -1202,8 +1263,38 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       }
     }
 
+    const isZeroAmountPaidBooking = isPaidTrip && Number(insertPayload.final_amount ?? 0) <= 0;
+
+    if (isZeroAmountPaidBooking) {
+      insertPayload.payment_status = "paid";
+      insertPayload.status = "confirmed";
+      insertPayload.amount_paid = 0;
+      insertPayload.paid_at = new Date().toISOString();
+      insertPayload.platform_fee_amount = 0;
+      insertPayload.organizer_net_amount = 0;
+    }
+
     if (isPaidTrip) {
       const fa = Number((data as { final_amount?: unknown }).final_amount ?? 0);
+      if (fa <= 0) {
+        if (couponValidated && couponValidated.ok === true) {
+          const ok = await incrementOrganizerCouponUsage(couponValidated.coupon.id);
+          if (!ok) {
+            console.warn(
+              "Zero-amount booking confirmed but coupon usage was not incremented (id:",
+              couponValidated.coupon.id,
+              ")",
+            );
+          }
+        }
+        return res.json({
+          id: data.id,
+          needs_payment: false,
+          amount: 0,
+          discount_amount:
+            couponValidated && couponValidated.ok === true ? couponValidated.discount_amount : 0,
+        });
+      }
       return res.json({
         id: data.id,
         needs_payment: true,
@@ -1232,12 +1323,19 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       .eq("user_id", Number(userId));
 
     if (!error) {
-      return res.json(data ?? []);
+      const filtered = (data ?? []).filter((b: any) => {
+        const bookingStatus = String(b?.status ?? "").toLowerCase();
+        const paymentStatus = String(b?.payment_status ?? "").toLowerCase();
+        if (bookingStatus === "cancelled" || bookingStatus === "canceled") return false;
+        if (!paymentStatus) return bookingStatus === "confirmed";
+        return paymentStatus === "paid";
+      });
+      return res.json(filtered);
     }
 
     console.warn("Supabase user bookings view error, falling back:", error.message);
 
-    const { data: baseBookings, error: baseError } = await supabase
+    const { data: baseBookingsRaw, error: baseError } = await supabase
       .from("bookings")
       .select("id, trip_id, user_id, status, payment_status, created_at")
       .eq("user_id", Number(userId))
@@ -1248,7 +1346,15 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       return res.status(500).json({ error: "Failed to fetch bookings" });
     }
 
-    const tripIds = Array.from(new Set((baseBookings ?? []).map((b: any) => Number(b.trip_id)).filter(Number.isFinite)));
+    const baseBookings = (baseBookingsRaw ?? []).filter((b: any) => {
+      const bookingStatus = String(b?.status ?? "").toLowerCase();
+      const paymentStatus = String(b?.payment_status ?? "").toLowerCase();
+      if (bookingStatus === "cancelled" || bookingStatus === "canceled") return false;
+      if (!paymentStatus) return bookingStatus === "confirmed";
+      return paymentStatus === "paid";
+    });
+
+    const tripIds = Array.from(new Set(baseBookings.map((b: any) => Number(b.trip_id)).filter(Number.isFinite)));
     if (tripIds.length === 0) {
       return res.json([]);
     }

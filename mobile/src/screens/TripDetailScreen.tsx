@@ -31,22 +31,13 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [coupon, setCoupon] = useState("");
   const [appliedPct, setAppliedPct] = useState<number | null>(null);
+  const [appliedDiscountAmount, setAppliedDiscountAmount] = useState<number>(0);
   const [booking, setBooking] = useState(false);
 
-  const [payModal, setPayModal] = useState(false);
-  const [payHtml, setPayHtml] = useState<string | null>(null);
-  const [pendingTxnId, setPendingTxnId] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await apiFetch(`/api/trips/${id}`);
-        if (res.ok) setTrip(await res.json());
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [id]);
+  const [showPaymentWebView, setShowPaymentWebView] = useState(false);
+  const [isPaymentLoading, setIsPaymentLoading] = useState(false);
+  const [paymentHtml, setPaymentHtml] = useState<string | null>(null);
+  const [cashfreeOrderId, setCashfreeOrderId] = useState<string | null>(null);
 
   const applyCoupon = async () => {
     const code = coupon.trim();
@@ -59,25 +50,44 @@ export function TripDetailScreen({ route, navigation }: Props) {
     if (!res.ok || body?.valid === false) {
       Alert.alert("Coupon", typeof body?.error === "string" ? body.error : "Invalid code");
       setAppliedPct(null);
+      setAppliedDiscountAmount(0);
       return;
     }
     setAppliedPct(Number(body.discount_pct) || 0);
+    setAppliedDiscountAmount(Number(body.discount_amount) || 0);
   };
 
+  const loadTrip = useCallback(async () => {
+    try {
+      const res = await apiFetch(`/api/trips/${id}`);
+      if (res.ok) setTrip(await res.json());
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    void loadTrip();
+  }, [loadTrip]);
+
   const pollPaymentStatus = useCallback(
-    async (txnid: string) => {
+    async (orderId: string) => {
       for (let i = 0; i < 40; i++) {
         try {
-          const r = await apiFetch(`/api/payments/verify/${encodeURIComponent(txnid)}`);
-          const j = (await r.json()) as { payment_status?: string };
-          if (j.payment_status === "paid") {
-            Alert.alert("Success", "Payment confirmed — you're in!", [
-              { text: "OK", onPress: () => navigation.goBack() },
+          const r = await apiFetch(`/api/payments/verify/${encodeURIComponent(orderId)}`);
+          const j = (await r.json()) as { paymentStatus?: string };
+          if (j.paymentStatus === "paid") {
+            Alert.alert("🎉 Payment Successful!", `You're now registered for ${String(trip?.name ?? "this trip")}`, [
+              { text: "View Trip", onPress: () => navigation.navigate("TripDetail", { id }) },
             ]);
+            void loadTrip();
             return;
           }
-          if (j.payment_status === "failed") {
-            Alert.alert("Payment", "Payment was not completed.");
+          if (j.paymentStatus === "failed") {
+            Alert.alert("Payment Failed", "Your payment was not completed. Please try again.", [
+              { text: "Try Again" },
+              { text: "Cancel" },
+            ]);
             return;
           }
         } catch {
@@ -87,71 +97,45 @@ export function TripDetailScreen({ route, navigation }: Props) {
       }
       Alert.alert("Payment", "Could not confirm payment status. Check My trips or try again.");
     },
-    [navigation],
+    [id, loadTrip, navigation, trip?.name],
   );
 
-  const startPayuCheckout = async (bookingId: number, amount: number) => {
+  const startCashfreeCheckout = async (bookingId: number, amount: number) => {
     if (!user?.email) {
       Alert.alert("Profile", "Email missing — update your account.");
       return;
     }
-    const res = await apiFetch("/api/payments/initiate", {
-      method: "POST",
-      body: JSON.stringify({
-        tripId: Number(id),
-        bookingId,
-        amount,
-        userEmail: user.email,
-        userPhone: "9999999999",
-        userName: user.name ?? "TripSync User",
-      }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      Alert.alert("Payment", typeof body?.error === "string" ? body.error : await readApiErrorMessage(res));
-      return;
+    setIsPaymentLoading(true);
+    try {
+      const res = await apiFetch("/api/payments/create-order", {
+        method: "POST",
+        body: JSON.stringify({
+          tripId: Number(id),
+          amount,
+          couponCode: coupon.trim() || undefined,
+          userName: user.name ?? "TripSync User",
+          userEmail: user.email || "user@tripsync.app",
+          userPhone: "9999999999",
+          bookingId,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        Alert.alert("Payment", typeof body?.error === "string" ? body.error : await readApiErrorMessage(res));
+        return;
+      }
+      const p = body as { orderId: string; paymentSessionId: string; cashfreeMode?: "sandbox" | "production" };
+      setCashfreeOrderId(p.orderId);
+      const mode = p.cashfreeMode === "production" ? "production" : "sandbox";
+      const html = `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script></head><body style="margin:0;background:#000;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;"><div id="status" style="font-family:sans-serif;font-size:14px;opacity:.8">Opening secure payment…</div><script>(function(){try{const cashfree=Cashfree({mode:"${mode}"});cashfree.checkout({paymentSessionId:"${p.paymentSessionId}",redirectTarget:"_self"}).then(function(result){if(result&&result.error){document.getElementById('status').textContent='Payment page failed to open.';}});}catch(e){document.getElementById('status').textContent='Checkout init failed.';}})();</script></body></html>`;
+      setPaymentHtml(html);
+      setShowPaymentWebView(true);
+    } catch (e) {
+      console.error("Payment initiation error:", e);
+      Alert.alert("Payment", "Could not initiate payment. Please try again.");
+    } finally {
+      setIsPaymentLoading(false);
     }
-    const p = body as {
-      payuUrl: string;
-      key: string;
-      txnid: string;
-      amount: string;
-      productinfo: string;
-      firstname: string;
-      email: string;
-      phone: string;
-      surl: string;
-      furl: string;
-      hash: string;
-    };
-
-    const fields: Record<string, string> = {
-      key: p.key,
-      txnid: p.txnid,
-      amount: p.amount,
-      productinfo: p.productinfo,
-      firstname: p.firstname,
-      email: p.email,
-      phone: p.phone,
-      surl: p.surl,
-      furl: p.furl,
-      hash: p.hash,
-    };
-    const formInputs = Object.entries(fields)
-      .map(
-        ([k, v]) =>
-          `<input type="hidden" name="${k.replace(/"/g, "&quot;")}" value="${String(v).replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" />`,
-      )
-      .join("");
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/></head><body onload="document.getElementById('f').submit()">
-<form id="f" method="post" action="${p.payuUrl.replace(/"/g, "&quot;")}">
-${formInputs}
-<noscript><button type="submit">Continue to PayU</button></noscript>
-</form></body></html>`;
-
-    setPendingTxnId(p.txnid);
-    setPayHtml(html);
-    setPayModal(true);
   };
 
   const book = async () => {
@@ -185,7 +169,7 @@ ${formInputs}
 
       if (body?.needs_payment === true && body?.id != null) {
         const amt = Number(body.amount ?? 0);
-        await startPayuCheckout(Number(body.id), amt);
+        await startCashfreeCheckout(Number(body.id), amt);
         return;
       }
 
@@ -208,6 +192,7 @@ ${formInputs}
   const joined = Number(trip.joined_count ?? 0);
   const max = Number(trip.max_participants ?? 0);
   const free = price <= 0;
+  const payablePreview = Math.max(0, Math.round(price - appliedDiscountAmount));
 
   return (
     <>
@@ -240,18 +225,39 @@ ${formInputs}
                 </Pressable>
               </View>
               {appliedPct != null && (
-                <Text style={styles.ok}>{appliedPct}% discount applied</Text>
+                <>
+                  <Text style={styles.ok}>{appliedPct}% discount applied</Text>
+                  <Text style={styles.ok}>Payable now: ₹{payablePreview.toLocaleString("en-IN")}</Text>
+                </>
               )}
+              <View style={styles.breakdownBox}>
+                <View style={styles.breakdownRow}>
+                  <Text style={styles.breakdownLabel}>Base</Text>
+                  <Text style={styles.breakdownValue}>₹{price.toLocaleString("en-IN")}</Text>
+                </View>
+                <View style={styles.breakdownRow}>
+                  <Text style={styles.breakdownLabel}>Discount</Text>
+                  <Text style={styles.breakdownValue}>-₹{appliedDiscountAmount.toLocaleString("en-IN")}</Text>
+                </View>
+                <View style={[styles.breakdownRow, { marginTop: 4 }]}>
+                  <Text style={styles.breakdownPayable}>Payable</Text>
+                  <Text style={styles.breakdownPayable}>₹{payablePreview.toLocaleString("en-IN")}</Text>
+                </View>
+              </View>
             </View>
           )}
 
           <Pressable
-            style={[styles.bookBtn, booking && { opacity: 0.6 }]}
+            style={[styles.bookBtn, (booking || isPaymentLoading) && { opacity: 0.6 }]}
             onPress={book}
-            disabled={booking}
+            disabled={booking || isPaymentLoading}
           >
             <Text style={styles.bookText}>
-              {booking ? "…" : free ? "Request to join" : "Pay & join"}
+              {booking || isPaymentLoading
+                ? "…"
+                : free || payablePreview <= 0
+                  ? "Join trip"
+                  : `Pay ₹${payablePreview.toLocaleString("en-IN")} & join`}
             </Text>
           </Pressable>
 
@@ -264,31 +270,46 @@ ${formInputs}
         </View>
       </ScrollView>
 
-      <Modal visible={payModal} animationType="slide" onRequestClose={() => setPayModal(false)}>
+      <Modal visible={showPaymentWebView} animationType="slide" onRequestClose={() => setShowPaymentWebView(false)}>
         <View style={{ flex: 1, backgroundColor: colors.bg }}>
           <View style={styles.payHeader}>
-            <Pressable onPress={() => setPayModal(false)}>
+            <Pressable
+              onPress={() => {
+                setShowPaymentWebView(false);
+                if (cashfreeOrderId) void pollPaymentStatus(cashfreeOrderId);
+              }}
+            >
               <Text style={styles.payClose}>Cancel</Text>
             </Pressable>
             <Text style={styles.payTitle}>Secure checkout</Text>
             <View style={{ width: 56 }} />
           </View>
-          {payHtml ? (
+          {paymentHtml ? (
             <WebView
               originWhitelist={["*"]}
-              source={{ html: payHtml, baseUrl: "https://payu.in" }}
+              source={{ html: paymentHtml, baseUrl: "https://cashfree.com" }}
+              onShouldStartLoadWithRequest={(req) => {
+                const u = req.url || "";
+                if (u.startsWith("tripsync://payment/success")) {
+                  setShowPaymentWebView(false);
+                  if (cashfreeOrderId) void pollPaymentStatus(cashfreeOrderId);
+                  return false;
+                }
+                if (u.startsWith("tripsync://payment/failure")) {
+                  setShowPaymentWebView(false);
+                  Alert.alert("Payment", "Payment failed or was cancelled.");
+                  return false;
+                }
+                return true;
+              }}
               onNavigationStateChange={(nav) => {
                 const u = nav.url || "";
                 if (u.includes("tripsync://payment/success")) {
-                  setPayModal(false);
-                  setPayHtml(null);
-                  const m = u.match(/txnid=([^&]+)/);
-                  const txn = m ? decodeURIComponent(m[1]) : pendingTxnId;
-                  if (txn) void pollPaymentStatus(txn);
+                  setShowPaymentWebView(false);
+                  if (cashfreeOrderId) void pollPaymentStatus(cashfreeOrderId);
                 }
                 if (u.includes("tripsync://payment/failure")) {
-                  setPayModal(false);
-                  setPayHtml(null);
+                  setShowPaymentWebView(false);
                   Alert.alert("Payment", "Payment failed or was cancelled.");
                 }
               }}
@@ -335,6 +356,23 @@ const styles = StyleSheet.create({
   },
   smallBtnText: { color: colors.text, fontWeight: "700" },
   ok: { color: colors.success, marginTop: 8, fontSize: 13 },
+  breakdownBox: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 10,
+    backgroundColor: "rgba(255,255,255,0.02)",
+    gap: 6,
+  },
+  breakdownRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  breakdownLabel: { color: colors.muted, fontSize: 13 },
+  breakdownValue: { color: colors.text, fontSize: 13, fontWeight: "600" },
+  breakdownPayable: { color: colors.success, fontSize: 14, fontWeight: "800" },
   bookBtn: {
     marginTop: 24,
     backgroundColor: colors.text,

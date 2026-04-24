@@ -1,26 +1,21 @@
 /**
- * PayU hosted checkout + organizer payouts (Express).
- * Secrets: PAYU_MERCHANT_KEY, PAYU_MERCHANT_SALT — server env only.
+ * Cashfree hosted checkout + organizer payouts (Express).
  */
 import type { Express, Request, Response } from "express";
 import type { Server } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import crypto from "crypto";
+import { Cashfree, CFEnvironment } from "cashfree-pg";
 import { computeOrganizerRevenue } from "./organizerRevenue.js";
 
 export type PaymentRoutesContext = {
   supabase: SupabaseClient;
   io: Server | null;
-  /** Public base URL for PayU surl/furl, e.g. https://api.example.com or http://192.168.1.5:3000 */
+  /** Public base URL for return/webhook links */
   backendPublicUrl: string;
   platformFeePercent: number;
-  payuKey: string;
-  payuSalt: string;
-  payuBaseUrl: string;
   adminSecretKey: string;
   incrementOrganizerCouponUsage: (couponId: number) => Promise<boolean>;
-  /** When false, PayU checkout routes are omitted (organizer + admin routes still register). */
-  enablePayuCheckout: boolean;
   /**
    * Resolve public.users id from route param (numeric id, auth UUID, or email).
    * Required for mobile clients where `user.id` may not be numeric.
@@ -28,45 +23,10 @@ export type PaymentRoutesContext = {
   resolveOrganizerId: (input: unknown) => Promise<number | null>;
 };
 
-function sha512Hex(s: string): string {
-  return crypto.createHash("sha512").update(s).digest("hex");
-}
-
-/** PayU request hash (matches Trip-Sync / PayU default pipe sequence). */
-export function payuRequestHash(params: {
-  key: string;
-  txnid: string;
-  amount: string;
-  productinfo: string;
-  firstname: string;
-  email: string;
-  salt: string;
-}): string {
-  const { key, txnid, amount, productinfo, firstname, email, salt } = params;
-  const hashStr = `${key}|${txnid}|${amount}|${productinfo}|${firstname}|${email}|||||||||||${salt}`;
-  return sha512Hex(hashStr);
-}
-
-/** PayU response verification (reverse hash). */
-export function payuResponseHash(params: {
-  salt: string;
-  status: string;
-  email: string;
-  firstname: string;
-  productinfo: string;
-  amount: string;
-  txnid: string;
-  key: string;
-}): string {
-  const { salt, status, email, firstname, productinfo, amount, txnid, key } = params;
-  const hashStr = `${salt}|${status}|||||||||||${email}|${firstname}|${productinfo}|${amount}|${txnid}|${key}`;
-  return sha512Hex(hashStr);
-}
-
-function parseTxnBookingId(txnid: string): number | null {
-  const parts = String(txnid || "").split("_");
-  const last = parts[parts.length - 1];
-  const n = Number(last);
+function parseBookingIdFromOrderId(orderId: string): number | null {
+  const m = String(orderId || "").match(/^TS_\d+_(\d+)_\d+$/);
+  if (!m) return null;
+  const n = Number(m[1]);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -80,273 +40,325 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
     io,
     backendPublicUrl,
     platformFeePercent,
-    payuKey,
-    payuSalt,
-    payuBaseUrl,
     adminSecretKey,
     incrementOrganizerCouponUsage,
-    enablePayuCheckout,
     resolveOrganizerId,
   } = ctx;
 
-  const payuPaymentPath = `${payuBaseUrl.replace(/\/$/, "")}/_payment`;
+  const cashfreeAppId = String(process.env.CASHFREE_APP_ID ?? "").trim();
+  const cashfreeSecretKey = String(process.env.CASHFREE_SECRET_KEY ?? "").trim();
+  const cashfreeBaseUrl = String(process.env.CASHFREE_BASE_URL ?? "https://sandbox.cashfree.com").trim();
+  const cashfreeApiVersion = String(process.env.CASHFREE_API_VERSION ?? "2025-01-01").trim();
+  const cashfreeEnabled = Boolean(cashfreeAppId && cashfreeSecretKey);
+  const payoutBaseUrl = `${cashfreeBaseUrl.replace(/\/$/, "")}/payout`;
 
-  async function resolveUserIdByEmail(email: string): Promise<number | null> {
-    const e = String(email || "").trim().toLowerCase();
-    if (!e) return null;
-    const { data } = await supabase.from("users").select("id").eq("email", e).maybeSingle();
-    return data?.id != null ? Number(data.id) : null;
+  const cashfree = new Cashfree(
+    cashfreeBaseUrl.includes("sandbox") ? CFEnvironment.SANDBOX : CFEnvironment.PRODUCTION,
+    cashfreeAppId,
+    cashfreeSecretKey,
+  );
+
+  const hasBookingCashfreeColsCache: { value: boolean | null } = { value: null };
+  const hasPayoutTransferColCache: { value: boolean | null } = { value: null };
+
+  function detectPublicBaseUrl(req: Request): string {
+    const explicit = String(backendPublicUrl || "").trim();
+    if (explicit && !/^https?:\/\/localhost(?::\d+)?$/i.test(explicit)) {
+      return explicit.replace(/\/$/, "");
+    }
+    const xfProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+    const xfHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
+    const host = xfHost || String(req.headers.host || "").trim();
+    const proto = xfProto || (host.includes("localhost") || host.startsWith("127.") ? "http" : "http");
+    if (host) return `${proto}://${host}`.replace(/\/$/, "");
+    return explicit.replace(/\/$/, "") || "http://localhost:3000";
   }
 
-  /** POST /api/payments/initiate */
-  const initiateHandler = async (req: Request, res: Response) => {
+  async function hasBookingCashfreeColumns(): Promise<boolean> {
+    if (hasBookingCashfreeColsCache.value != null) return hasBookingCashfreeColsCache.value;
+    const { error } = await supabase
+      .from("bookings")
+      .select("cashfree_order_id,cashfree_txn_id")
+      .limit(1);
+    hasBookingCashfreeColsCache.value = !error;
+    if (error) {
+      console.warn("[payments] bookings cashfree columns missing:", error.message);
+    }
+    return hasBookingCashfreeColsCache.value;
+  }
+
+  async function hasPayoutTransferColumn(): Promise<boolean> {
+    if (hasPayoutTransferColCache.value != null) return hasPayoutTransferColCache.value;
+    const { error } = await supabase.from("payout_requests").select("cashfree_transfer_id").limit(1);
+    hasPayoutTransferColCache.value = !error;
+    if (error) {
+      console.warn("[payments] payout_requests cashfree_transfer_id missing:", error.message);
+    }
+    return hasPayoutTransferColCache.value;
+  }
+
+  function verifyWebhook(rawBody: string, timestamp: string, signature: string): boolean {
+    const data = timestamp + rawBody;
+    const expectedSig = crypto.createHmac("sha256", cashfreeSecretKey).update(data).digest("base64");
+    return expectedSig === signature;
+  }
+
+  app.post("/api/payments/create-order", async (req: Request, res: Response) => {
+    if (!cashfreeEnabled) {
+      return res.status(503).json({ error: "Cashfree is not configured" });
+    }
     try {
       const tripId = Number(req.body?.tripId);
       const bookingId = Number(req.body?.bookingId);
-      const clientAmount = Number(req.body?.amount);
-      const userEmail = String(req.body?.userEmail ?? "").trim();
-      const userPhone = String(req.body?.userPhone ?? "").replace(/\D/g, "").slice(0, 15);
+      const amountIn = Number(req.body?.amount);
       const userName = String(req.body?.userName ?? "TripSync User").trim() || "TripSync User";
-
-      if (!Number.isFinite(tripId) || !Number.isFinite(bookingId)) {
-        return res.status(400).json({ error: "tripId and bookingId are required" });
+      const userEmail = String(req.body?.userEmail ?? "").trim().toLowerCase();
+      const userPhone = String(req.body?.userPhone ?? "9999999999").replace(/\D/g, "").slice(-10);
+      if (!Number.isFinite(tripId) || !Number.isFinite(bookingId) || !Number.isFinite(amountIn)) {
+        return res.status(400).json({ error: "tripId, bookingId and amount are required" });
       }
-
-      const uid = await resolveUserIdByEmail(userEmail);
-      if (uid == null) {
-        return res.status(400).json({ error: "Unknown user email" });
-      }
-
-      const { data: booking, error: bErr } = await supabase
+      const couponCodeHint = String(req.body?.couponCode ?? "").trim();
+      const { data: booking } = await supabase
         .from("bookings")
-        .select("id, trip_id, user_id, payment_status, final_amount, coupon_id")
+        .select("id, final_amount, payment_status, coupon_id, discount_amount")
         .eq("id", bookingId)
         .maybeSingle();
-
-      if (bErr || !booking) {
+      if (!booking) {
         return res.status(404).json({ error: "Booking not found" });
       }
-      if (Number(booking.trip_id) !== tripId || Number(booking.user_id) !== uid) {
-        return res.status(403).json({ error: "Booking does not match trip/user" });
+      const bookingStatus = String((booking as { payment_status?: unknown }).payment_status ?? "").toLowerCase();
+      if (bookingStatus === "paid" || bookingStatus === "confirmed") {
+        return res.status(409).json({ error: "Booking already paid" });
       }
-      if (String(booking.payment_status) !== "pending") {
-        return res.status(400).json({ error: "Booking is not awaiting payment" });
+      const bookingFinalAmount = Number((booking as { final_amount?: unknown }).final_amount ?? NaN);
+      const payable = Number.isFinite(bookingFinalAmount) ? bookingFinalAmount : amountIn;
+      if (!Number.isFinite(payable) || payable <= 0) {
+        return res.status(400).json({ error: "No payment required for this booking" });
+      }
+      const finalAmount = Number(payable.toFixed(2));
+      const discountAmount = Number((booking as { discount_amount?: unknown }).discount_amount ?? 0);
+      let couponCode = couponCodeHint;
+      const couponId = Number((booking as { coupon_id?: unknown }).coupon_id ?? NaN);
+      if (!couponCode && Number.isFinite(couponId)) {
+        const { data: coupon } = await supabase
+          .from("organizer_coupons")
+          .select("code")
+          .eq("id", couponId)
+          .maybeSingle();
+        couponCode = String((coupon as { code?: unknown })?.code ?? "").trim();
       }
 
-      const finalAmount = Number((booking as { final_amount?: unknown }).final_amount ?? NaN);
-      if (!Number.isFinite(finalAmount) || finalAmount <= 0) {
-        return res.status(400).json({ error: "Invalid payable amount on booking" });
+      const orderId = `TS_${tripId}_${bookingId}_${Date.now()}`;
+      const publicBaseUrl = detectPublicBaseUrl(req);
+      const noteParts = ["Trip Ticket - TripSync"];
+      if (couponCode) noteParts.push(`Coupon ${couponCode}`);
+      if (discountAmount > 0) noteParts.push(`Discount INR ${discountAmount.toFixed(0)}`);
+      const orderRequest = {
+        order_id: orderId,
+        order_amount: Number(finalAmount.toFixed(2)),
+        order_currency: "INR",
+        customer_details: {
+          customer_id: `user_${bookingId}`,
+          customer_name: userName,
+          customer_email: userEmail || "user@tripsync.app",
+          customer_phone: userPhone.length === 10 ? userPhone : "9999999999",
+        },
+        order_meta: {
+          return_url: `${publicBaseUrl}/api/payments/return?order_id={order_id}`,
+          notify_url: `${publicBaseUrl}/api/payments/webhook`,
+        },
+        order_note: noteParts.join(" | ").slice(0, 120),
+      };
+
+      const response = await cashfree.PGCreateOrder(orderRequest as any, cashfreeApiVersion);
+      const paymentSessionId = response?.data?.payment_session_id;
+      if (!paymentSessionId) {
+        return res.status(500).json({ error: "Could not create order" });
       }
-      if (Number.isFinite(clientAmount) && Math.abs(clientAmount - finalAmount) > 0.01) {
-        return res.status(400).json({ error: "Amount mismatch" });
-      }
 
-      const amountStr = finalAmount.toFixed(2);
-      const productinfo = `Trip Ticket - ${tripId}`;
-      const txnid = `TRIPSYNC_${Date.now()}_${bookingId}`;
+      // Best-effort update; do not block checkout if DB update is slow.
+      void (async () => {
+        try {
+          const updatePayload: Record<string, unknown> = { payment_status: "pending" };
+          if (await hasBookingCashfreeColumns()) updatePayload.cashfree_order_id = orderId;
+          const { error: upErr } = await supabase.from("bookings").update(updatePayload).eq("id", bookingId);
+          if (upErr) console.error("[payments/create-order] booking update:", upErr.message);
+        } catch (upErr) {
+          console.error("[payments/create-order] booking update crash:", upErr);
+        }
+      })();
 
-      const hash = payuRequestHash({
-        key: payuKey,
-        txnid,
-        amount: amountStr,
-        productinfo,
-        firstname: userName.slice(0, 60),
-        email: userEmail.toLowerCase(),
-        salt: payuSalt,
-      });
-
-      const surl = `${backendPublicUrl.replace(/\/$/, "")}/api/payments/success`;
-      const furl = `${backendPublicUrl.replace(/\/$/, "")}/api/payments/failure`;
-
+      const checkoutBase = cashfreeBaseUrl.replace(/\/$/, "");
       return res.json({
-        payuUrl: payuPaymentPath,
-        key: payuKey,
-        txnid,
-        amount: amountStr,
-        productinfo,
-        firstname: userName.slice(0, 60),
-        email: userEmail.toLowerCase(),
-        phone: userPhone || "9999999999",
-        surl,
-        furl,
-        hash,
+        orderId,
+        paymentSessionId,
+        orderAmount: finalAmount,
+        checkoutUrl: `${checkoutBase}/pg/view/sessions/${paymentSessionId}`,
+        cashfreeMode: cashfreeBaseUrl.includes("sandbox") ? "sandbox" : "production",
       });
-    } catch (e) {
-      console.error("[payments/initiate]", e);
-      return res.status(500).json({ error: "Failed to initiate payment" });
-    }
-  };
-
-  if (enablePayuCheckout && payuKey && payuSalt) {
-    app.post("/api/payments/initiate", initiateHandler);
-  } else {
-    app.post("/api/payments/initiate", (_req: Request, res: Response) => {
-      return res.status(503).json({
-        error: "PayU is not configured",
-        hint: "Set PAYU_MERCHANT_KEY and PAYU_MERCHANT_SALT in backend/.env",
+    } catch (error: any) {
+      console.error("Cashfree create order error:", error?.response?.data || error);
+      return res.status(500).json({
+        error: error?.response?.data?.message || "Could not create order",
       });
-    });
-  }
-
-  async function handlePayuReturn(req: Request, res: Response, expectSuccess: boolean) {
-    const body = req.body as Record<string, string | undefined>;
-    const status = String(body?.status ?? "");
-    const txnid = String(body?.txnid ?? "");
-    const hashFromPayu = String(body?.hash ?? "").toLowerCase();
-    const key = String(body?.key ?? payuKey);
-    const amount = String(body?.amount ?? "");
-    const productinfo = String(body?.productinfo ?? "");
-    const firstname = String(body?.firstname ?? "");
-    const email = String(body?.email ?? "");
-    const mihpayid = String(body?.mihpayid ?? "");
-
-    const expected = payuResponseHash({
-      salt: payuSalt,
-      status,
-      email,
-      firstname,
-      productinfo,
-      amount,
-      txnid,
-      key,
-    }).toLowerCase();
-
-    if (!hashFromPayu || hashFromPayu !== expected) {
-      console.warn("[payments] hash mismatch — possible tampering", { txnid, status });
-      return res.status(400).send("Invalid hash");
     }
+  });
 
-    const bookingId = parseTxnBookingId(txnid);
-    if (bookingId == null) {
-      return res.status(400).send("Invalid txnid");
-    }
+  app.post("/api/payments/webhook", async (req: Request, res: Response) => {
+    try {
+      const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body ?? "");
+      const rawBody = raw.toString();
+      const timestamp = String(req.headers["x-webhook-timestamp"] ?? "");
+      const signature = String(req.headers["x-webhook-signature"] ?? "");
+      if (!timestamp || !signature || !verifyWebhook(rawBody, timestamp, signature)) {
+        console.error("Webhook signature mismatch — possible fraud");
+        return res.status(400).json({ error: "Invalid signature" });
+      }
 
-    const { data: booking } = await supabase
-      .from("bookings")
-      .select("id, trip_id, user_id, payment_status, coupon_id")
-      .eq("id", bookingId)
-      .maybeSingle();
+      const event = JSON.parse(rawBody) as {
+        type?: string;
+        data?: {
+          order?: { order_id?: string; order_amount?: number };
+          payment?: { cf_payment_id?: string; payment_amount?: number };
+        };
+      };
+      const type = String(event?.type ?? "");
+      const orderId = String(event?.data?.order?.order_id ?? "");
+      const bookingId = parseBookingIdFromOrderId(orderId);
+      if (!bookingId) return res.status(200).json({ ok: true });
 
-    if (!booking) {
-      return res.status(404).send("Booking not found");
-    }
-
-    const tripId = Number((booking as { trip_id?: unknown }).trip_id);
-    const stLower = status.toLowerCase();
-
-    if (!expectSuccess || stLower !== "success") {
-      await supabase
+      const { data: booking } = await supabase
         .from("bookings")
-        .update({ payment_status: "failed" })
+        .select("id,trip_id,user_id,coupon_id")
         .eq("id", bookingId)
-        .eq("payment_status", "pending");
+        .maybeSingle();
+      if (!booking) return res.status(200).json({ ok: true });
 
-      if (io) {
-        io.to(`trip-${tripId}`).emit("payment:failed", {
-          bookingId,
-          tripId,
-          userId: Number((booking as { user_id?: unknown }).user_id),
-        });
-      }
-
-      return res.redirect(302, `tripsync://payment/failure?txnid=${encodeURIComponent(txnid)}`);
-    }
-
-    if (expectSuccess && stLower === "success") {
-      const paid = parseFloat(amount);
-      if (!Number.isFinite(paid) || paid <= 0) {
-        return res.status(400).send("Invalid amount");
-      }
-
-      const platformFee = paid * (platformFeePercent / 100);
-      const organizerNet = paid - platformFee;
-
-      const { error: upErr } = await supabase
-        .from("bookings")
-        .update({
+      if (type === "PAYMENT_SUCCESS_WEBHOOK") {
+        const paidAmount = Number(event?.data?.payment?.payment_amount ?? event?.data?.order?.order_amount ?? 0);
+        const platformFee = paidAmount * (platformFeePercent / 100);
+        const organizerNet = paidAmount - platformFee;
+        const payload: Record<string, unknown> = {
           payment_status: "paid",
-          payu_txn_id: mihpayid || txnid,
-          amount_paid: paid,
+          amount_paid: paidAmount,
           paid_at: new Date().toISOString(),
           platform_fee_amount: platformFee,
           organizer_net_amount: organizerNet,
           status: "confirmed",
-        })
-        .eq("id", bookingId)
-        .eq("payment_status", "pending");
+        };
+        if (await hasBookingCashfreeColumns()) {
+          payload.cashfree_txn_id = String(event?.data?.payment?.cf_payment_id ?? "");
+        }
+        const { error: upErr } = await supabase
+          .from("bookings")
+          .update(payload)
+          .eq("id", bookingId)
+          .eq("payment_status", "pending");
+        if (upErr) console.error("[payments/webhook] success update:", upErr.message);
 
-      if (upErr) {
-        console.error("[payments/success] update booking:", upErr.message);
-        return res.status(500).send("Update failed");
-      }
+        const couponId = (booking as { coupon_id?: unknown }).coupon_id;
+        if (couponId != null && Number.isFinite(Number(couponId))) {
+          const okInc = await incrementOrganizerCouponUsage(Number(couponId));
+          if (!okInc) console.warn("[payments/webhook] coupon increment failed", couponId);
+        }
 
-      const couponId = (booking as { coupon_id?: unknown }).coupon_id;
-      if (couponId != null && Number.isFinite(Number(couponId))) {
-        const okInc = await incrementOrganizerCouponUsage(Number(couponId));
-        if (!okInc) console.warn("[payments/success] coupon increment failed", couponId);
-      }
-
-      let organizerIdForEmit: number | null = null;
-      const { data: tripRow } = await supabase.from("trips").select("organizer_id").eq("id", tripId).maybeSingle();
-      if (tripRow && (tripRow as { organizer_id?: unknown }).organizer_id != null) {
-        organizerIdForEmit = Number((tripRow as { organizer_id: unknown }).organizer_id);
-      }
-
-      if (io) {
-        io.to(`trip-${tripId}`).emit("payment:confirmed", {
-          bookingId,
-          tripId,
-          userId: Number((booking as { user_id?: unknown }).user_id),
-          amount: paid,
-          organizerId: organizerIdForEmit,
-        });
-        if (organizerIdForEmit != null && Number.isFinite(organizerIdForEmit)) {
-          io.emit("payment:confirmed", {
+        if (io) {
+          io.to(`trip-${Number((booking as { trip_id?: unknown }).trip_id)}`).emit("payment:confirmed", {
             bookingId,
-            tripId,
+            tripId: Number((booking as { trip_id?: unknown }).trip_id),
             userId: Number((booking as { user_id?: unknown }).user_id),
-            amount: paid,
-            organizerId: organizerIdForEmit,
+            amount: paidAmount,
+          });
+        }
+        return res.status(200).json({ ok: true });
+      }
+
+      if (type === "PAYMENT_FAILED_WEBHOOK") {
+        await supabase.from("bookings").update({ payment_status: "failed" }).eq("id", bookingId);
+        if (io) {
+          io.to(`trip-${Number((booking as { trip_id?: unknown }).trip_id)}`).emit("payment:failed", {
+            bookingId,
+            tripId: Number((booking as { trip_id?: unknown }).trip_id),
+            userId: Number((booking as { user_id?: unknown }).user_id),
           });
         }
       }
 
-      return res.redirect(302, `tripsync://payment/success?txnid=${encodeURIComponent(txnid)}`);
+      return res.status(200).json({ ok: true });
+    } catch (e) {
+      console.error("[payments/webhook]", e);
+      return res.status(200).json({ ok: true });
     }
+  });
 
-    return res.redirect(302, `tripsync://payment/failure?txnid=${encodeURIComponent(txnid)}`);
-  }
+  app.get("/api/payments/verify/:orderId", async (req: Request, res: Response) => {
+    if (!cashfreeEnabled) return res.status(503).json({ error: "Cashfree is not configured" });
+    const orderId = String(req.params.orderId ?? "");
+    try {
+      const response = await cashfree.PGFetchOrder(orderId, cashfreeApiVersion);
+      const orderStatus = String(response?.data?.order_status ?? "ACTIVE");
+      let bookingQuery = supabase.from("bookings").select("id,payment_status,coupon_id").limit(1);
+      if (await hasBookingCashfreeColumns()) bookingQuery = bookingQuery.eq("cashfree_order_id", orderId);
+      const { data: booking } = await bookingQuery.maybeSingle();
 
-  if (enablePayuCheckout && payuKey && payuSalt) {
-    app.post("/api/payments/success", async (req: Request, res: Response) => {
-      return handlePayuReturn(req, res, true);
-    });
+      // Reconcile eventual consistency: if Cashfree says PAID but webhook hasn't updated DB yet.
+      if (booking && orderStatus === "PAID" && String(booking.payment_status ?? "") !== "paid") {
+        const bookingId = Number((booking as { id?: unknown }).id);
+        const paidAmount = Number(response?.data?.order_amount ?? 0);
+        const platformFee = paidAmount * (platformFeePercent / 100);
+        const organizerNet = paidAmount - platformFee;
+        const updatePayload: Record<string, unknown> = {
+          payment_status: "paid",
+          amount_paid: paidAmount,
+          paid_at: new Date().toISOString(),
+          platform_fee_amount: platformFee,
+          organizer_net_amount: organizerNet,
+          status: "confirmed",
+        };
+        if (await hasBookingCashfreeColumns()) {
+          updatePayload.cashfree_txn_id = String(response?.data?.cf_order_id ?? orderId);
+        }
+        const { error: upErr } = await supabase.from("bookings").update(updatePayload).eq("id", bookingId);
+        if (upErr) {
+          console.error("[payments/verify] paid reconciliation failed:", upErr.message);
+        } else {
+          const couponId = (booking as { coupon_id?: unknown }).coupon_id;
+          if (couponId != null && Number.isFinite(Number(couponId))) {
+            const okInc = await incrementOrganizerCouponUsage(Number(couponId));
+            if (!okInc) console.warn("[payments/verify] coupon increment failed", couponId);
+          }
+        }
+      }
 
-    app.post("/api/payments/failure", async (req: Request, res: Response) => {
-      return handlePayuReturn(req, res, false);
-    });
-  }
-
-  /** GET /api/payments/verify/:txnid */
-  app.get("/api/payments/verify/:txnid", async (req: Request, res: Response) => {
-    const txnid = String(req.params.txnid ?? "");
-    const bookingId = parseTxnBookingId(txnid);
-    if (bookingId == null) {
-      return res.status(400).json({ error: "Invalid txnid" });
+      // Re-read after reconciliation attempt.
+      let finalBookingQuery = supabase.from("bookings").select("id,payment_status").limit(1);
+      if (await hasBookingCashfreeColumns()) finalBookingQuery = finalBookingQuery.eq("cashfree_order_id", orderId);
+      const { data: finalBooking } = await finalBookingQuery.maybeSingle();
+      return res.json({
+        orderStatus,
+        paymentStatus: finalBooking?.payment_status ?? booking?.payment_status ?? "pending",
+        bookingId: finalBooking?.id ?? booking?.id ?? parseBookingIdFromOrderId(orderId),
+      });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.response?.data?.message || "Could not verify order" });
     }
-    const { data: booking } = await supabase
-      .from("bookings")
-      .select("payment_status, payu_txn_id, amount_paid, paid_at")
-      .eq("id", bookingId)
-      .maybeSingle();
+  });
 
-    if (!booking) return res.status(404).json({ error: "Not found" });
-    return res.json({
-      payment_status: booking.payment_status,
-      payu_txn_id: booking.payu_txn_id,
-      amount_paid: booking.amount_paid,
-      paid_at: booking.paid_at,
-    });
+  app.get("/api/payments/return", async (req: Request, res: Response) => {
+    const orderId = String(req.query.order_id ?? "");
+    if (!cashfreeEnabled || !orderId) {
+      return res.redirect(`tripsync://payment/failure?order_id=${encodeURIComponent(orderId)}`);
+    }
+    try {
+      const response = await cashfree.PGFetchOrder(orderId, cashfreeApiVersion);
+      const status = String(response?.data?.order_status ?? "");
+      if (status === "PAID") {
+        return res.redirect(`tripsync://payment/success?order_id=${encodeURIComponent(orderId)}`);
+      }
+      return res.redirect(`tripsync://payment/failure?order_id=${encodeURIComponent(orderId)}`);
+    } catch {
+      return res.redirect(`tripsync://payment/failure?order_id=${encodeURIComponent(orderId)}`);
+    }
   });
 
   /** GET /api/organizer/earnings/:userId — legacy summary; balances match revenue engine */
@@ -391,10 +403,46 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
     const from = typeof req.query.from === "string" ? req.query.from.trim() : "";
     const to = typeof req.query.to === "string" ? req.query.to.trim() : "";
     const range = from && to ? { from, to } : undefined;
+    const selectedYearRaw = Number(req.query.year);
+    const selectedYear = Number.isFinite(selectedYearRaw) ? selectedYearRaw : new Date().getFullYear();
 
     const r = await computeOrganizerRevenue(supabase, organizerId, platformFeePercent, range);
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const monthlyData = months.map((monthName, month) => ({
+      month,
+      monthName,
+      totalAmount: 0,
+      bookingCount: 0,
+    }));
+    const { data: organizerTrips } = await supabase
+      .from("trips")
+      .select("id")
+      .eq("organizer_id", organizerId);
+    const tripIds = (organizerTrips ?? []).map((t) => Number((t as { id?: unknown }).id)).filter(Number.isFinite);
+    if (tripIds.length > 0) {
+      const { data: paidRows } = await supabase
+        .from("bookings")
+        .select("paid_at, created_at, amount_paid")
+        .in("trip_id", tripIds)
+        .eq("payment_status", "paid");
+      for (const row of paidRows ?? []) {
+        const paidAt = (row as { paid_at?: unknown }).paid_at;
+        const createdAt = (row as { created_at?: unknown }).created_at;
+        const stamp = paidAt != null ? String(paidAt) : createdAt != null ? String(createdAt) : "";
+        if (!stamp) continue;
+        const dt = new Date(stamp);
+        if (!Number.isFinite(dt.getTime()) || dt.getFullYear() !== selectedYear) continue;
+        const m = dt.getMonth();
+        if (m < 0 || m > 11) continue;
+        const amt = Number((row as { amount_paid?: unknown }).amount_paid ?? 0);
+        monthlyData[m].totalAmount += Number.isFinite(amt) ? amt : 0;
+        monthlyData[m].bookingCount += 1;
+      }
+    }
     return res.json({
       ...r,
+      monthlyData,
+      selectedYear,
       transactions: r.transactions.slice(0, 30),
     });
   });
@@ -623,45 +671,91 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
     });
   });
 
-  /** POST /api/admin/payout/:requestId/update */
-  app.post("/api/admin/payout/:requestId/update", async (req: Request, res: Response) => {
+  /** POST /api/admin/payout/:requestId/process */
+  app.post("/api/admin/payout/:requestId/process", async (req: Request, res: Response) => {
     const adminKey = String(req.headers["x-admin-key"] ?? "");
-    if (!adminSecretKey || adminKey !== adminSecretKey) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
+    if (!adminSecretKey || adminKey !== adminSecretKey) return res.status(403).json({ error: "Unauthorized" });
     const requestId = Number(req.params.requestId);
-    const status = String(req.body?.status ?? "");
-    const payuTransferId = req.body?.payu_transfer_id != null ? String(req.body.payu_transfer_id) : null;
-    const failureReason = req.body?.failure_reason != null ? String(req.body.failure_reason) : null;
+    if (!Number.isFinite(requestId)) return res.status(400).json({ error: "Invalid request" });
+    if (!cashfreeEnabled) return res.status(503).json({ error: "Cashfree is not configured" });
 
-    if (!Number.isFinite(requestId) || !["completed", "failed", "processing"].includes(status)) {
-      return res.status(400).json({ error: "Invalid request" });
-    }
-
-    const { data: row } = await supabase
+    const { data: requestRow } = await supabase
       .from("payout_requests")
-      .select("organizer_id")
+      .select("id,organizer_id,net_amount")
       .eq("id", requestId)
       .maybeSingle();
+    if (!requestRow) return res.status(404).json({ error: "Payout request not found" });
 
-    const { error } = await supabase
-      .from("payout_requests")
-      .update({
-        status,
-        processed_at: new Date().toISOString(),
-        payu_transfer_id: payuTransferId,
-        failure_reason: failureReason,
-      })
-      .eq("id", requestId);
-
-    if (error) return res.status(500).json({ error: error.message });
-
-    if (io && row && (row as { organizer_id?: number }).organizer_id != null) {
-      const oid = Number((row as { organizer_id?: unknown }).organizer_id);
-      io.emit("payout:updated", { requestId, organizerId: oid, status });
+    const { data: payoutDetails } = await supabase
+      .from("organizer_payout_details")
+      .select("*")
+      .eq("user_id", Number((requestRow as { organizer_id?: unknown }).organizer_id))
+      .maybeSingle();
+    if (!payoutDetails) {
+      return res.status(400).json({ error: "Organizer payout details missing" });
     }
 
-    return res.json({ ok: true });
+    const transferId = `PAYOUT_${requestId}_${Date.now()}`;
+    const amount = Number((requestRow as { net_amount?: unknown }).net_amount ?? 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: "Invalid payout amount" });
+    }
+    const method = String((payoutDetails as { payout_method?: unknown }).payout_method ?? "upi");
+
+    const payoutResponse = await fetch(`${payoutBaseUrl}/v1/directTransfer`, {
+      method: "POST",
+      headers: {
+        "X-Client-Id": cashfreeAppId,
+        "X-Client-Secret": cashfreeSecretKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        transferId,
+        amount,
+        currency: "INR",
+        purpose: "Trip-Sync Organizer Payout",
+        beneficiary:
+          method === "upi"
+            ? {
+                name: String((payoutDetails as { bank_account_name?: unknown }).bank_account_name || "Organizer"),
+                email: "organizer@tripsync.app",
+                phone: "9999999999",
+                vpa: String((payoutDetails as { upi_id?: unknown }).upi_id || ""),
+              }
+            : {
+                name: String((payoutDetails as { bank_account_name?: unknown }).bank_account_name || "Organizer"),
+                email: "organizer@tripsync.app",
+                phone: "9999999999",
+                bankAccount: String((payoutDetails as { bank_account_number?: unknown }).bank_account_number || ""),
+                ifsc: String((payoutDetails as { bank_ifsc?: unknown }).bank_ifsc || ""),
+              },
+        remarks: `TripSync payout for organizer ${String((requestRow as { organizer_id?: unknown }).organizer_id)}`,
+      }),
+    });
+    const result = (await payoutResponse.json().catch(() => ({}))) as { status?: string; message?: string };
+
+    const ok = String(result?.status ?? "").toUpperCase() === "SUCCESS";
+    const payload: Record<string, unknown> = {
+      status: ok ? "processing" : "failed",
+      processed_at: new Date().toISOString(),
+      failure_reason: ok ? null : String(result?.message ?? "Payout failed"),
+    };
+    if (ok && (await hasPayoutTransferColumn())) {
+      payload.cashfree_transfer_id = transferId;
+    }
+    const { error: updateErr } = await supabase.from("payout_requests").update(payload).eq("id", requestId);
+    if (updateErr) return res.status(500).json({ error: updateErr.message });
+
+    if (io) {
+      const oid = Number((requestRow as { organizer_id?: unknown }).organizer_id);
+      io.emit("payout:updated", { requestId, organizerId: oid, status: payload.status });
+    }
+
+    if (!ok) {
+      console.error("Cashfree payout failed:", result);
+      return res.status(400).json({ error: String(result?.message ?? "Payout failed") });
+    }
+
+    return res.json({ ok: true, transferId, status: "processing" });
   });
 }

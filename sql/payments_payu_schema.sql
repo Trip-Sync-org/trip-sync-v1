@@ -1,12 +1,12 @@
--- PayU + organizer payouts — run in Supabase SQL Editor once.
+-- Cashfree + organizer payouts — run in Supabase SQL Editor once.
 -- Bookings: payment columns. Payout tables: details + requests.
 
--- ── Bookings: amounts & PayU metadata ─────────────────────────────────────
+-- ── Bookings: amounts & Cashfree metadata ─────────────────────────────────
 ALTER TABLE public.bookings
   ADD COLUMN IF NOT EXISTS final_amount NUMERIC(12, 2);
 
 ALTER TABLE public.bookings
-  ADD COLUMN IF NOT EXISTS payu_txn_id TEXT;
+  ADD COLUMN IF NOT EXISTS cashfree_txn_id TEXT;
 
 ALTER TABLE public.bookings
   ADD COLUMN IF NOT EXISTS amount_paid NUMERIC(12, 2);
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS public.organizer_payout_details (
 
 ALTER TABLE public.organizer_payout_details DISABLE ROW LEVEL SECURITY;
 
--- ── Payout withdrawal requests (manual processing via PayU / bank) ─────────
+-- ── Payout withdrawal requests (manual processing via Cashfree / bank) ─────
 CREATE TABLE IF NOT EXISTS public.payout_requests (
   id BIGSERIAL PRIMARY KEY,
   organizer_id BIGINT NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS public.payout_requests (
   net_amount NUMERIC(12, 2),
   requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   processed_at TIMESTAMPTZ,
-  payu_transfer_id TEXT,
+  cashfree_transfer_id TEXT,
   failure_reason TEXT,
   payout_method_snapshot TEXT
 );

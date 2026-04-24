@@ -8,7 +8,8 @@
     "deploy": "vercel --prod"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.43.0"
+    "@supabase/supabase-js": "^2.43.0",
+    "cashfree-pg": "^5.1.3"
   },
   "devDependencies": {
     "vercel": "^34.0.0"

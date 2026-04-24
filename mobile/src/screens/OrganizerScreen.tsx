@@ -30,6 +30,7 @@ import { buildRevenueSummaryHtml, shareRevenuePdf } from "../lib/revenuePdf";
 import { useAuth } from "../context/AuthContext";
 import { colors, typography } from "../theme";
 import { Card, Badge, PrimaryButton, OutlineButton } from "../components/ui";
+import { MonthlyRevenueChart } from "../components/MonthlyRevenueChart";
 import { parseDateOnlyLocal } from "../lib/tripNormalize";
 
 const TABS = [
@@ -70,6 +71,7 @@ type CouponRow = {
 
 const CAL_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const TEAL = "#00E5B0";
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function generateCouponCode(prefix: string): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -101,8 +103,14 @@ export function OrganizerScreen() {
     activeCoupons: 0,
     expiringCoupons: 0,
   });
-  const [monthlyPaidChart, setMonthlyPaidChart] = useState<number[]>(() =>
-    Array.from({ length: 12 }, () => 0),
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [monthlyData, setMonthlyData] = useState(
+    Array.from({ length: 12 }, (_, i) => ({
+      month: i,
+      monthName: MONTHS[i],
+      totalAmount: 0,
+      bookingCount: 0,
+    })),
   );
   const [coupons, setCoupons] = useState<CouponRow[]>([]);
   const [couponsFetchError, setCouponsFetchError] = useState<string | null>(null);
@@ -148,12 +156,19 @@ export function OrganizerScreen() {
     dateRange?: { from: string; to: string } | null;
     isPeriodFiltered?: boolean;
     periodEligibleForPayout?: number;
+    monthlyData?: Array<{
+      month: number;
+      monthName: string;
+      totalAmount: number;
+      bookingCount: number;
+    }>;
+    selectedYear?: number;
   };
 
   const [revenueDetail, setRevenueDetail] = useState<RevenueDetail | null>(null);
   const [txnFilter, setTxnFilter] = useState<"all" | "real" | "coupon" | "free">("all");
   const [pdfBusy, setPdfBusy] = useState(false);
-  const [payuLoading, setPayuLoading] = useState(false);
+  const [revenueLoading, setRevenueLoading] = useState(false);
 
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>("all");
   const [customFrom, setCustomFrom] = useState(() => {
@@ -267,84 +282,65 @@ export function OrganizerScreen() {
     }
   }, [user?.id]);
 
-  const loadMonthlyPaid = useCallback(async () => {
-    if (!user?.id) return;
-    const y =
-      activeRange != null
-        ? new Date(activeRange.to + "T12:00:00").getFullYear()
-        : new Date().getFullYear();
-    let qs = `?year=${y}`;
-    if (activeRange != null) {
-      qs += `&from=${encodeURIComponent(activeRange.from)}&to=${encodeURIComponent(activeRange.to)}`;
-    }
-    try {
-      const res = await apiFetch(`/api/organizers/${user.id}/monthly-revenue${qs}`);
-      if (!res.ok) return;
-      const rows = await res.json();
-      const arr = Array.from({ length: 12 }, () => 0);
-      for (const row of rows || []) {
-        const i = Number((row as { month?: number }).month);
-        if (Number.isFinite(i) && i >= 0 && i < 12) {
-          arr[i] = Number((row as { revenue?: number }).revenue || 0);
-        }
-      }
-      setMonthlyPaidChart(arr);
-    } catch {
-      /* ignore */
-    }
-  }, [user?.id, activeRange]);
-
   const loadOrganizerMoney = useCallback(async () => {
     if (!user?.id) return;
-    setPayuLoading(true);
+    setRevenueLoading(true);
     try {
-      const qs =
+      const rangeQs =
         activeRange != null
           ? `?from=${encodeURIComponent(activeRange.from)}&to=${encodeURIComponent(activeRange.to)}`
           : "";
+      const yearQs = rangeQs ? `${rangeQs}&year=${selectedYear}` : `?year=${selectedYear}`;
       const rev = await apiFetch(
-        `/api/organizer/revenue/${encodeURIComponent(String(user.id))}${qs}`,
+        `/api/organizer/revenue/${encodeURIComponent(String(user.id))}${yearQs}`,
       );
       if (rev.ok) {
         const j = (await rev.json()) as RevenueDetail;
         setRevenueDetail(j);
+        const incoming = Array.isArray(j.monthlyData) ? j.monthlyData : [];
+        const merged = MONTHS.map((monthName, month) => {
+          const found = incoming.find((m) => Number(m.month) === month);
+          return {
+            month,
+            monthName,
+            totalAmount: found ? Number(found.totalAmount || 0) : 0,
+            bookingCount: found ? Number(found.bookingCount || 0) : 0,
+          };
+        });
+        setMonthlyData(merged);
       }
     } catch {
       /* ignore */
     } finally {
-      setPayuLoading(false);
+      setRevenueLoading(false);
     }
-  }, [user?.id, activeRange]);
+  }, [user?.id, activeRange, selectedYear]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
     const tasks = [loadEvents(), loadSummary(), loadOrganizerMoney()];
-    if (activeTab === "Revenue Analytics") tasks.push(loadMonthlyPaid());
     await Promise.all(tasks);
     setRefreshing(false);
-  }, [loadEvents, loadSummary, loadOrganizerMoney, loadMonthlyPaid, activeTab]);
+  }, [loadEvents, loadSummary, loadOrganizerMoney]);
 
   useEffect(() => {
     if (activeTab !== "Revenue Analytics") return;
     void loadOrganizerMoney();
-    void loadMonthlyPaid();
-  }, [activeTab, loadOrganizerMoney, loadMonthlyPaid]);
+  }, [activeTab, loadOrganizerMoney, selectedYear]);
 
   useEffect(() => {
     if (activeTab !== "Revenue Analytics") return;
     const id = setInterval(() => {
       void loadOrganizerMoney();
-      void loadMonthlyPaid();
     }, 60000);
     return () => clearInterval(id);
-  }, [activeTab, loadOrganizerMoney, loadMonthlyPaid]);
+  }, [activeTab, loadOrganizerMoney]);
 
   useOrganizerPaymentsSocket({
     userId: user?.id != null ? Number(user.id) : undefined,
     role: user?.role,
     onPaymentConfirmed: () => {
       void loadOrganizerMoney();
-      void loadMonthlyPaid();
     },
     onPayoutUpdated: () => {
       void loadOrganizerMoney();
@@ -595,14 +591,9 @@ export function OrganizerScreen() {
     }
 
     if (activeTab === "Revenue Analytics") {
-      const maxM = Math.max(...monthlyPaidChart, 1);
-      const chartYear =
-        activeRange != null
-          ? new Date(activeRange.to + "T12:00:00").getFullYear()
-          : new Date().getFullYear();
       const now = new Date();
       const thisMonthVal =
-        chartYear === now.getFullYear() ? monthlyPaidChart[now.getMonth()] || 0 : 0;
+        selectedYear === now.getFullYear() ? monthlyData[now.getMonth()]?.totalAmount || 0 : 0;
       const r = revenueDetail;
       const periodFiltered = Boolean(r?.isPeriodFiltered);
       const cashTotal = (r?.realRevenue ?? 0) + (r?.couponRevenue ?? 0);
@@ -677,7 +668,7 @@ export function OrganizerScreen() {
             })}
           </View>
 
-          {payuLoading ? (
+          {revenueLoading ? (
             <Card style={{ padding: 24, alignItems: "center" }}>
               <ActivityIndicator color={TEAL} />
               <Text style={[styles.mutedSmall, { marginTop: 12 }]}>Loading revenue…</Text>
@@ -701,9 +692,9 @@ export function OrganizerScreen() {
                     label: "This month",
                     value: `₹${thisMonthVal.toLocaleString()}`,
                     sub:
-                      chartYear === now.getFullYear()
+                      selectedYear === now.getFullYear()
                         ? CAL_SHORT[now.getMonth()]
-                        : `${chartYear}`,
+                        : `${selectedYear}`,
                   },
                   {
                     label: "Avg per event",
@@ -724,23 +715,7 @@ export function OrganizerScreen() {
                 ))}
               </View>
 
-              <Card style={{ padding: 16, marginBottom: 12 }}>
-                <Text style={styles.sectionTitle}>Monthly Overview</Text>
-                <Text style={[styles.mutedSmall, { marginBottom: 8 }]}>
-                  Paid bookings (₹) by month · {chartYear}
-                </Text>
-                <View style={styles.chartRow}>
-                  {monthlyPaidChart.map((v, i) => {
-                    const h = Math.max(8, Math.round((v / maxM) * 100));
-                    return (
-                      <View key={i} style={styles.chartCol}>
-                        <View style={[styles.chartBar, { height: h }]} />
-                        <Text style={styles.chartLbl}>{CAL_SHORT[i]}</Text>
-                      </View>
-                    );
-                  })}
-                </View>
-              </Card>
+              <MonthlyRevenueChart data={monthlyData} year={selectedYear} onYearChange={setSelectedYear} />
 
               <Text style={[styles.sectionTitleCaps, { marginTop: 8 }]}>REVENUE BREAKDOWN</Text>
               <View style={styles.splitBar}>
