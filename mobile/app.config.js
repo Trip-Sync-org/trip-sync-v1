@@ -5,8 +5,8 @@
 module.exports = {
   expo: {
     name: "Trip-Sync",
-    slug: "react-example",
-    owner: "meetsantinfo",
+    slug: "trip-sync-deploy",
+    owner: "trip-sync",
     scheme: "tripsync",
     version: "1.0.0",
     orientation: "portrait",
@@ -63,7 +63,7 @@ module.exports = {
     ],
     extra: {
       eas: {
-        projectId: "f2782331-62fd-4357-b83f-10faf3990f55",
+        projectId: "09cc91aa-0098-4bbe-833c-b70e201e1544",
       },
       mapboxPublicToken: (process.env.EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN || "").trim(),
     },
