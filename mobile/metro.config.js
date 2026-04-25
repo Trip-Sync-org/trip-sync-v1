@@ -6,8 +6,10 @@ const path = require("path");
 const projectRoot = __dirname;
 const config = getDefaultConfig(projectRoot);
 
-// Allow importing shared `../shared/voiceConstants.js` from the repo root
-config.watchFolders = [path.resolve(projectRoot, "..")];
+// Voice JS lives under `mobile/shared` (not repo `shared/`) so we only watch the app root.
+// Including the monorepo parent in watchFolders is unnecessary and pulled two react-native
+// trees into Metro on this repo.
+config.watchFolders = [projectRoot];
 
 // Monorepo: the repo root may install a different `react-native` (and `react`) than `mobile/`.
 // `watchFolders` includes the parent, so Metro can otherwise resolve two copies and crash at runtime

@@ -1,5 +1,10 @@
 {
   "android": {
-    "package": "com.anonymous.reactexample"
+    "package": "com.tripsync.mobile"
+  },
+  "extra": {
+    "eas": {
+      "projectId": "f2782331-62fd-4357-b83f-10faf3990f55"
+    }
   }
 }

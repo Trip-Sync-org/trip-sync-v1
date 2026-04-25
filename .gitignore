@@ -7,3 +7,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Local EAS archive inspection output (eas-cli build:inspect)
+eas-archive-inspect/

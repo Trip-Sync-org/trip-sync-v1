@@ -15,6 +15,10 @@
     "build": "vite build --config frontend/vite.config.js",
     "vercel-build": "node -e \"console.log('API-only deploy: skipping Vite'); process.exit(0)\"",
     "preview": "vite preview --config frontend/vite.config.js",
+    "build:preview": "npm run build:preview --prefix mobile",
+    "build:prod": "npm run build:prod --prefix mobile",
+    "eas:android": "npm run eas:android --prefix mobile",
+    "eas:android:production": "npm run eas:android:production --prefix mobile",
     "clean": "rm -rf dist",
     "lint": "tsc -p backend/tsconfig.json --noEmit"
   },

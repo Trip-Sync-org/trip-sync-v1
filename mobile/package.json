@@ -2,12 +2,18 @@
   "name": "mobile",
   "version": "1.0.0",
   "engines": {
-    "node": ">=20.0.0 <23.0.0"
+    "node": ">=20.0.0"
   },
   "main": "index.ts",
   "scripts": {
     "check-node": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-node.ps1",
     "typecheck": "tsc --noEmit",
+    "build:preview": "node ./scripts/eas-with-staging.cjs preview",
+    "build:prod": "node ./scripts/eas-with-staging.cjs production",
+    "eas:android": "node ./scripts/eas-with-staging.cjs preview",
+    "eas:android:production": "node ./scripts/eas-with-staging.cjs production",
+    "eas:android:direct": "npx --yes eas-cli@latest build --non-interactive --platform android --profile preview",
+    "eas:android:direct:production": "npx --yes eas-cli@latest build --non-interactive --platform android --profile production",
     "expo:start": "expo start",
     "expo:tunnel": "expo start --tunnel",
     "start": "expo start",
@@ -27,6 +33,7 @@
     "expo": "~54.0.27",
     "expo-asset": "~12.0.12",
     "expo-constants": "~18.0.13",
+    "expo-font": "~14.0.11",
     "expo-image-picker": "~17.0.10",
     "expo-location": "~19.0.8",
     "expo-modules-autolinking": "3.0.24",
@@ -48,6 +55,16 @@
   "devDependencies": {
     "@types/react": "~19.1.10",
     "typescript": "~5.9.2"
+  },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "react-native-incall-manager",
+          "react-native-webrtc"
+        ]
+      }
+    }
   },
   "private": true
 }
