@@ -15,3 +15,9 @@ export const API_BASE_URL = (
 export const BACKEND_PUBLIC_URL = (
   process.env.EXPO_PUBLIC_BACKEND_URL ?? process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000"
 ).replace(/\/$/, "");
+
+export const SOCKET_URL = (
+  process.env["EXPO_PUBLIC_SOCKET_URL"] ?? 
+  process.env["EXPO_PUBLIC_API_URL"] ?? 
+  "http://localhost:4000"
+).replace(/\/+$/, "");

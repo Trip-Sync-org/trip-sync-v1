@@ -1,4 +1,5 @@
 /**
+ * backend/lib/realtime.js
  * Supabase Realtime broadcast helpers — uses the open-source Realtime server (included with Supabase).
  * No third-party paid pub/sub; events go over your Supabase project’s Realtime channels.
  */
@@ -11,6 +12,51 @@ import { supabase } from './supabase.js';
 import { EVENTS, tripChannel } from '../../shared/voiceConstants.js';
 
 export { EVENTS };
+
+// In-memory trip location store
+// Structure: tripLocations[tripId][userId] = { lat, lng, ts }
+// Never written to DB per update; overwritten on each update.
+// Cleared when trip ends or rider disconnects.
+export const tripLocations = {};
+
+// Helper: get all riders in a trip (excluding one user)
+export function getTripRiders(tripId, excludeUserId) {
+  return tripLocations[tripId]
+    ? Object.entries(tripLocations[tripId])
+        .filter(([uid]) => uid !== String(excludeUserId))
+        .map(([uid, loc]) => ({ userId: uid, ...loc }))
+    : [];
+}
+
+// Helper: upsert rider location (overwrite, no history)
+export function upsertRiderLocation(tripId, userId, lat, lng) {
+  if (!tripLocations[tripId]) tripLocations[tripId] = {};
+  tripLocations[tripId][String(userId)] = {
+    lat,
+    lng,
+    ts: Date.now(),
+  };
+}
+
+// Helper: remove rider from memory on disconnect
+export function removeRiderLocation(tripId, userId) {
+  if (tripLocations[tripId]) {
+    delete tripLocations[tripId][String(userId)];
+    if (Object.keys(tripLocations[tripId]).length === 0) {
+      delete tripLocations[tripId];
+    }
+  }
+}
+
+export function haversineMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 /**
  * Socket.IO (Express + socket.io) — checkpoint / map-pin events. No-op if `io` is missing (e.g. serverless).

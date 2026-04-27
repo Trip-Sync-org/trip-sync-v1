@@ -1,123 +1,113 @@
 import React, { useState } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  StyleSheet,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-} from "react-native";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { useAuth } from "../context/AuthContext";
-import { colors, typography } from "../theme";
-import { Card } from "../components/ui";
+import { useAuthPalette } from "../theme/authTheme";
+import {
+  AuthScreenShell,
+  CheckboxRow,
+  DividerOr,
+  GoogleButton,
+  InputField,
+  PrimaryButton,
+  RoleSwitch,
+} from "../components/auth/AuthUI";
+import { safeGoBack } from "../utils/navigation";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Login">;
 
 export function LoginScreen({ navigation }: Props) {
+  const c = useAuthPalette();
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"user" | "organizer">("user");
+  const [userType, setUserType] = useState<"explorer" | "organisor">("explorer");
+  const [rememberMe, setRememberMe] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [wrongPassword, setWrongPassword] = useState(false);
+  const [errorText, setErrorText] = useState("");
 
   const onSubmit = async () => {
+    if (!email.trim() || !password || wrongPassword) return;
     setBusy(true);
+    setErrorText("");
     try {
-      await login(email.trim(), password, role);
+      await login(email.trim(), password, userType, rememberMe);
+      setWrongPassword(false);
     } catch (e: unknown) {
-      Alert.alert("Login failed", e instanceof Error ? e.message : "Try again");
+      const msg = e instanceof Error ? e.message : "Try again";
+      setWrongPassword(true);
+      setErrorText(
+        /invalid credentials/i.test(msg)
+          ? "Incorrect password. Please try again."
+          : "Connection failed. Try again.",
+      );
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    <AuthScreenShell
+      title="Let's Sign You In"
+      subtitle="Welcome back, you've been missed!"
+      onBack={() => safeGoBack(navigation, "Onboarding")}
     >
-      <Text style={styles.welcome}>Welcome Back</Text>
-      <Text style={styles.welcomeSub}>Sign in to your NOMAD account</Text>
-      <Card style={{ padding: 20, marginTop: 8 }}>
-      <Text style={styles.label}>Email</Text>
-      <TextInput
-        style={styles.input}
-        autoCapitalize="none"
-        keyboardType="email-address"
+      <InputField
+        label="Email Address"
         value={email}
-        onChangeText={setEmail}
-        placeholder="you@example.com"
-        placeholderTextColor={colors.muted}
+        onChangeText={(v) => {
+          setEmail(v);
+          setWrongPassword(false);
+          setErrorText("");
+        }}
+        keyboardType="email-address"
+        autoCapitalize="none"
       />
-      <Text style={styles.label}>Password</Text>
-      <TextInput
-        style={styles.input}
-        secureTextEntry
+      <InputField
+        label="Password"
         value={password}
-        onChangeText={setPassword}
-        placeholder="••••••••"
-        placeholderTextColor={colors.muted}
+        onChangeText={(v) => {
+          setPassword(v);
+          setWrongPassword(false);
+          setErrorText("");
+        }}
+        secure
+        status={wrongPassword ? "error" : "default"}
       />
-      <Text style={styles.label}>I am a</Text>
-      <View style={styles.roleRow}>
-        {(["user", "organizer"] as const).map((r) => (
-          <Pressable
-            key={r}
-            onPress={() => setRole(r)}
-            style={[styles.roleChip, role === r && styles.roleChipOn]}
-          >
-            <Text style={[styles.roleText, role === r && styles.roleTextOn]}>
-              {r === "user" ? "Explorer" : "Organizer"}
-            </Text>
-          </Pressable>
-        ))}
+      {errorText ? (
+        <Text style={{ color: c.borderError, marginTop: 6, fontSize: 12 }}>{errorText}</Text>
+      ) : null}
+      <RoleSwitch value={userType} onChange={setUserType} />
+
+      <View style={{ flexDirection: "row", alignItems: "center", marginTop: 14 }}>
+        <View style={{ flex: 1 }}>
+          <CheckboxRow
+            checked={rememberMe && !wrongPassword}
+            onPress={() => setRememberMe((v) => !v)}
+            label={<Text style={{ color: c.textPrimary, fontSize: 13, fontWeight: "600" }}>Remember Me</Text>}
+          />
+        </View>
+        <Pressable onPress={() => navigation.navigate("ForgotPassword")}>
+          <Text style={{ color: c.accentOrange, fontSize: 12, fontWeight: "500" }}>Forgot Password ?</Text>
+        </Pressable>
       </View>
-      <Pressable style={[styles.btn, busy && { opacity: 0.6 }]} onPress={onSubmit} disabled={busy}>
-        <Text style={styles.btnText}>{busy ? "…" : "Sign in"}</Text>
+
+      <PrimaryButton
+        title={busy ? "Logging in..." : "Login"}
+        onPress={onSubmit}
+        disabled={busy || !email.trim() || !password || wrongPassword}
+      />
+      {busy ? <ActivityIndicator color={c.accentOrange} style={{ marginTop: 8 }} /> : null}
+      <DividerOr />
+      <GoogleButton onPress={() => {}} />
+
+      <Pressable onPress={() => navigation.navigate("Signup")} style={{ marginTop: 14 }}>
+        <Text style={{ textAlign: "center", color: c.textSecondary, fontSize: 13 }}>
+          Don't have an account ? <Text style={{ color: c.accentOrange, fontWeight: "600" }}>Sign Up</Text>
+        </Text>
       </Pressable>
-      <Pressable onPress={() => navigation.navigate("Signup")}>
-        <Text style={styles.link}>Need an account? Sign up</Text>
-      </Pressable>
-      </Card>
-    </KeyboardAvoidingView>
+    </AuthScreenShell>
   );
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg, padding: 20, paddingTop: 16 },
-  welcome: { ...typography.h1, color: colors.text, textAlign: "center" },
-  welcomeSub: { color: colors.muted, textAlign: "center", marginBottom: 16, fontSize: 14 },
-  label: { color: colors.muted, fontSize: 12, fontWeight: "600", marginBottom: 6, marginTop: 12 },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 14,
-    color: colors.text,
-    fontSize: 16,
-  },
-  roleRow: { flexDirection: "row", gap: 10, marginTop: 8 },
-  roleChip: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  roleChipOn: { backgroundColor: colors.text, borderColor: colors.text },
-  roleText: { color: colors.muted, fontWeight: "600" },
-  roleTextOn: { color: colors.bg },
-  btn: {
-    marginTop: 28,
-    backgroundColor: colors.text,
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: "center",
-  },
-  btnText: { color: colors.bg, fontWeight: "700", fontSize: 16 },
-  link: { marginTop: 20, color: colors.muted, textAlign: "center" },
-});

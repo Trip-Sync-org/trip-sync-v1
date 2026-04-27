@@ -1,5 +1,6 @@
 # Voice channel backend (Trip Sync)
 
+
 Serverless API on **Vercel** using **Supabase** (Postgres + Realtime) and **WebRTC** signaling conventions. Stack uses only free, open-source building blocks: Supabase free tier, browser/RN WebRTC, public STUN servers, Vercel serverless.
 
 ## How the full voice flow works

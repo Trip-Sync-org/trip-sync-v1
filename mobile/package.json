@@ -2,18 +2,16 @@
   "name": "mobile",
   "version": "1.0.0",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=18.18.0"
   },
   "main": "index.ts",
   "scripts": {
     "check-node": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-node.ps1",
     "typecheck": "tsc --noEmit",
-    "build:preview": "node ./scripts/eas-with-staging.cjs preview",
-    "build:prod": "node ./scripts/eas-with-staging.cjs production",
-    "eas:android": "node ./scripts/eas-with-staging.cjs preview",
-    "eas:android:production": "node ./scripts/eas-with-staging.cjs production",
-    "eas:android:direct": "npx --yes eas-cli@latest build --non-interactive --platform android --profile preview",
-    "eas:android:direct:production": "npx --yes eas-cli@latest build --non-interactive --platform android --profile production",
+    "build:preview": "npx --yes eas-cli@latest build --platform android --profile preview",
+    "build:prod": "npx --yes eas-cli@latest build --platform android --profile production",
+    "eas:android": "npx --yes eas-cli@latest build --platform android --profile preview",
+    "eas:android:production": "npx --yes eas-cli@latest build --platform android --profile production",
     "expo:start": "expo start",
     "expo:tunnel": "expo start --tunnel",
     "start": "expo start",
@@ -47,6 +45,7 @@
     "react-native-incall-manager": "^4.2.1",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
+    "react-native-svg": "15.12.1",
     "react-native-web": "^0.21.0",
     "react-native-webrtc": "^124.0.7",
     "react-native-webview": "^13.16.1",

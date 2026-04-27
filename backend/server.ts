@@ -1,4 +1,5 @@
 /**
+ * backend/server.ts
  * Backend entrypoint.
  * Loads repo-root `.env` before any other module — `server.impl` transitively imports
  * `lib/supabase.js`, which needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY at import time.

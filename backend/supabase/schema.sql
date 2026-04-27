@@ -1,5 +1,6 @@
 -- =============================================================================
 -- VOICE CHANNEL SCHEMA
+-- backend/supabase/schema.sql
 -- Run this ONCE in your Supabase project → SQL Editor → New query → Run
 -- supabase.com → your project → SQL Editor
 -- This file is NOT executed by the app — run it manually in the Supabase dashboard.

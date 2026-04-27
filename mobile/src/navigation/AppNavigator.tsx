@@ -7,9 +7,13 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { useAuth } from "../context/AuthContext";
 import { useAppTheme } from "../context/ThemeContext";
 import { colors } from "../theme";
-import { LandingScreen } from "../screens/LandingScreen";
+import { SplashScreen } from "../screens/SplashScreen";
 import { LoginScreen } from "../screens/LoginScreen";
 import { SignupScreen } from "../screens/SignupScreen";
+import { ForgotPasswordScreen } from "../screens/ForgotPasswordScreen";
+import { ResetEmailSentScreen } from "../screens/ResetEmailSentScreen";
+import { SetNewPasswordScreen } from "../screens/SetNewPasswordScreen";
+import { OnboardingScreen } from "../screens/OnboardingScreen";
 import { ExploreScreen } from "../screens/ExploreScreen";
 import { UserDashboardScreen } from "../screens/UserDashboardScreen";
 import { OrganizerScreen } from "../screens/OrganizerScreen";
@@ -19,6 +23,13 @@ import { CreateEventScreen } from "../screens/CreateEventScreen";
 import { LiveTripScreen } from "../screens/LiveTripScreen";
 import { EndTripDashboardScreen } from "../screens/EndTripDashboardScreen";
 import { PayoutScreen } from "../screens/PayoutScreen";
+import { EditProfileScreen } from "../screens/EditProfileScreen";
+import { ChangePasswordScreen } from "../screens/ChangePasswordScreen";
+import { ContactUsScreen } from "../screens/ContactUsScreen";
+import { SupportChatScreen } from "../screens/SupportChatScreen";
+import { FAQScreen } from "../screens/FAQScreen";
+import { ReferFriendsScreen } from "../screens/ReferFriendsScreen";
+import { NotificationsScreen } from "../screens/NotificationsScreen";
 import type { NavigatorScreenParams } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { navigateToRootStack } from "./navigateRoot";
@@ -100,9 +111,13 @@ function OrganizerHeaderMenu() {
 }
 
 export type RootStackParamList = {
-  Landing: undefined;
+  Splash: undefined;
+  Onboarding: undefined;
   Login: undefined;
   Signup: undefined;
+  ForgotPassword: undefined;
+  ResetEmailSent: undefined;
+  SetNewPassword: { token?: string } | undefined;
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
   TripDetail: { id: string };
   CreateEvent: undefined;
@@ -115,6 +130,13 @@ export type RootStackParamList = {
     durationSec?: number;
     riders?: number;
   };
+  EditProfile: undefined;
+  ChangePassword: undefined;
+  ContactUs: undefined;
+  SupportChat: undefined;
+  FAQ: undefined;
+  ReferFriends: undefined;
+  Notifications: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -149,7 +171,7 @@ function MainTabs() {
           headerRight: isOrg === true ? () => <OrganizerHeaderMenu /> : undefined,
         }}
       />
-      <Tab.Screen name="ProfileTab" component={ProfileScreen} options={{ title: "Profile" }} />
+      <Tab.Screen name="ProfileTab" component={ProfileScreen} options={{ title: "Profile", headerShown: false }} />
     </Tab.Navigator>
   );
 }
@@ -184,30 +206,51 @@ export function AppNavigator() {
   return (
     <NavigationContainer theme={navTheme}>
       <Stack.Navigator
+        initialRouteName="Splash"
         screenOptions={{
-          headerStyle: { backgroundColor: tc.bg },
-          headerTintColor: tc.text,
+          headerShown: false,
+          animation: "fade",
+          animationDuration: 400,
           contentStyle: { backgroundColor: tc.bg },
         }}
       >
+        <Stack.Screen name="Splash" component={SplashScreen} />
         {user == null ? (
           <>
-            <Stack.Screen name="Landing" component={LandingScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="Login" component={LoginScreen} options={{ title: "Sign in" }} />
-            <Stack.Screen name="Signup" component={SignupScreen} options={{ title: "Sign up" }} />
+            <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="Signup" component={SignupScreen} />
+            <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+            <Stack.Screen name="ResetEmailSent" component={ResetEmailSentScreen} />
+            <Stack.Screen name="SetNewPassword" component={SetNewPasswordScreen} />
           </>
         ) : (
           <>
-            <Stack.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
-            <Stack.Screen name="TripDetail" component={TripDetailScreen} options={{ title: "Trip" }} />
-            <Stack.Screen name="CreateEvent" component={CreateEventScreen} options={{ title: "Create Event" }} />
-            <Stack.Screen name="Payout" component={PayoutScreen} options={{ title: "Payout Dashboard" }} />
-            <Stack.Screen name="LiveTrip" component={LiveTripScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="Main" component={MainTabs} />
+            <Stack.Screen name="TripDetail" component={TripDetailScreen} options={{ headerShown: true, title: "Trip" }} />
+            <Stack.Screen
+              name="CreateEvent"
+              component={CreateEventScreen}
+              options={{ headerShown: true, title: "Create Event" }}
+            />
+            <Stack.Screen
+              name="Payout"
+              component={PayoutScreen}
+              options={{ headerShown: true, title: "Payout Dashboard" }}
+            />
+            <Stack.Screen name="LiveTrip" component={LiveTripScreen} />
             <Stack.Screen
               name="EndTripDashboard"
               component={EndTripDashboardScreen}
               options={{ title: "Trip summary", headerShown: true }}
             />
+            <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+            <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
+            <Stack.Screen name="ContactUs" component={ContactUsScreen} />
+            <Stack.Screen name="SupportChat" component={SupportChatScreen} />
+            <Stack.Screen name="FAQ" component={FAQScreen} />
+            <Stack.Screen name="ReferFriends" component={ReferFriendsScreen} />
+            <Stack.Screen name="Notifications" component={NotificationsScreen} />
           </>
         )}
       </Stack.Navigator>

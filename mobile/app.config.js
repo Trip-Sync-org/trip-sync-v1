@@ -11,7 +11,7 @@ module.exports = {
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/icon.png",
-    userInterfaceStyle: "light",
+    userInterfaceStyle: "automatic",
     splash: {
       image: "./assets/splash-icon.png",
       resizeMode: "contain",
@@ -46,6 +46,10 @@ module.exports = {
         monochromeImage: "./assets/android-icon-monochrome.png",
       },
       predictiveBackGestureEnabled: false,
+    },
+    androidStatusBar: {
+      backgroundColor: "#000000",
+      barStyle: "light-content",
     },
     web: {
       favicon: "./assets/favicon.png",

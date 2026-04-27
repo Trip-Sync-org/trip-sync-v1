@@ -1,4 +1,5 @@
 /**
+ * backend/api/voice/mode.js
  * POST /api/voice/mode — stores talk mode in Supabase; members must leave voice when mode is staff-only (client-side).
  */
 

@@ -1,9 +1,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useColorScheme } from "react-native";
 
 export type ColorMode = "dark" | "light";
-
-const STORAGE_KEY = "tripsync_color_mode";
 
 type ThemeColors = {
   bg: string;
@@ -42,22 +40,13 @@ type ThemeContextValue = {
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [mode, setModeState] = useState<ColorMode>("dark");
-
-  React.useEffect(() => {
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (raw === "light" || raw === "dark") setModeState(raw);
-      } catch {
-        /* ignore */
-      }
-    })();
-  }, []);
+  const systemScheme = useColorScheme();
+  const systemMode: ColorMode = systemScheme === "dark" ? "dark" : "light";
+  const [manualMode, setManualMode] = useState<ColorMode | null>(null);
+  const mode: ColorMode = manualMode ?? systemMode;
 
   const setMode = useCallback((m: ColorMode) => {
-    setModeState(m);
-    AsyncStorage.setItem(STORAGE_KEY, m).catch(() => {});
+    setManualMode(m);
   }, []);
 
   const toggleMode = useCallback(() => {

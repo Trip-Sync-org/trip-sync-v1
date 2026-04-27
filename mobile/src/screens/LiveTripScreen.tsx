@@ -24,7 +24,7 @@ import { io, type Socket } from "socket.io-client";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
-import { API_BASE_URL } from "../config";
+import { SOCKET_URL } from "../config";
 import { apiFetch, isAbortLikeError, readApiErrorMessage } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { normalizeTripFromApi, type Trip } from "../lib/tripNormalize";
@@ -89,6 +89,13 @@ type MapPin = {
   lng: number;
   label: string;
   addedBy: string;
+};
+
+type LiveRider = {
+  userId: string;
+  lat: number;
+  lng: number;
+  ts?: number;
 };
 
 const R_EARTH_KM = 6371;
@@ -264,10 +271,21 @@ function appUserNumericId(user: { id: string } | null | undefined): number | nul
 }
 
 /** REST poll for peer positions (Socket still pushes in parallel). */
-const LIVE_STATE_POLL_MS = 350;
-const LOCATION_HTTP_POST_MIN_MS = 750;
+const LIVE_STATE_POLL_MS = 2000;
+const MIN_DISTANCE_METERS = 15;
+const FAST_INTERVAL_MS = 4000;
+const NORMAL_INTERVAL_MS = 6000;
+const SLOW_INTERVAL_MS = 10000;
+const STOPPED_INTERVAL_MS = 15000;
 /** Low-pass filter for map position — reduces GPS jitter without large lag. */
 const GPS_SMOOTH_ALPHA = 0.32;
+
+function getAdaptiveInterval(speedKmh: number): number {
+  if (speedKmh > 30) return FAST_INTERVAL_MS;
+  if (speedKmh > 5) return NORMAL_INTERVAL_MS;
+  if (speedKmh > 1) return SLOW_INTERVAL_MS;
+  return STOPPED_INTERVAL_MS;
+}
 
 /** Same as older builds: parse `m{userId}` (socket rows include userId). */
 function memberUserId(m: LiveMember): number {
@@ -296,6 +314,14 @@ function liveMemberRowIsSelf(m: LiveMember, selfUid: number | null, localMid: st
     if (selfUid != null && digits === String(selfUid)) return true;
   }
   return false;
+}
+
+function mapBadgeNameForMember(m: LiveMember): string {
+  const uid = memberUserId(m);
+  const raw = String(m.name ?? "").trim();
+  const isGeneric = raw.length === 0 || /^rider\s*\d*$/i.test(raw) || /^user\s*\d*$/i.test(raw);
+  if (isGeneric && Number.isFinite(uid)) return `U${uid}`;
+  return raw || (Number.isFinite(uid) ? `U${uid}` : "Rider");
 }
 
 /** When peers are within ~45m of you, HTML markers stack — fan out slightly so every initials badge stays visible. */
@@ -386,6 +412,49 @@ function mergeLiveMembersFromApi(prev: LiveMember[], incoming: LiveMember[]): Li
 
   const extra = prev.filter((m) => !incomingIds.has(canonicalMemberIdStr(m)));
   return extra.length ? [...merged, ...extra] : merged;
+}
+
+function mergeRidersIntoMembers(prev: LiveMember[], riders: LiveRider[], selfUid: number | null): LiveMember[] {
+  if (!Array.isArray(riders) || riders.length === 0) return prev;
+  let next = [...prev];
+  for (const rider of riders) {
+    const uid = Number(rider.userId);
+    const lat = toNum(rider.lat);
+    const lng = toNum(rider.lng);
+    if (!Number.isFinite(uid) || lat == null || lng == null) continue;
+    if (selfUid != null && uid === selfUid) continue;
+    if (Math.abs(lat) <= 1e-5 && Math.abs(lng) <= 1e-5) continue;
+    const idx = next.findIndex((m) => memberUserId(m) === uid);
+    if (idx >= 0) {
+      const cur = next[idx];
+      next[idx] = {
+        ...cur,
+        lat,
+        lng,
+        status: cur.status === "absent" ? "on-way" : cur.status,
+        locationUpdatedAt: new Date().toISOString(),
+      };
+    } else {
+      next.push({
+        id: `m${uid}`,
+        userId: uid,
+        name: `Rider ${uid}`,
+        avatar: `rider-${uid}`,
+        status: "on-way",
+        role: "member",
+        muted: true,
+        blocked: false,
+        speed: 0,
+        distanceCovered: 0,
+        checkpoints: 0,
+        xpGained: 0,
+        lat,
+        lng,
+        locationUpdatedAt: new Date().toISOString(),
+      });
+    }
+  }
+  return next;
 }
 
 const SOS_OPTIONS: Array<{ id: string; label: string; icon: string; reason: string }> = [
@@ -517,6 +586,10 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const lastPosRef = useRef<{ lat: number; lng: number } | null>(null);
   /** Raw device GPS (lat/lng) for checkpoint distance — updated every fix, not smoothed, not from socket. */
   const currentPositionRef = useRef<{ lat: number; lng: number } | null>(null);
+  const lastSentLocationRef = useRef<{ lat: number; lng: number } | null>(null);
+  const lastSentTimeRef = useRef<number>(0);
+  const currentSpeedRef = useRef<number>(0);
+  const isBackgroundedRef = useRef(false);
   /** Fetched checkpoints + sticky reached; `applyCheckpointSort` writes sorted list + distances to state. */
   const checkpointsRawRef = useRef<Checkpoint[]>([]);
   /** Genuinely passed checkpoint ids: must have been >300m away then <150m (not distance-only). */
@@ -531,8 +604,6 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const sheetScrollYRef = useRef(0);
   const seenAlertIdsRef = useRef<Set<string>>(new Set());
   const lastAlertIsoRef = useRef<string>("");
-  /** Throttle REST location posts so convoy works when Socket.IO cannot reach the server. */
-  const lastLocationHttpPostRef = useRef<number>(0);
   /** Dev: throttle console logs for outgoing GPS so the terminal stays readable. */
   const lastEmitLocationLogRef = useRef<number>(0);
 
@@ -892,6 +963,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
       const body = (await res.json().catch(() => ({}))) as {
         error?: string;
         members?: LiveMember[];
+        riders?: LiveRider[];
         checkpoints?: Checkpoint[];
         mapPins?: MapPin[];
       };
@@ -909,6 +981,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
       setMapDiag(null);
       if (Array.isArray(body.members) && body.members.length > 0) {
         setMembers((prev) => mergeLiveMembersFromApi(prev, body.members!));
+      } else if (Array.isArray(body.riders) && body.riders.length > 0) {
+        setMembers((prev) => mergeRidersIntoMembers(prev, body.riders!, uid));
       }
       /* Checkpoints come from GET /api/trips/:id/checkpoints (trip_checkpoints) + socket */
       if (Array.isArray(body.mapPins)) setMapPins(body.mapPins);
@@ -1114,6 +1188,31 @@ export function LiveTripScreen({ route, navigation }: Props) {
     return () => sub.remove();
   }, [accessDenied, user?.id]);
 
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "background") {
+        isBackgroundedRef.current = true;
+        return;
+      }
+      if (state === "active") {
+        isBackgroundedRef.current = false;
+        const uid = appUserNumericId(user);
+        const pos = currentPositionRef.current;
+        if (uid != null && pos) {
+          socketRef.current?.emit("location-update", {
+            tripId: tripIdRef.current,
+            userId: uid,
+            lat: pos.lat,
+            lng: pos.lng,
+          });
+          lastSentLocationRef.current = { lat: pos.lat, lng: pos.lng };
+          lastSentTimeRef.current = Date.now();
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [user]);
+
   const fetchLiveStateRef = useRef(fetchAndMergeLiveState);
   fetchLiveStateRef.current = fetchAndMergeLiveState;
 
@@ -1149,7 +1248,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
 
     const selfUid = appUserNumericId(user);
 
-    const socket = io(API_BASE_URL, {
+    const socket = io(SOCKET_URL, {
       transports: ["polling", "websocket"],
       path: "/socket.io/",
       reconnection: true,
@@ -1166,20 +1265,18 @@ export function LiveTripScreen({ route, navigation }: Props) {
       const pos = lastPosRef.current;
       const uid = appUserNumericId(user);
       if (!pos || uid == null) return;
-      socket.emit("update-location", {
+      socket.emit("location-update", {
         tripId: tripIdNum,
         userId: uid,
         lat: pos.lat,
         lng: pos.lng,
-        speed: null,
-        heading: null,
       });
     };
 
     const joinAndAnnounce = () => {
       setMapDiag((d) => (d?.includes("Live socket") ? null : d));
-      socket.emit("join-trip", tripIdNum);
       const uid = appUserNumericId(user);
+      socket.emit("join-trip", { tripId: tripIdNum, userId: uid ?? undefined });
       if (uid != null) {
         const roleForSocket = (() => {
           const r = String(localRole || "member").toLowerCase();
@@ -1236,14 +1333,15 @@ export function LiveTripScreen({ route, navigation }: Props) {
     };
 
     const onLocationUpdated = (payload: {
-      userId: number;
+      userId?: number;
+      u?: string;
       lat: number;
       lng: number;
       speed?: number | null;
       heading?: number | null;
       ts?: number;
     }) => {
-      const puid = Number(payload.userId);
+      const puid = Number(payload.userId ?? payload.u);
       if (selfUid != null && puid === selfUid) return;
       const plat = toNum(payload.lat);
       const plng = toNum(payload.lng);
@@ -1309,6 +1407,11 @@ export function LiveTripScreen({ route, navigation }: Props) {
         ];
       });
     };
+    const onTripStateSync = (payload: { riders?: Array<{ userId: string; lat: number; lng: number }> }) => {
+      const riders = Array.isArray(payload?.riders) ? payload.riders : [];
+      if (riders.length === 0) return;
+      setMembers((prev) => mergeRidersIntoMembers(prev, riders, selfUid));
+    };
 
     const onConvoyAction = (payload: {
       kind?: string;
@@ -1343,6 +1446,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
     socket.on("rider-left", onRiderLeft);
     socket.on("location-updated", onLocationUpdated);
     socket.on("convoy-action", onConvoyAction);
+    socket.on("trip-state-sync", onTripStateSync);
     socket.on("disconnect", onDisconnect);
 
     const onCheckpointsUpdated = (payload?: {
@@ -1406,6 +1510,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
       socket.off("rider-left", onRiderLeft);
       socket.off("location-updated", onLocationUpdated);
       socket.off("convoy-action", onConvoyAction);
+      socket.off("trip-state-sync", onTripStateSync);
       socket.off("disconnect", onDisconnect);
       socket.off("checkpoints:updated", onCheckpointsUpdated);
       socket.off("map_pin:requested", onMapPinRequested);
@@ -1423,7 +1528,12 @@ export function LiveTripScreen({ route, navigation }: Props) {
       try {
         const res = await apiFetch(`/api/trips/${id}/live-state?user_id=${encodeURIComponent(String(user.id))}`);
         if (!res.ok) return;
-        const body = (await res.json().catch(() => ({}))) as { members?: LiveMember[] };
+        const body = (await res.json().catch(() => ({}))) as { members?: LiveMember[]; riders?: LiveRider[] };
+        const uid = appUserNumericId(user);
+        if (Array.isArray(body.riders) && body.riders.length > 0) {
+          setMembers((prev) => mergeRidersIntoMembers(prev, body.riders!, uid));
+          return;
+        }
         if (!Array.isArray(body.members)) return;
 
         setMembers((prev) => {
@@ -1577,15 +1687,26 @@ export function LiveTripScreen({ route, navigation }: Props) {
         mapSmoothedRef.current = { lat, lng };
         lastLocTsRef.current = first.timestamp;
         applyCheckpointSort();
+        const uidNow = appUserNumericId(user);
+        if (uidNow != null && !isBackgroundedRef.current) {
+          socketRef.current?.emit("location-update", {
+            tripId: tripIdNum,
+            userId: uidNow,
+            lat,
+            lng,
+          });
+          lastSentLocationRef.current = { lat, lng };
+          lastSentTimeRef.current = Date.now();
+        }
       } catch {
         // watcher below can still provide the first fix
       }
 
       sub = await Location.watchPositionAsync(
         {
-          accuracy: Location.Accuracy.High,
-          timeInterval: 1000,
-          distanceInterval: 4,
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 2000,
+          distanceInterval: 5,
         },
         (loc) => {
           const uidLoc = appUserNumericId(user);
@@ -1604,6 +1725,20 @@ export function LiveTripScreen({ route, navigation }: Props) {
 
           // Ignore noisy GPS drift when user is effectively stationary.
           if (prev && !movedEnough && !deviceSaysMoving) {
+            if (
+              uidLoc != null &&
+              !isBackgroundedRef.current &&
+              (lastSentTimeRef.current === 0 || Date.now() - lastSentTimeRef.current >= STOPPED_INTERVAL_MS)
+            ) {
+              socketRef.current?.emit("location-update", {
+                tripId: tripIdNum,
+                userId: uidLoc,
+                lat,
+                lng,
+              });
+              lastSentLocationRef.current = { lat, lng };
+              lastSentTimeRef.current = Date.now();
+            }
             return;
           }
 
@@ -1663,17 +1798,30 @@ export function LiveTripScreen({ route, navigation }: Props) {
             }),
           );
 
-          if (uidLoc != null) {
-            socketRef.current?.emit("update-location", {
+          const speedKmhNow = Math.max(0, (speed ?? 0) * 3.6);
+          currentSpeedRef.current = speedKmhNow;
+          const nowMs = Date.now();
+          const interval = getAdaptiveInterval(speedKmhNow);
+          const timePassed = nowMs - lastSentTimeRef.current;
+          const prevSent = lastSentLocationRef.current;
+          const distMeters = prevSent
+            ? haversineKm({ lat: prevSent.lat, lng: prevSent.lng }, { lat: outLat, lng: outLng }) * 1000
+            : Number.POSITIVE_INFINITY;
+
+          if (
+            uidLoc != null &&
+            !isBackgroundedRef.current &&
+            timePassed >= interval &&
+            distMeters >= MIN_DISTANCE_METERS
+          ) {
+            socketRef.current?.emit("location-update", {
               tripId: tripIdNum,
               userId: uidLoc,
               lat: outLat,
               lng: outLng,
-              accuracy: accuracy ?? undefined,
-              speed: speed ?? undefined,
-              heading: heading ?? undefined,
-              recordedAt: new Date(loc.timestamp).toISOString(),
             });
+            lastSentLocationRef.current = { lat: outLat, lng: outLng };
+            lastSentTimeRef.current = nowMs;
           }
 
           if (__DEV__) {
@@ -1688,22 +1836,6 @@ export function LiveTripScreen({ route, navigation }: Props) {
             }
           }
 
-          const nowMs = Date.now();
-          if (uidLoc != null && nowMs - lastLocationHttpPostRef.current >= LOCATION_HTTP_POST_MIN_MS) {
-            lastLocationHttpPostRef.current = nowMs;
-            void apiFetch(`/api/trips/${tripIdNum}/location`, {
-              method: "POST",
-              body: JSON.stringify({
-                user_id: uidLoc,
-                lat: outLat,
-                lng: outLng,
-                speed_mps:
-                  speed != null && Number.isFinite(speed) && speed >= 0 ? Number(speed) : null,
-              }),
-            }).catch(() => {
-              /* non-fatal; socket or next tick may succeed */
-            });
-          }
         },
       );
     })();
@@ -1872,13 +2004,11 @@ export function LiveTripScreen({ route, navigation }: Props) {
       if (!pos || !user?.id || !socketRef.current) return;
       const uid = appUserNumericId(user);
       if (uid == null) return;
-      socketRef.current.emit("update-location", {
+      socketRef.current.emit("location-update", {
         tripId: tripIdNum,
         userId: uid,
         lat: pos.lat,
         lng: pos.lng,
-        speed: null,
-        heading: null,
       });
     }, 800);
   }, [tripIdNum, user?.id]);
@@ -3073,15 +3203,21 @@ export function LiveTripScreen({ route, navigation }: Props) {
     return { lat, lng };
   };
   const dedupedForPins = dedupeMembersForMapPins(members);
+  const selfUidForMap =
+    appUid != null && Number.isFinite(appUid)
+      ? appUid
+      : Number.isFinite(Number(user?.id))
+        ? Number(user?.id)
+        : null;
   const mapMembersRaw = dedupedForPins
-    .filter((m) => !liveMemberRowIsSelf(m, appUid, localMemberId))
+    .filter((m) => !liveMemberRowIsSelf(m, selfUidForMap, localMemberId))
     .map((m) => {
       const c = convoyMarkerCoords(m);
       if (!c) return null;
       const i = dedupedForPins.findIndex((x) => canonicalMemberIdStr(x) === canonicalMemberIdStr(m));
       return {
         id: canonicalMemberIdStr(m),
-        name: m.name,
+        name: mapBadgeNameForMember(m),
         lat: c.lat,
         lng: c.lng,
         speed: m.speed,

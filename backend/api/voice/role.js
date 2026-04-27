@@ -1,4 +1,5 @@
 /**
+ * backend/api/voice/role.js
  * POST /api/voice/role — persists role changes in Supabase Postgres; notifies clients via Supabase Realtime.
  */
 

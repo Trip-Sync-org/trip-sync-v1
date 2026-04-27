@@ -12,17 +12,27 @@ import { apiFetch } from "../api/client";
 import { supabase } from "../lib/supabase";
 
 const STORAGE_KEY = "tripsync_user";
+const STORAGE_TOKEN_KEY = "authToken";
+const LEGACY_STORAGE_TOKEN_KEY = "tripsync_access_token";
 
 type AuthContextValue = {
   user: User | null;
+  accessToken: string | null;
   loading: boolean;
-  login: (email: string, password: string, role: "user" | "organizer") => Promise<void>;
+  login: (
+    email: string,
+    password: string,
+    userType: "explorer" | "organisor",
+    rememberMe: boolean,
+  ) => Promise<void>;
   signup: (
     email: string,
     password: string,
     name: string,
-    role: "user" | "organizer",
+    userType: "explorer" | "organisor",
   ) => Promise<void>;
+  forgotPassword: (email: string) => Promise<void>;
+  resetPassword: (token: string, newPassword: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -30,6 +40,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -39,6 +50,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (raw) {
           setUser(JSON.parse(raw) as User);
         }
+        const token =
+          (await AsyncStorage.getItem(STORAGE_TOKEN_KEY)) ||
+          (await AsyncStorage.getItem(LEGACY_STORAGE_TOKEN_KEY));
+        if (token) setAccessToken(token);
       } catch {
         /* ignore */
       } finally {
@@ -86,16 +101,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
-  const persist = useCallback(async (u: User | null) => {
-    if (u) await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(u));
-    else await AsyncStorage.removeItem(STORAGE_KEY);
+  const persist = useCallback(async (u: User | null, token: string | null, rememberMe: boolean) => {
+    if (rememberMe && u) {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(u));
+      if (token) {
+        await AsyncStorage.multiSet([
+          [STORAGE_TOKEN_KEY, token],
+          [LEGACY_STORAGE_TOKEN_KEY, token],
+        ]);
+      } else {
+        await AsyncStorage.multiRemove([STORAGE_TOKEN_KEY, LEGACY_STORAGE_TOKEN_KEY]);
+      }
+      return;
+    }
+    await AsyncStorage.removeItem(STORAGE_KEY);
+    await AsyncStorage.multiRemove([STORAGE_TOKEN_KEY, LEGACY_STORAGE_TOKEN_KEY]);
   }, []);
 
   const login = useCallback(
-    async (email: string, password: string, role: "user" | "organizer") => {
+    async (email: string, password: string, userType: "explorer" | "organisor", rememberMe: boolean) => {
+      const role = userType === "organisor" ? "organizer" : "user";
       const res = await apiFetch("/api/auth/login", {
         method: "POST",
-        body: JSON.stringify({ email, password, role }),
+        body: JSON.stringify({ email, password, role, userType }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -110,16 +138,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         xp: body.xp ?? 0,
       };
       setUser(u);
-      await persist(u);
+      const token = typeof body.access_token === "string" ? body.access_token : null;
+      setAccessToken(token);
+      await persist(u, token, rememberMe);
     },
     [persist],
   );
 
   const signup = useCallback(
-    async (email: string, password: string, name: string, role: "user" | "organizer") => {
+    async (
+      email: string,
+      password: string,
+      name: string,
+      userType: "explorer" | "organisor",
+    ) => {
+      const role = userType === "organisor" ? "organizer" : "user";
       const res = await apiFetch("/api/auth/signup", {
         method: "POST",
-        body: JSON.stringify({ email, password, name, role }),
+        body: JSON.stringify({
+          email,
+          password,
+          name,
+          fullName: name,
+          role,
+          userType,
+        }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -134,33 +177,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           : [body.error, body.hint].filter(Boolean).join(" — ") || "Sign up failed";
         throw new Error(msg);
       }
-      const u: User = {
-        id: String(body.id ?? email),
-        name: body.name || name || email.split("@")[0] || "Explorer",
-        email: body.email || email,
-        role: body.role || role,
-        level: body.level ?? 1,
-        xp: body.xp ?? 0,
-      };
-      setUser(u);
-      await persist(u);
     },
-    [persist],
+    [],
   );
+
+  const forgotPassword = useCallback(async (email: string) => {
+    const res = await apiFetch("/api/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(typeof body.error === "string" ? body.error : "Reset password request failed");
+    }
+  }, []);
+
+  const resetPassword = useCallback(async (token: string, newPassword: string) => {
+    const res = await apiFetch("/api/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, newPassword }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(typeof body.error === "string" ? body.error : "Reset password failed");
+    }
+  }, []);
 
   const logout = useCallback(async () => {
     setUser(null);
-    await persist(null);
+    setAccessToken(null);
+    await AsyncStorage.removeItem(STORAGE_KEY);
+    await AsyncStorage.multiRemove([STORAGE_TOKEN_KEY, LEGACY_STORAGE_TOKEN_KEY]);
     try {
       await supabase?.auth.signOut();
     } catch {
       /* ignore */
     }
-  }, [persist]);
+  }, []);
 
   const value = useMemo(
-    () => ({ user, loading, login, signup, logout }),
-    [user, loading, login, signup, logout],
+    () => ({ user, accessToken, loading, login, signup, forgotPassword, resetPassword, logout }),
+    [user, accessToken, loading, login, signup, forgotPassword, resetPassword, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

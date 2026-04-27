@@ -1,5 +1,7 @@
+///backend/livetripmap/registerLiveTripMapRoutes.ts
 import type { Express } from "express";
 import { registerTripCheckpointRoutes, type TripCheckpointSocketBridge } from "./tripCheckpointRoutes.js";
+import { getTripRiders } from "../lib/realtime.js";
 
 const inMemoryAlertsByTrip = new Map<
   number,
@@ -32,6 +34,13 @@ export type LiveTripMapRoutesContext = {
 
 export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesContext): void {
   let hasTripAlertsTable: boolean | null = null;
+  const liveStateCache = new Map<string, { data: { riders: Array<{ userId: string; lat: number; lng: number; ts: number }>; tripId: number }; ts: number }>();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, val] of liveStateCache.entries()) {
+      if (now - val.ts > 30000) liveStateCache.delete(key);
+    }
+  }, 30000);
   function hasAccessFromBookingRow(booking: { status?: unknown; payment_status?: unknown } | null): boolean {
     if (!booking) return false;
     const bookingStatus = String(booking.status ?? "").toLowerCase();
@@ -248,6 +257,17 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
         .maybeSingle();
       if (!hasAccessFromBookingRow(booking)) return res.status(403).json({ error: "Book the trip before going live" });
     }
+
+    const cacheKey = `live_${tripId}`;
+    const cached = liveStateCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < 2000) {
+      return res.json(cached.data);
+    }
+
+    const riders = getTripRiders(tripId, null);
+    const data = { riders, tripId };
+    liveStateCache.set(cacheKey, { data, ts: Date.now() });
+    return res.json(data);
 
     const { data: organizerRow } = await ctx.supabase
       .from("users")

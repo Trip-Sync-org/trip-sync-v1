@@ -1,4 +1,5 @@
 /**
+ * backend/payments/organizerRevenue.ts
  * Organizer revenue / payout math (paid bookings only).
  * Trips use `name` + `price`; coupons use `code` + `discount_pct`.
  */

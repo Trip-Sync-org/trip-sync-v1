@@ -1,4 +1,5 @@
 /**
+ * backend/lib/supabase.js
  * Supabase admin client — uses the open-source Supabase hosted Postgres + Auth APIs (free tier).
  * Service role key bypasses RLS for trusted server-side operations only.
  */

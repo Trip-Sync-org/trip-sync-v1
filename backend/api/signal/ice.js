@@ -1,4 +1,5 @@
 /**
+ * backend/api/signal/ice.js
  * GET /api/signal/ice — returns public STUN URLs (browser WebRTC / Google STUN — no paid API).
  * To add TURN servers later (for corporate firewalls/NAT), add them here. Cloudflare TURN has a free tier at cloudflare.com/products/cloudflare-spectrum
  */

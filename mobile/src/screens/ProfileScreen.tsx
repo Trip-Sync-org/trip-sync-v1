@@ -1,119 +1,18 @@
-import React, { useCallback, useEffect, useState } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
-  Alert,
-  ScrollView,
-  TextInput,
-  ActivityIndicator,
-} from "react-native";
-import { useNavigation } from "@react-navigation/native";
-import { navigateToRootStack } from "../navigation/navigateRoot";
+import React, { useState } from "react";
+import { Alert, Image, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { useAuth } from "../context/AuthContext";
-import { colors, typography } from "../theme";
-import { apiFetch, readApiErrorMessage } from "../api/client";
-
-const TEAL = "#2dd4bf";
-
-type PayoutMethod = "upi" | "bank";
+import { useAuthPalette } from "../theme/authTheme";
+import { ProfileLayout } from "../components/profile/ProfileLayout";
+import { navigateToRootStack } from "../navigation/navigateRoot";
+import { useNavigation } from "@react-navigation/native";
 
 export function ProfileScreen() {
+  const c = useAuthPalette();
   const { user, logout } = useAuth();
   const navigation = useNavigation();
-
-  const [payoutMethod, setPayoutMethod] = useState<PayoutMethod>("upi");
-  const [upiId, setUpiId] = useState("");
-  const [bankAccountName, setBankAccountName] = useState("");
-  const [bankName, setBankName] = useState("");
-  const [bankAccountNumber, setBankAccountNumber] = useState("");
-  const [bankAccountConfirm, setBankAccountConfirm] = useState("");
-  const [bankIfsc, setBankIfsc] = useState("");
-  const [payoutLoading, setPayoutLoading] = useState(false);
-  const [payoutSaving, setPayoutSaving] = useState(false);
-  const [payoutVerified, setPayoutVerified] = useState(false);
-  const [maskedHint, setMaskedHint] = useState<string | null>(null);
-
-  const loadPayoutDetails = useCallback(async () => {
-    if (user?.role !== "organizer" || !user?.id) return;
-    setPayoutLoading(true);
-    try {
-      const res = await apiFetch(`/api/organizer/payout-details/${user.id}`);
-      const row = await res.json().catch(() => null);
-      if (!res.ok || !row) {
-        setMaskedHint(null);
-        return;
-      }
-      const m = String(row.payout_method ?? "upi") === "bank" ? "bank" : "upi";
-      setPayoutMethod(m);
-      if (m === "upi") setUpiId(String(row.upi_id ?? ""));
-      if (m === "bank") {
-        setBankAccountName(String(row.bank_account_name ?? ""));
-        setBankName(String(row.bank_name ?? ""));
-        setBankIfsc(String(row.bank_ifsc ?? ""));
-        setMaskedHint(
-          typeof row.bank_account_number_masked === "string" ? row.bank_account_number_masked : null,
-        );
-      }
-      setPayoutVerified(Boolean(row.is_verified));
-    } finally {
-      setPayoutLoading(false);
-    }
-  }, [user?.id, user?.role]);
-
-  useEffect(() => {
-    void loadPayoutDetails();
-  }, [loadPayoutDetails]);
-
-  const upiValid =
-    /^[^\s@]+@[^\s@]+$/.test(upiId.trim()) && /\.[a-zA-Z]{2,}/.test((upiId.split("@")[1] ?? "").trim());
-
-  const ifscValid = /^[A-Z]{4}0[A-Z0-9]{6}$/.test(bankIfsc.trim().toUpperCase());
-  const bankNumbersMatch =
-    bankAccountNumber.length > 0 && bankAccountNumber === bankAccountConfirm;
-
-  const onSavePayout = async () => {
-    if (!user?.id) return;
-    if (payoutMethod === "upi") {
-      if (!upiValid) {
-        Alert.alert("UPI", "Enter a valid UPI ID (e.g. name@paytm).");
-        return;
-      }
-    } else {
-      if (!bankAccountName.trim() || !bankName.trim() || !bankAccountNumber || !ifscValid || !bankNumbersMatch) {
-        Alert.alert("Bank", "Fill all bank fields; IFSC must be like ABCD0123456; account numbers must match.");
-        return;
-      }
-    }
-
-    setPayoutSaving(true);
-    try {
-      const body =
-        payoutMethod === "upi"
-          ? { userId: Number(user.id), payoutMethod: "upi", upiId: upiId.trim() }
-          : {
-              userId: Number(user.id),
-              payoutMethod: "bank",
-              bankAccountName: bankAccountName.trim(),
-              bankName: bankName.trim(),
-              bankAccountNumber: bankAccountNumber.trim(),
-              bankIfsc: bankIfsc.trim().toUpperCase(),
-            };
-      const res = await apiFetch("/api/organizer/payout-details", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        Alert.alert("Save failed", await readApiErrorMessage(res));
-        return;
-      }
-      Alert.alert("Saved", "Payout method saved.");
-      void loadPayoutDetails();
-    } finally {
-      setPayoutSaving(false);
-    }
-  };
+  const [pushNotifs, setPushNotifs] = useState(true);
+  const [promoNotifs, setPromoNotifs] = useState(true);
+  const avatarUri = `https://api.dicebear.com/7.x/avataaars/png?seed=${encodeURIComponent(user?.name || "User")}`;
 
   const onLogout = () => {
     Alert.alert("Sign out?", undefined, [
@@ -123,232 +22,145 @@ export function ProfileScreen() {
   };
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      <Text style={styles.name}>{user?.name ?? "—"}</Text>
-      <Text style={styles.email}>{user?.email}</Text>
-      <Text style={styles.role}>{user?.role === "organizer" ? "Organizer" : "Explorer"}</Text>
+    <ProfileLayout navigation={navigation} title="Profile" fallback="Main">
+      <View style={styles.center}>
+        <Pressable onPress={() => navigateToRootStack(navigation, "EditProfile")}>
+          <Image source={{ uri: avatarUri }} style={styles.avatar} />
+        </Pressable>
+        <Text style={[styles.name, { color: c.textPrimary }]}>{user?.name || "User"}</Text>
+        <Text style={[styles.email, { color: c.textSecondary }]}>{user?.email || ""}</Text>
+        <Pressable
+          style={[styles.editBtn, { borderColor: c.accentOrange }]}
+          onPress={() => navigateToRootStack(navigation, "EditProfile")}
+        >
+          <Text style={[styles.editText, { color: c.accentOrange }]}>Edit</Text>
+        </Pressable>
+      </View>
 
-      {user?.role === "organizer" && (
-        <>
-          <Pressable
-            style={styles.btn}
-            onPress={() => navigateToRootStack(navigation, "CreateEvent")}
-          >
-            <Text style={styles.btnText}>Create event</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.btn, { backgroundColor: "rgba(45,212,191,0.12)" }]}
-            onPress={() => navigateToRootStack(navigation, "Payout")}
-          >
-            <Text style={[styles.btnText, { color: TEAL }]}>Payout dashboard</Text>
-          </Pressable>
+      <Text style={[styles.sectionLabel, { color: c.accentOrange }]}>GENERAL</Text>
+      <View style={[styles.card, { backgroundColor: c.bgCard, borderColor: c.borderDefault }]}>
+        <MenuItem icon="💳" title="Payment Methods" subtitle="Add your credit & debit cards" onPress={() => {}} c={c} />
+        <MenuItem icon="📍" title="Locations" subtitle="Add your home & work locations" onPress={() => {}} c={c} />
+        <MenuItem icon="📷" title="Add Social Account" subtitle="Add Facebook, Instagram, Twitter etc" onPress={() => {}} c={c} />
+        <MenuItem icon="🎁" title="Refer to Friends" subtitle="Get $10 for referring friends" onPress={() => navigateToRootStack(navigation, "ReferFriends")} c={c} last />
+      </View>
 
-          <Text style={styles.sectionLabel}>EARNINGS PAYOUT</Text>
-          {payoutLoading ? (
-            <ActivityIndicator color={TEAL} style={{ marginVertical: 16 }} />
-          ) : (
-            <>
-              <View style={styles.methodRow}>
-                <Pressable
-                  onPress={() => setPayoutMethod("upi")}
-                  style={[
-                    styles.methodCard,
-                    payoutMethod === "upi" && { borderColor: TEAL, borderWidth: 2 },
-                  ]}
-                >
-                  <Text style={[styles.methodLabel, payoutMethod === "upi" && { color: TEAL }]}>
-                    UPI ID
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setPayoutMethod("bank")}
-                  style={[
-                    styles.methodCard,
-                    payoutMethod === "bank" && { borderColor: TEAL, borderWidth: 2 },
-                  ]}
-                >
-                  <Text style={[styles.methodLabel, payoutMethod === "bank" && { color: TEAL }]}>
-                    Bank Account
-                  </Text>
-                </Pressable>
-              </View>
+      <Text style={[styles.sectionLabel, { color: c.accentOrange }]}>NOTIFICATIONS</Text>
+      <View style={[styles.card, { backgroundColor: c.bgCard, borderColor: c.borderDefault }]}>
+        <ToggleRow
+          icon="🔔"
+          title="Push Notifications"
+          subtitle="For daily update and others."
+          value={pushNotifs}
+          onChange={setPushNotifs}
+          c={c}
+        />
+        <ToggleRow
+          icon="📢"
+          title="Promotional Notifications"
+          subtitle="New Campaign & Offers"
+          value={promoNotifs}
+          onChange={setPromoNotifs}
+          c={c}
+          last
+        />
+      </View>
 
-              {payoutVerified ? (
-                <View style={styles.badgeOk}>
-                  <Text style={styles.badgeOkText}>Verified</Text>
-                </View>
-              ) : null}
-
-              {payoutMethod === "upi" ? (
-                <View style={styles.field}>
-                  <Text style={typography.label}>UPI ID</Text>
-                  <View style={styles.inputRow}>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="yourname@upi"
-                      placeholderTextColor={colors.muted2}
-                      value={upiId}
-                      onChangeText={setUpiId}
-                      keyboardType="email-address"
-                      autoCapitalize="none"
-                    />
-                    {upiValid ? <Text style={styles.check}>✓</Text> : null}
-                  </View>
-                </View>
-              ) : (
-                <>
-                  <View style={styles.field}>
-                    <Text style={typography.label}>Account holder name</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Name as per bank"
-                      placeholderTextColor={colors.muted2}
-                      value={bankAccountName}
-                      onChangeText={setBankAccountName}
-                    />
-                  </View>
-                  <View style={styles.field}>
-                    <Text style={typography.label}>Bank name</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Bank name"
-                      placeholderTextColor={colors.muted2}
-                      value={bankName}
-                      onChangeText={setBankName}
-                    />
-                  </View>
-                  <View style={styles.field}>
-                    <Text style={typography.label}>Account number</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Account number"
-                      placeholderTextColor={colors.muted2}
-                      value={bankAccountNumber}
-                      onChangeText={setBankAccountNumber}
-                      keyboardType="number-pad"
-                      secureTextEntry
-                    />
-                    {maskedHint ? (
-                      <Text style={styles.hint}>On file: {maskedHint}</Text>
-                    ) : null}
-                  </View>
-                  <View style={styles.field}>
-                    <Text style={typography.label}>Confirm account number</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Re-enter account number"
-                      placeholderTextColor={colors.muted2}
-                      value={bankAccountConfirm}
-                      onChangeText={setBankAccountConfirm}
-                      keyboardType="number-pad"
-                      secureTextEntry
-                    />
-                  </View>
-                  <View style={styles.field}>
-                    <Text style={typography.label}>IFSC</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="ABCD0123456"
-                      placeholderTextColor={colors.muted2}
-                      value={bankIfsc}
-                      onChangeText={(t) => setBankIfsc(t.toUpperCase())}
-                      autoCapitalize="characters"
-                      maxLength={11}
-                    />
-                    {ifscValid ? <Text style={styles.check}>✓</Text> : null}
-                  </View>
-                </>
-              )}
-
-              <Pressable
-                style={[styles.btnTeal, payoutSaving && { opacity: 0.7 }]}
-                onPress={() => void onSavePayout()}
-                disabled={payoutSaving}
-              >
-                <Text style={styles.btnTealText}>{payoutSaving ? "Saving…" : "Save payout method"}</Text>
-              </Pressable>
-            </>
-          )}
-        </>
-      )}
-
-      <Pressable style={styles.outline} onPress={onLogout}>
-        <Text style={styles.outlineText}>Sign out</Text>
-      </Pressable>
-    </ScrollView>
+      <Text style={[styles.sectionLabel, { color: c.accentOrange }]}>MORE</Text>
+      <View style={[styles.card, { backgroundColor: c.bgCard, borderColor: c.borderDefault }]}>
+        <MenuItem icon="📞" title="Contact Us" subtitle="For more information" onPress={() => navigateToRootStack(navigation, "ContactUs")} c={c} />
+        <Pressable style={styles.rowNoBorder} onPress={onLogout}>
+          <Text style={styles.rowIcon}>🚪</Text>
+          <View style={styles.menuText}>
+            <Text style={[styles.menuTitle, { color: "#E05555" }]}>Logout</Text>
+          </View>
+        </Pressable>
+      </View>
+    </ProfileLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: 20, paddingBottom: 48 },
-  name: { color: colors.text, fontSize: 24, fontWeight: "800" },
-  email: { color: colors.muted, marginTop: 6 },
-  role: { color: colors.muted, marginTop: 4, fontSize: 13 },
-  btn: {
-    marginTop: 28,
-    backgroundColor: colors.text,
-    paddingVertical: 14,
-    borderRadius: 14,
+  center: { alignItems: "center", paddingVertical: 6 },
+  avatar: { width: 80, height: 80, borderRadius: 40 },
+  name: { fontSize: 26 / 1.54, fontWeight: "700", marginTop: 10 },
+  email: { fontSize: 12, marginTop: 2 },
+  editBtn: {
+    borderWidth: 1.5,
+    borderRadius: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 6,
+    marginTop: 10,
+  },
+  editText: { fontSize: 13, fontWeight: "600" },
+  sectionLabel: { fontSize: 12, fontWeight: "700", letterSpacing: 1.2, marginTop: 20, marginBottom: 8 },
+  card: { borderWidth: 1, borderRadius: 14 },
+  menuRow: {
+    flexDirection: "row",
     alignItems: "center",
+    padding: 16,
+    borderBottomWidth: 1,
   },
-  btnText: { color: colors.bg, fontWeight: "800" },
-  sectionLabel: {
-    marginTop: 28,
-    marginBottom: 12,
-    color: colors.muted2,
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 1.2,
-  },
-  methodRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
-  methodCard: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    alignItems: "center",
-  },
-  methodLabel: { color: colors.muted, fontWeight: "700", fontSize: 13 },
-  field: { marginBottom: 14 },
-  inputRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  input: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 12,
-    color: colors.text,
-    backgroundColor: colors.surface,
-  },
-  check: { color: colors.success, fontSize: 20, fontWeight: "800" },
-  hint: { color: colors.muted, fontSize: 12, marginTop: 6 },
-  badgeOk: {
-    alignSelf: "flex-start",
-    backgroundColor: "rgba(52,211,153,0.15)",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    marginBottom: 12,
-  },
-  badgeOkText: { color: colors.success, fontWeight: "700", fontSize: 12 },
-  btnTeal: {
-    marginTop: 8,
-    backgroundColor: TEAL,
-    paddingVertical: 14,
-    borderRadius: 14,
-    alignItems: "center",
-  },
-  btnTealText: { color: "#000", fontWeight: "800" },
-  outline: {
-    marginTop: 24,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: 14,
-    borderRadius: 14,
-    alignItems: "center",
-  },
-  outlineText: { color: colors.text, fontWeight: "700" },
+  rowNoBorder: { flexDirection: "row", alignItems: "center", padding: 16 },
+  rowIcon: { width: 22, fontSize: 14 },
+  menuText: { flex: 1 },
+  menuTitle: { fontSize: 15, fontWeight: "600" },
+  menuSubtitle: { fontSize: 12, marginTop: 2 },
+  arrow: { fontSize: 19, marginLeft: 6 },
 });
+
+function MenuItem({
+  icon,
+  title,
+  subtitle,
+  onPress,
+  c,
+  last,
+}: {
+  icon: string;
+  title: string;
+  subtitle: string;
+  onPress: () => void;
+  c: ReturnType<typeof useAuthPalette>;
+  last?: boolean;
+}) {
+  return (
+    <Pressable style={[styles.menuRow, { borderBottomColor: c.borderDefault, borderBottomWidth: last ? 0 : 1 }]} onPress={onPress}>
+      <Text style={styles.rowIcon}>{icon}</Text>
+      <View style={styles.menuText}>
+        <Text style={[styles.menuTitle, { color: c.textPrimary }]}>{title}</Text>
+        <Text style={[styles.menuSubtitle, { color: c.textSecondary }]}>{subtitle}</Text>
+      </View>
+      <Text style={[styles.arrow, { color: c.textSecondary }]}>›</Text>
+    </Pressable>
+  );
+}
+
+function ToggleRow({
+  icon,
+  title,
+  subtitle,
+  value,
+  onChange,
+  c,
+  last,
+}: {
+  icon: string;
+  title: string;
+  subtitle: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+  c: ReturnType<typeof useAuthPalette>;
+  last?: boolean;
+}) {
+  return (
+    <View style={[styles.menuRow, { borderBottomColor: c.borderDefault, borderBottomWidth: last ? 0 : 1 }]}>
+      <Text style={styles.rowIcon}>{icon}</Text>
+      <View style={styles.menuText}>
+        <Text style={[styles.menuTitle, { color: c.textPrimary }]}>{title}</Text>
+        <Text style={[styles.menuSubtitle, { color: c.textSecondary }]}>{subtitle}</Text>
+      </View>
+      <Switch value={value} onValueChange={onChange} trackColor={{ false: "#555", true: "#4FA88A" }} thumbColor="#FFFFFF" />
+    </View>
+  );
+}

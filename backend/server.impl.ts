@@ -1,3 +1,4 @@
+///backend/server.impl.ts
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
@@ -9,6 +10,8 @@ import { existsSync } from "fs";
 import { createSupabaseServerClient } from "./src/lib/supabaseServerClient.js";
 import { registerLiveTripMapRoutes } from "./livetripmap/registerLiveTripMapRoutes.js";
 import { registerPaymentRoutes } from "./payments/registerPaymentRoutes.js";
+import compression from "compression";
+import { getTripRiders, haversineMeters, removeRiderLocation, upsertRiderLocation, tripLocations } from "./lib/realtime.js";
 
 /** Non-loopback IPv4 addresses — use these on your phone (same Wi‑Fi), not `localhost`. */
 function lanIPv4Urls(port: number): string[] {
@@ -60,6 +63,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     express.raw({ type: "application/json" }),
     (_req, _res, next) => next(),
   );
+  app.use(compression());
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
@@ -2015,6 +2019,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
   // Real-time Socket Logic
   if (shouldListen && io) {
     const tripRiders = checkpointSocketBridge.tripRiders;
+    const voiceRooms = new Map<number, Set<string>>();
     /** Key `tripId:userId` — cancel delayed disconnect when same rider reconnects (identify). */
     const pendingDisconnectCleanup = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -2045,10 +2050,15 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       let myTripId: number | null = null;
       let myUserId: number | null = null;
 
-      socket.on("join-trip", (tripId: unknown) => {
-        const tid = Number(tripId);
+      socket.on("join-trip", (payload: unknown) => {
+        const p = payload as { tripId?: unknown; userId?: unknown } | number | string;
+        const tid = Number(typeof p === "object" && p != null ? p.tripId : p);
+        const joinUserId = Number(typeof p === "object" && p != null ? p.userId : NaN);
         if (!Number.isFinite(tid)) return;
         myTripId = tid;
+        if (Number.isFinite(joinUserId)) {
+          myUserId = joinUserId;
+        }
         const room = `trip-${Number(tid)}`;
         socket.rooms.forEach((r) => {
           if (r !== socket.id) socket.leave(r);
@@ -2057,6 +2067,11 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
         if (myUserId != null && Number.isFinite(myUserId)) {
           if (!tripRiders.has(tid)) tripRiders.set(tid, new Map());
           tripRiders.get(tid)!.set(myUserId, socket.id);
+          const currentRiders = getTripRiders(tid, myUserId);
+          if (currentRiders.length > 0) {
+            socket.emit("trip-state-sync", { riders: currentRiders });
+          }
+          socket.to(room).emit("rider-joined", { userId: myUserId });
         }
         console.log(`[socket] ${socket.id} joined ${room}`);
       });
@@ -2141,20 +2156,14 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
         });
       });
 
-      socket.on("update-location", async ({ tripId, userId, lat, lng, accuracy, speed, heading, recordedAt }) => {
+      const onLocationUpdate = async ({ tripId, userId, lat, lng }: { tripId?: unknown; userId?: unknown; lat?: unknown; lng?: unknown }) => {
         const latNum = toFiniteNumber(lat);
         const lngNum = toFiniteNumber(lng);
         const tripIdNum = Number(tripId);
         const userIdNum = Number(userId);
-        if (
-          !Number.isFinite(tripIdNum) ||
-          !Number.isFinite(userIdNum) ||
-          latNum === null ||
-          lngNum === null ||
-          !isValidLatLng(latNum, lngNum)
-        ) {
-          return;
-        }
+        if (!Number.isFinite(tripIdNum) || !Number.isFinite(userIdNum) || latNum === null || lngNum === null) return;
+        if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) return;
+        if (!isValidLatLng(latNum, lngNum)) return;
 
         myTripId = tripIdNum;
         myUserId = userIdNum;
@@ -2162,52 +2171,21 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
         if (!tripRiders.has(tripIdNum)) tripRiders.set(tripIdNum, new Map());
         tripRiders.get(tripIdNum)!.set(userIdNum, socket.id);
 
-        const speedMps = toFiniteNumber(speed);
-        const headingNum =
-          heading != null && Number.isFinite(Number(heading)) ? Number(heading) : null;
+        const prev = tripLocations[tripIdNum]?.[String(userIdNum)];
+        if (prev) {
+          const dist = haversineMeters(prev.lat, prev.lng, latNum, lngNum);
+          if (dist < 15) return;
+        }
 
+        upsertRiderLocation(tripIdNum, userIdNum, latNum, lngNum);
         socket.to(room).emit("location-updated", {
-          userId: Number(userIdNum),
+          u: String(userIdNum),
           lat: Number(latNum),
           lng: Number(lngNum),
-          speed: speedMps,
-          heading: headingNum,
-          ts: Date.now(),
         });
-
-        const nowIso = new Date().toISOString();
-        try {
-          const { error: locUpsertErr } = await supabase.from("trip_participant_locations").upsert(
-            {
-              trip_id: tripIdNum,
-              user_id: userIdNum,
-              lat: latNum,
-              lng: lngNum,
-              speed_mps: speedMps,
-              updated_at: nowIso,
-            },
-            { onConflict: "trip_id,user_id" },
-          );
-          if (locUpsertErr) console.error("[socket] location upsert failed:", locUpsertErr);
-        } catch (err) {
-          console.error("[socket] location upsert failed:", err);
-        }
-
-        try {
-          await supabase.from("trip_location_events").insert({
-            trip_id: tripIdNum,
-            user_id: userIdNum,
-            lat: latNum,
-            lng: lngNum,
-            accuracy_m: toFiniteNumber(accuracy),
-            speed_mps: speedMps,
-            heading_deg: toFiniteNumber(heading),
-            recorded_at: recordedAt ? new Date(recordedAt).toISOString() : nowIso,
-          });
-        } catch {
-          /* optional analytics table */
-        }
-      });
+      };
+      socket.on("location-update", onLocationUpdate);
+      socket.on("update-location", onLocationUpdate);
 
       socket.on("send-message", ({ tripId, userId, message }) => {
         io.to(`trip-${tripId}`).emit("new-message", { userId, message, timestamp: new Date() });
@@ -2241,14 +2219,64 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
         (payload: { tripId?: unknown; toUserId?: unknown; fromUserId?: unknown; signal?: unknown }) => {
           const tripId = Number(payload?.tripId);
           if (!Number.isFinite(tripId)) return;
-          const room = `trip-${Number(tripId)}`;
-          io.to(room).emit("voice-signal", {
-            fromUserId: Number(payload.fromUserId),
-            toUserId: Number(payload.toUserId),
+          const toUserId = Number(payload?.toUserId);
+          const fromUserId = Number(payload?.fromUserId);
+          if (toUserId === -1) {
+            io.to(`trip-${Number(tripId)}`).emit("voice-signal", {
+              fromUserId,
+              toUserId,
+              signal: payload.signal,
+            });
+            return;
+          }
+          const targetSocketId = tripRiders.get(tripId)?.get(toUserId);
+          if (!targetSocketId) return;
+          io.to(targetSocketId).emit("voice-signal", {
+            fromUserId,
+            toUserId,
             signal: payload.signal,
           });
         },
       );
+      socket.on("voice:join", ({ tripId }: { tripId?: unknown }) => {
+        const tid = Number(tripId);
+        if (!Number.isFinite(tid)) return;
+        if (!voiceRooms.has(tid)) voiceRooms.set(tid, new Set());
+        const room = `trip-${tid}`;
+        voiceRooms.get(tid)!.add(socket.id);
+        socket.to(room).emit("voice:peer-joined", {
+          peerId: socket.id,
+          userId: myUserId,
+        });
+      });
+      socket.on(
+        "voice:ice-candidate",
+        ({ candidate, targetSocketId }: { candidate?: unknown; targetSocketId?: unknown }) => {
+          const sid = String(targetSocketId ?? "");
+          if (!sid) return;
+          io.to(sid).emit("voice:ice-candidate", {
+            candidate,
+            fromSocketId: socket.id,
+          });
+        },
+      );
+      socket.on("voice:offer", ({ sdp, targetSocketId }: { sdp?: unknown; targetSocketId?: unknown }) => {
+        const sid = String(targetSocketId ?? "");
+        if (!sid) return;
+        io.to(sid).emit("voice:offer", {
+          sdp,
+          fromSocketId: socket.id,
+          userId: myUserId,
+        });
+      });
+      socket.on("voice:answer", ({ sdp, targetSocketId }: { sdp?: unknown; targetSocketId?: unknown }) => {
+        const sid = String(targetSocketId ?? "");
+        if (!sid) return;
+        io.to(sid).emit("voice:answer", {
+          sdp,
+          fromSocketId: socket.id,
+        });
+      });
 
       socket.on("disconnect", (reason: string) => {
         const tid = myTripId;
@@ -2263,6 +2291,8 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
         const room = `trip-${Number(tid)}`;
         voiceRiders.get(tid)?.delete(uid);
         io.to(room).emit("voice-rider-left", { userId: uid });
+        voiceRooms.get(tid)?.delete(socket.id);
+        if (voiceRooms.get(tid)?.size === 0) voiceRooms.delete(tid);
         const pendKey = `${tid}:${uid}`;
         const prevPend = pendingDisconnectCleanup.get(pendKey);
         if (prevPend) clearTimeout(prevPend);
@@ -2278,18 +2308,13 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
           tripRiders.get(tid)?.delete(uid);
           io.to(room).emit("trip-member-presence", { userId: uid, online: false });
           io.to(room).emit("rider-left", { userId: uid });
-          try {
-            const { error: delErr } = await supabase
-              .from("trip_participant_locations")
-              .delete()
-              .eq("trip_id", tid)
-              .eq("user_id", uid);
-            if (delErr) console.error("[socket] location delete after disconnect:", delErr.message);
-          } catch (err) {
-            console.error("[socket] location delete after disconnect:", err);
-          }
+          removeRiderLocation(tid, uid);
         }, 12000);
         pendingDisconnectCleanup.set(pendKey, timer);
+        for (const [tripId, riders] of voiceRooms.entries()) {
+          riders.delete(socket.id);
+          if (riders.size === 0) voiceRooms.delete(tripId);
+        }
       });
     });
   }

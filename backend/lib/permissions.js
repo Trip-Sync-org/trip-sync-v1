@@ -1,4 +1,5 @@
 /**
+ * backend/lib/permissions.js
  * Role checks for the voice API — permissions are defined in shared/voiceConstants.js (no external API).
  * Replace getAuthContext with Supabase Auth JWT verification when you wire real auth.
  */

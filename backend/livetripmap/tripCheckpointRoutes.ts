@@ -1,4 +1,6 @@
+///backend/livetripmap/tripCheckpointRoutes.ts
 // @ts-nocheck — imports JS modules without declarations
+
 import type { Express } from "express";
 import type { Server } from "socket.io";
 import { isTripStaffRole } from "../lib/permissions.js";

@@ -1,4 +1,5 @@
 /**
+ * backend/api/voice/mute.js
  * POST /api/voice/mute — updates mute flag in Supabase; WebRTC mute is enforced on the client when clients receive the broadcast.
  */
 

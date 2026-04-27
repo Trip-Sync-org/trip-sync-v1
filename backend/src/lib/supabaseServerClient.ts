@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 // Server-side Supabase client.
+///backend/src/lib/supabaseServerClient.ts
 // IMPORTANT: This file must only be imported in server / backend code
 // (e.g. Express routes, server-side scripts, Cloud Functions).
 //

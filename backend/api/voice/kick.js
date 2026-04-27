@@ -1,5 +1,6 @@
 /**
- * POST /api/voice/kick — blocks and/or mutes in Supabase; clients must tear down WebRTC when they receive PARTICIPANT_KICKED.
+ * backend/api/voice/kick.js
+ *  POST /api/voice/kick — blocks and/or mutes in Supabase; clients must tear down WebRTC when they receive PARTICIPANT_KICKED.
  */
 
 import { blockMember, setMemberMuted } from '../../lib/supabase.js';
