@@ -1,23 +1,26 @@
-/**
- * API base URL for the Trip-Sync Express server (run `npm run dev` in repo root).
- *
- * - iOS Simulator: http://localhost:3000
- * - Android Emulator: http://10.0.2.2:3000
- * - Physical device: http://<your PC LAN IP>:3000
- *
- * Set EXPO_PUBLIC_API_URL in mobile/.env (see .env.example).
- */
-export const API_BASE_URL = (
-  process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000"
-).replace(/\/$/, "");
+const rawApiUrl = process.env["EXPO_PUBLIC_API_URL"] ?? "";
+const rawSocketUrl = process.env["EXPO_PUBLIC_SOCKET_URL"] ?? "";
 
-/** Same server as API (Cashfree return/webhook routes). Defaults to EXPO_PUBLIC_API_URL. */
+export const API_BASE_URL = (
+  rawApiUrl || "http://localhost:3000"
+).replace(/\/+$/, "");
+
 export const BACKEND_PUBLIC_URL = (
-  process.env.EXPO_PUBLIC_BACKEND_URL ?? process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000"
-).replace(/\/$/, "");
+  process.env["EXPO_PUBLIC_BACKEND_URL"] ?? rawApiUrl ?? "http://localhost:3000"
+).replace(/\/+$/, "");
 
 export const SOCKET_URL = (
-  process.env["EXPO_PUBLIC_SOCKET_URL"] ?? 
-  process.env["EXPO_PUBLIC_API_URL"] ?? 
-  "http://localhost:4000"
+  rawSocketUrl || rawApiUrl || "http://localhost:4000"
 ).replace(/\/+$/, "");
+
+export const SUPABASE_URL = (
+  process.env["EXPO_PUBLIC_SUPABASE_URL"] ?? ""
+).replace(/^["']|["']$/g, "").trim();
+
+export const SUPABASE_ANON_KEY = (
+  process.env["EXPO_PUBLIC_SUPABASE_ANON_KEY"] ?? ""
+).replace(/^["']|["']$/g, "").trim();
+
+export const MAPBOX_TOKEN = (
+  process.env["EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN"] ?? ""
+).replace(/^["']|["']$/g, "").trim();

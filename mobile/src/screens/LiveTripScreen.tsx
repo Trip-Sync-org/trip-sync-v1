@@ -24,7 +24,7 @@ import { io, type Socket } from "socket.io-client";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
-import { SOCKET_URL } from "../config";
+import { API_BASE_URL,SOCKET_URL } from "../config";
 import { apiFetch, isAbortLikeError, readApiErrorMessage } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { normalizeTripFromApi, type Trip } from "../lib/tripNormalize";
