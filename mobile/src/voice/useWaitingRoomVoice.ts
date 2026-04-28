@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
-import { tripChannel, EVENTS } from "../../shared/voiceConstants.js";
+import { tripChannel, EVENTS } from "../../../shared/voiceConstants.js";
 
 export type VoiceMode = "open" | "controlled";
 

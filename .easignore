@@ -1,12 +1,21 @@
-# Ignore all non-mobile content
-backend/
-frontend/
-api/
-sql/
-shared/
+﻿# Ignore backend-only content
+/backend/
+/frontend/
+/sql/
+/scripts/
+
+# Ignore dev/editor files
 .cursor/
+.idea/
+.vscode/
+
+# Ignore build artifacts and logs
 node_modules/
 dist/
-.git/
 *.log
+
+# Ignore git and env
+.git/
 .env
+.env*
+!.env.example

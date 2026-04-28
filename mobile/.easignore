@@ -1,4 +1,4 @@
-node_modules/
+﻿node_modules/
 .expo/
 .git
 .env
@@ -29,10 +29,3 @@ web-build/
 npm-debug.*
 yarn-debug.*
 yarn-error.*
-
-backend/
-frontend/
-sql/
-api/
-shared/
-scripts/

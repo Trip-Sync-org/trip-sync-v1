@@ -5,7 +5,7 @@
 
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import { NativeModules } from "react-native";
-import { EVENTS, ICE_SERVERS, signalingChannel } from "../../shared/voiceConstants.js";
+import { EVENTS, ICE_SERVERS, signalingChannel } from "../../../shared/voiceConstants.js";
 
 /** RN MediaStream shape we use — do not import react-native-webrtc at file load (it throws without native code). */
 type RNMediaStream = {
