@@ -1,13 +1,13 @@
-/**
+﻿/**
  * WebRTC peer mesh for waiting-room voice (P2P audio via free STUN; signaling over Supabase Realtime).
- * Requires a development build — Expo Go does not ship react-native-webrtc native code.
+ * Requires a development build â€” Expo Go does not ship react-native-webrtc native code.
  */
 
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import { NativeModules } from "react-native";
-import { EVENTS, ICE_SERVERS, signalingChannel } from "../../../shared/voiceConstants.js";
+import { EVENTS, ICE_SERVERS, signalingChannel } from "../../shared/voiceConstants.js";
 
-/** RN MediaStream shape we use — do not import react-native-webrtc at file load (it throws without native code). */
+/** RN MediaStream shape we use â€” do not import react-native-webrtc at file load (it throws without native code). */
 type RNMediaStream = {
   getTracks: () => Array<{ stop: () => void }>;
 };
@@ -26,7 +26,7 @@ type WrtcMod = {
   RTCIceCandidate: new (init: Record<string, unknown>) => RTCIceCandidate;
 };
 
-/** Metro/babel often wraps CJS in `{ default: moduleExports }` — unwrap so `mediaDevices` exists. */
+/** Metro/babel often wraps CJS in `{ default: moduleExports }` â€” unwrap so `mediaDevices` exists. */
 function unwrapReactNativeWebrtc(mod: unknown): WrtcMod {
   if (!mod || typeof mod !== "object") return mod as WrtcMod;
   const m = mod as Record<string, unknown>;

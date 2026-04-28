@@ -1,7 +1,5 @@
 /**
- * Mirror of repo root `shared/voiceConstants.js` — duplicated here so Metro resolves
- * without leaving the `mobile/` app root (fixes UnableToResolveError on Android).
- * Keep in sync when changing voice event names or ICE servers.
+ * Shared voice channel constants (no external services — plain JS for mobile + web + backend).
  */
 
 export const ROLES = {
@@ -66,11 +64,17 @@ export const EVENTS = {
   WAITING_SPEAK_DENY:        'voice:waiting-speak-deny',
   WAITING_VOICE_JOIN:        'voice:waiting-join',
   WAITING_VOICE_LEAVE:       'voice:waiting-leave',
+  /** Client broadcast — raise / lower hand (no backend call) */
   RAISE_HAND:                'voice:raise-hand',
   LOWER_HAND:                'voice:lower-hand',
+  /** After staff approves — { userId, approvedBy } */
   SPEAK_APPROVED:            'voice:speak-approved',
 };
 
+/**
+ * Best-effort Expo Go detection (no expo import in plain shared module).
+ * Prefer `Constants.appOwnership === 'expo'` in app code when available.
+ */
 export function isExpoGo() {
   try {
     const g = typeof globalThis !== 'undefined' ? globalThis : {};
