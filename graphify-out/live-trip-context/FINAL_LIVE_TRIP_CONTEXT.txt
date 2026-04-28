@@ -1,0 +1,1424 @@
+NODE LiveTripScreen.tsx [src=mobile\src\screens\LiveTripScreen.tsx loc=L1 community=2]
+NODE apiFetch() [src=mobile\src\api\client.ts loc=L54 community=1]
+NODE catch() [src=mobile\src\screens\PayoutScreen.tsx loc=L231 community=0]
+NODE readApiErrorMessage() [src=mobile\src\api\client.ts loc=L33 community=1]
+NODE startServer() [src=backend\server.impl.ts loc=L47 community=3]
+NODE server.impl.ts [src=backend\server.impl.ts loc=L1 community=3]
+NODE supabaseServerClient.ts [src=backend\src\lib\supabaseServerClient.ts loc=L1 community=3]
+NODE createSupabaseServerClient() [src=frontend\src\lib\supabaseServerClient.ts loc=L58 community=3]
+NODE tripCheckpointRoutes.ts [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L1 community=3]
+NODE post() [src=mobile\src\components\LiveMapView.tsx loc=L475 community=3]
+NODE memberUserId() [src=mobile\src\screens\LiveTripScreen.tsx loc=L291 community=2]
+NODE registerPaymentRoutes.ts [src=backend\payments\registerPaymentRoutes.ts loc=L1 community=3]
+NODE toNum() [src=mobile\src\screens\LiveTripScreen.tsx loc=L148 community=2]
+NODE registerLiveTripMapRoutes() [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L35 community=3]
+NODE endTrip() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1973 community=1]
+NODE refreshLiveAccess() [src=mobile\src\screens\LiveTripScreen.tsx loc=L926 community=1]
+NODE registerPaymentRoutes() [src=backend\payments\registerPaymentRoutes.ts loc=L38 community=3]
+NODE registerTripCheckpointRoutes() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L73 community=3]
+NODE hasValidMapCoords() [src=mobile\src\screens\LiveTripScreen.tsx loc=L153 community=2]
+NODE getServerApp() [src=backend\server.impl.ts loc=L2397 community=3]
+NODE appUserNumericId() [src=mobile\src\screens\LiveTripScreen.tsx loc=L263 community=2]
+NODE registerLiveTripMapRoutes.ts [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L1 community=3]
+NODE dedupeMembersForMapPins() [src=mobile\src\screens\LiveTripScreen.tsx loc=L170 community=2]
+NODE LiveTripMapNoProvider.tsx [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L1 community=18]
+NODE tick() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1586 community=1]
+NODE emitLastKnownPosition() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1264 community=2]
+NODE liveMemberRowIsSelf() [src=mobile\src\screens\LiveTripScreen.tsx loc=L306 community=2]
+NODE allowSpeakerAndUnmute() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1906 community=2]
+NODE onConnect() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L108 community=18]
+NODE mapBadgeNameForMember() [src=mobile\src\screens\LiveTripScreen.tsx loc=L319 community=2]
+NODE startLocalServer() [src=backend\server.impl.ts loc=L2404 community=3]
+NODE allowSpeaker() [src=frontend\src\App.tsx loc=L3597 community=2]
+NODE denySpeakerOnly() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1911 community=2]
+NODE uint8ArrayFromBase64() [src=mobile\src\screens\LiveTripScreen.tsx loc=L199 community=2]
+NODE canonicalMemberIdStr() [src=mobile\src\screens\LiveTripScreen.tsx loc=L301 community=2]
+NODE joinAndAnnounce() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1276 community=2]
+NODE LiveMapView.tsx [src=mobile\src\components\LiveMapView.tsx loc=L1 community=3]
+NODE onBroadcastPositionNow() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1317 community=2]
+NODE mergeRidersIntoMembers() [src=mobile\src\screens\LiveTripScreen.tsx loc=L417 community=2]
+NODE getRouteFilterReferencePoints() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L49 community=3]
+NODE joinTripRoom() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L101 community=18]
+NODE onLocationUpdated() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1335 community=2]
+NODE getRouteSegmentMidpoints() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L37 community=3]
+NODE denySpeaker() [src=frontend\src\App.tsx loc=L3605 community=2]
+NODE uploadAttractionImagesToStorage() [src=mobile\src\screens\LiveTripScreen.tsx loc=L207 community=2]
+NODE onTripStateSync() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1410 community=2]
+NODE normalizeTripRole() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L60 community=3]
+NODE onDisconnect() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1437 community=2]
+NODE weatherLoading() [src=mobile\src\screens\LiveTripScreen.tsx loc=L3581 community=2]
+NODE locationUpdatedAtMs() [src=mobile\src\screens\LiveTripScreen.tsx loc=L160 community=2]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMapNoProviderMapbox.tsx loc=L17 community=25]
+NODE onConvoyAction() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1416 community=2]
+NODE onMapPinReviewed() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1487 community=2]
+NODE spreadPeersForMap() [src=mobile\src\screens\LiveTripScreen.tsx loc=L328 community=2]
+NODE assignRole() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1970 community=2]
+NODE haversineMeters() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L25 community=3]
+NODE mergeLiveMembersFromApi() [src=mobile\src\screens\LiveTripScreen.tsx loc=L348 community=2]
+NODE LiveTripMapNoProviderMapbox.tsx [src=frontend\src\components\LiveTripMapNoProviderMapbox.tsx loc=L1 community=25]
+NODE requestToSpeak() [src=mobile\src\screens\LiveTripScreen.tsx loc=L741 community=2]
+NODE haversineKm() [src=mobile\src\screens\LiveTripScreen.tsx loc=L103 community=2]
+NODE onTripMemberPresence() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1310 community=2]
+NODE formatElapsedStrava() [src=mobile\src\screens\LiveTripScreen.tsx loc=L117 community=2]
+NODE getAdaptiveInterval() [src=mobile\src\screens\LiveTripScreen.tsx loc=L283 community=2]
+NODE onConnectErr() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1303 community=2]
+NODE onMapPinRequested() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1479 community=2]
+NODE lanIPv4Urls() [src=backend\server.impl.ts loc=L17 community=3]
+NODE normalizeRole() [src=mobile\src\screens\LiveTripScreen.tsx 
+... (truncated to ~2000 token budget)
+NODE LiveTripScreen.tsx [src=mobile\src\screens\LiveTripScreen.tsx loc=L1 community=2]
+NODE server.impl.ts [src=backend\server.impl.ts loc=L1 community=3]
+NODE startServer() [src=backend\server.impl.ts loc=L47 community=3]
+NODE tripCheckpointRoutes.ts [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L1 community=3]
+NODE createSupabaseServerClient() [src=frontend\src\lib\supabaseServerClient.ts loc=L58 community=3]
+NODE post() [src=mobile\src\components\LiveMapView.tsx loc=L475 community=3]
+NODE memberUserId() [src=mobile\src\screens\LiveTripScreen.tsx loc=L291 community=2]
+NODE endTrip() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1973 community=1]
+NODE toNum() [src=mobile\src\screens\LiveTripScreen.tsx loc=L148 community=2]
+NODE registerLiveTripMapRoutes() [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L35 community=3]
+NODE tick() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1586 community=1]
+NODE refreshLiveAccess() [src=mobile\src\screens\LiveTripScreen.tsx loc=L926 community=1]
+NODE dedupeMembersForMapPins() [src=mobile\src\screens\LiveTripScreen.tsx loc=L170 community=2]
+NODE registerTripCheckpointRoutes() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L73 community=3]
+NODE appUserNumericId() [src=mobile\src\screens\LiveTripScreen.tsx loc=L263 community=2]
+NODE hasValidMapCoords() [src=mobile\src\screens\LiveTripScreen.tsx loc=L153 community=2]
+NODE registerLiveTripMapRoutes.ts [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L1 community=3]
+NODE registerPaymentRoutes() [src=backend\payments\registerPaymentRoutes.ts loc=L38 community=3]
+NODE getServerApp() [src=backend\server.impl.ts loc=L2397 community=3]
+NODE emitLastKnownPosition() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1264 community=2]
+NODE startLocalServer() [src=backend\server.impl.ts loc=L2404 community=3]
+NODE allowSpeakerAndUnmute() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1906 community=2]
+NODE denySpeakerOnly() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1911 community=2]
+NODE liveMemberRowIsSelf() [src=mobile\src\screens\LiveTripScreen.tsx loc=L306 community=2]
+NODE LiveMapView.tsx [src=mobile\src\components\LiveMapView.tsx loc=L1 community=3]
+NODE canonicalMemberIdStr() [src=mobile\src\screens\LiveTripScreen.tsx loc=L301 community=2]
+NODE uploadAttractionImagesToStorage() [src=mobile\src\screens\LiveTripScreen.tsx loc=L207 community=2]
+NODE mapBadgeNameForMember() [src=mobile\src\screens\LiveTripScreen.tsx loc=L319 community=2]
+NODE joinAndAnnounce() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1276 community=2]
+NODE onLocationUpdated() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1335 community=2]
+NODE mergeRidersIntoMembers() [src=mobile\src\screens\LiveTripScreen.tsx loc=L417 community=2]
+NODE uint8ArrayFromBase64() [src=mobile\src\screens\LiveTripScreen.tsx loc=L199 community=2]
+NODE onBroadcastPositionNow() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1317 community=2]
+NODE normalizeRole() [src=mobile\src\screens\LiveTripScreen.tsx loc=L139 community=2]
+NODE onTripStateSync() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1410 community=2]
+NODE haversineKm() [src=mobile\src\screens\LiveTripScreen.tsx loc=L103 community=2]
+NODE formatElapsedStrava() [src=mobile\src\screens\LiveTripScreen.tsx loc=L117 community=2]
+NODE buildHtml() [src=mobile\src\components\LiveMapView.tsx loc=L63 community=3]
+NODE onMapPinRequested() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1479 community=2]
+NODE LiveTripMapNoProviderMapbox.tsx [src=frontend\src\components\LiveTripMapNoProviderMapbox.tsx loc=L1 community=25]
+NODE onTripMemberPresence() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1310 community=2]
+NODE locationUpdatedAtMs() [src=mobile\src\screens\LiveTripScreen.tsx loc=L160 community=2]
+NODE roleBadgeStyle() [src=mobile\src\screens\LiveTripScreen.tsx loc=L125 community=2]
+NODE getAdaptiveInterval() [src=mobile\src\screens\LiveTripScreen.tsx loc=L283 community=2]
+NODE requestToSpeak() [src=mobile\src\screens\LiveTripScreen.tsx loc=L741 community=2]
+NODE mergeLiveMembersFromApi() [src=mobile\src\screens\LiveTripScreen.tsx loc=L348 community=2]
+NODE onConvoyAction() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1416 community=2]
+NODE assignRole() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1970 community=2]
+NODE onConnectErr() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1303 community=2]
+NODE onRiderLeft() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1321 community=2]
+NODE onMapPinReviewed() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1487 community=2]
+NODE onDisconnect() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1437 community=2]
+NODE spreadPeersForMap() [src=mobile\src\screens\LiveTripScreen.tsx loc=L328 community=2]
+NODE onCheckpointsUpdated() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1452 community=2]
+NODE weatherLoading() [src=mobile\src\screens\LiveTripScreen.tsx loc=L3581 community=2]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMapNoProviderMapbox.tsx loc=L17 community=25]
+EDGE LiveMapView.tsx --contains [EXTRACTED]--> buildHtml()
+EDGE LiveMapView.tsx --contains [EXTRACTED]--> post()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> startServer()
+EDGE registerLiveTripMapRoutes() --contains [EXTRACTED]--> registerLiveTripMapRoutes.ts
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> post()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> registerTripCheckpointRoutes()
+EDGE readLiveMapStoredTheme() --contains [EXTRACTED]--> LiveTripMapNoProviderMapbox.tsx
+EDGE mergeLiveMembersFromApi() --contains [EXTRACTED]--> LiveTripScreen.tsx
+EDGE dedupeMembersForMapPins() --contains [EXTRACTED]--> LiveTripScreen.tsx
+EDGE dedupeMembersForMapPins() --calls [EXTRACTED]--> hasValidMapCoords()
+EDGE dedupeMembersForMapPins() --calls [EXTRACTED]--> memberUserId()
+EDGE hasValidMapCoords() --calls [EXTRACTED]--> toNum()
+EDGE registerLiveTripMapRoutes.ts --imports_from [EXTRACTED]--> server.impl.ts
+EDGE regi
+... (truncated to ~2000 token budget)
+NODE startServer() [src=backend\server.impl.ts loc=L47 community=3]
+NODE server.impl.ts [src=backend\server.impl.ts loc=L1 community=3]
+NODE tripCheckpointRoutes.ts [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L1 community=3]
+NODE supabaseServerClient.ts [src=backend\src\lib\supabaseServerClient.ts loc=L1 community=3]
+NODE createSupabaseServerClient() [src=frontend\src\lib\supabaseServerClient.ts loc=L58 community=3]
+NODE post() [src=mobile\src\components\LiveMapView.tsx loc=L475 community=3]
+NODE registerPaymentRoutes.ts [src=backend\payments\registerPaymentRoutes.ts loc=L1 community=3]
+NODE registerLiveTripMapRoutes() [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L35 community=3]
+NODE registerTripCheckpointRoutes() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L73 community=3]
+NODE registerLiveTripMapRoutes.ts [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L1 community=3]
+NODE LiveTripMapNoProvider.tsx [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L1 community=18]
+NODE getServerApp() [src=backend\server.impl.ts loc=L2397 community=3]
+NODE registerPaymentRoutes() [src=backend\payments\registerPaymentRoutes.ts loc=L38 community=3]
+NODE startLocalServer() [src=backend\server.impl.ts loc=L2404 community=3]
+NODE getRouteFilterReferencePoints() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L49 community=3]
+NODE onConnect() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L108 community=18]
+NODE getRouteSegmentMidpoints() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L37 community=3]
+NODE joinTripRoom() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L101 community=18]
+NODE LiveTripMap.tsx [src=frontend\src\components\LiveTripMap.tsx loc=L1 community=19]
+NODE LiveMapView.tsx [src=mobile\src\components\LiveMapView.tsx loc=L1 community=3]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L18 community=18]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMap.tsx loc=L20 community=19]
+NODE lanIPv4Urls() [src=backend\server.impl.ts loc=L17 community=3]
+NODE normalizeTripRole() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L60 community=3]
+NODE injectGlobalStyles() [src=frontend\src\components\LiveTripMap.tsx loc=L139 community=19]
+NODE haversineMeters() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L25 community=3]
+NODE LiveTripMapNoProviderMapbox.tsx [src=frontend\src\components\LiveTripMapNoProviderMapbox.tsx loc=L1 community=25]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMapNoProviderMapbox.tsx loc=L17 community=25]
+EDGE registerLiveTripMapRoutes.ts --imports_from [EXTRACTED]--> server.impl.ts
+EDGE registerLiveTripMapRoutes.ts --imports_from [EXTRACTED]--> tripCheckpointRoutes.ts
+EDGE LiveTripMapNoProvider.tsx --contains [EXTRACTED]--> readLiveMapStoredTheme()
+EDGE LiveTripMapNoProvider.tsx --contains [EXTRACTED]--> joinTripRoom()
+EDGE LiveTripMapNoProvider.tsx --contains [EXTRACTED]--> onConnect()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> startServer()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> post()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> registerTripCheckpointRoutes()
+EDGE LiveTripMap.tsx --contains [EXTRACTED]--> readLiveMapStoredTheme()
+EDGE LiveTripMap.tsx --contains [EXTRACTED]--> injectGlobalStyles()
+EDGE LiveTripMapNoProviderMapbox.tsx --contains [EXTRACTED]--> readLiveMapStoredTheme()
+EDGE startServer() --calls [EXTRACTED]--> getServerApp()
+EDGE startServer() --calls [EXTRACTED]--> startLocalServer()
+EDGE startServer() --calls [INFERRED]--> createSupabaseServerClient()
+EDGE startServer() --calls [INFERRED]--> registerPaymentRoutes()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> haversineMeters()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> getRouteSegmentMidpoints()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> getRouteFilterReferencePoints()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> normalizeTripRole()
+EDGE post() --calls [INFERRED]--> registerPaymentRoutes()
+EDGE post() --contains [EXTRACTED]--> LiveMapView.tsx
+EDGE server.impl.ts --imports_from [EXTRACTED]--> supabaseServerClient.ts
+EDGE server.impl.ts --imports_from [EXTRACTED]--> registerPaymentRoutes.ts
+EDGE server.impl.ts --contains [EXTRACTED]--> lanIPv4Urls()
+EDGE server.impl.ts --contains [EXTRACTED]--> getServerApp()
+EDGE server.impl.ts --contains [EXTRACTED]--> startLocalServer()
+NODE server.impl.ts [src=backend\server.impl.ts loc=L1 community=3]
+NODE startServer() [src=backend\server.impl.ts loc=L47 community=3]
+NODE tripCheckpointRoutes.ts [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L1 community=3]
+NODE createSupabaseServerClient() [src=frontend\src\lib\supabaseServerClient.ts loc=L58 community=3]
+NODE post() [src=mobile\src\components\LiveMapView.tsx loc=L475 community=3]
+NODE registerLiveTripMapRoutes() [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L35 community=3]
+NODE registerLiveTripMapRoutes.ts [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L1 community=3]
+NODE getServerApp() [src=backend\server.impl.ts loc=L2397 community=3]
+NODE registerPaymentRoutes() [src=backend\payments\registerPaymentRoutes.ts loc=L38 community=3]
+NODE registerTripCheckpointRoutes() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L73 community=3]
+NODE LiveMapView.tsx [src=mobile\src\components\LiveMapView.tsx loc=L1 community=3]
+NODE startLocalServer() [src=backend\server.impl.ts loc=L2404 community=3]
+NODE LiveTripMap.tsx [src=frontend\src\components\LiveTripMap.tsx loc=L1 community=19]
+NODE fmtCoord() [src=frontend\src\components\RoutePreviewMap.tsx loc=L22 community=27]
+NODE buildHtml() [src=mobile\src\components\LiveMapView.tsx loc=L63 community=3]
+NODE draw() [src=frontend\src\components\MapboxRouteMap.tsx loc=L81 community=26]
+NODE MapboxRouteMap.tsx [src=frontend\src\components\MapboxRouteMap.tsx loc=L1 community=26]
+NODE RoutePreviewMap.tsx [src=frontend\src\components\RoutePreviewMap.tsx loc=L1 community=27]
+NODE injectGlobalStyles() [src=frontend\src\components\LiveTripMap.tsx loc=L139 community=19]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMap.tsx loc=L20 community=19]
+EDGE RoutePreviewMap.tsx --contains [EXTRACTED]--> fmtCoord()
+EDGE LiveMapView.tsx --contains [EXTRACTED]--> buildHtml()
+EDGE LiveMapView.tsx --contains [EXTRACTED]--> post()
+EDGE LiveTripMap.tsx --contains [EXTRACTED]--> readLiveMapStoredTheme()
+EDGE LiveTripMap.tsx --contains [EXTRACTED]--> injectGlobalStyles()
+EDGE MapboxRouteMap.tsx --contains [EXTRACTED]--> draw()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> startServer()
+EDGE registerLiveTripMapRoutes() --contains [EXTRACTED]--> registerLiveTripMapRoutes.ts
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> post()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> registerTripCheckpointRoutes()
+EDGE post() --calls [INFERRED]--> registerPaymentRoutes()
+EDGE startServer() --contains [EXTRACTED]--> server.impl.ts
+EDGE startServer() --calls [EXTRACTED]--> getServerApp()
+EDGE startServer() --calls [EXTRACTED]--> startLocalServer()
+EDGE startServer() --calls [INFERRED]--> createSupabaseServerClient()
+EDGE startServer() --calls [INFERRED]--> registerPaymentRoutes()
+EDGE registerLiveTripMapRoutes.ts --imports_from [EXTRACTED]--> server.impl.ts
+EDGE registerLiveTripMapRoutes.ts --imports_from [EXTRACTED]--> tripCheckpointRoutes.ts
+EDGE registerTripCheckpointRoutes() --contains [EXTRACTED]--> tripCheckpointRoutes.ts
+NODE realtime.js [src=backend\lib\realtime.js loc=L1 community=11]
+NODE startServer() [src=backend\server.impl.ts loc=L47 community=3]
+NODE server.impl.ts [src=backend\server.impl.ts loc=L1 community=3]
+NODE broadcast() [src=backend\lib\realtime.js loc=L142 community=4]
+NODE tripCheckpointRoutes.ts [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L1 community=3]
+NODE post() [src=mobile\src\components\LiveMapView.tsx loc=L475 community=3]
+NODE checkpointUtils.ts [src=mobile\src\lib\checkpointUtils.ts loc=L1 community=16]
+NODE registerLiveTripMapRoutes() [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L35 community=3]
+NODE registerPaymentRoutes() [src=backend\payments\registerPaymentRoutes.ts loc=L38 community=3]
+NODE registerLiveTripMapRoutes.ts [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L1 community=3]
+NODE registerTripCheckpointRoutes() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L73 community=3]
+NODE emitMapPinRequestedToStaff() [src=backend\lib\realtime.js loc=L109 community=11]
+NODE getRouteFilterReferencePoints() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L49 community=3]
+NODE LiveMapView.tsx [src=mobile\src\components\LiveMapView.tsx loc=L1 community=3]
+NODE haversineMeters() [src=mobile\src\lib\checkpointUtils.ts loc=L6 community=16]
+NODE haversineDistance() [src=mobile\src\lib\checkpointUtils.ts loc=L15 community=16]
+NODE getRouteSegmentMidpoints() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L37 community=3]
+NODE emitToPrivileged() [src=backend\lib\realtime.js loc=L83 community=11]
+NODE getTripRiders() [src=backend\lib\realtime.js loc=L23 community=11]
+NODE haversineMeters() [src=backend\lib\realtime.js loc=L51 community=11]
+NODE emitMapPinReviewedToUser() [src=backend\lib\realtime.js loc=L129 community=11]
+NODE formatDistance() [src=mobile\src\lib\checkpointUtils.ts loc=L19 community=16]
+NODE normalizeTripRole() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L60 community=3]
+NODE getRouteSegmentMidpoints() [src=mobile\src\lib\checkpointUtils.ts loc=L37 community=16]
+NODE emitCheckpointsUpdated() [src=backend\lib\realtime.js loc=L69 community=11]
+NODE haversineMeters() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L25 community=3]
+NODE upsertRiderLocation() [src=backend\lib\realtime.js loc=L32 community=11]
+NODE insertCheckpointByDistance() [src=mobile\src\lib\checkpointUtils.ts loc=L25 community=16]
+NODE removeRiderLocation() [src=backend\lib\realtime.js loc=L42 community=11]
+EDGE tripCheckpointRoutes.ts --imports_from [EXTRACTED]--> registerLiveTripMapRoutes.ts
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> haversineMeters()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> getRouteSegmentMidpoints()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> getRouteFilterReferencePoints()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> normalizeTripRole()
+EDGE checkpointUtils.ts --contains [EXTRACTED]--> haversineMeters()
+EDGE checkpointUtils.ts --contains [EXTRACTED]--> haversineDistance()
+EDGE checkpointUtils.ts --contains [EXTRACTED]--> formatDistance()
+EDGE checkpointUtils.ts --contains [EXTRACTED]--> getRouteSegmentMidpoints()
+EDGE registerTripCheckpointRoutes() --calls [INFERRED]--> registerLiveTripMapRoutes()
+EDGE registerTripCheckpointRoutes() --calls [INFERRED]--> post()
+EDGE emitCheckpointsUpdated() --contains [EXTRACTED]--> realtime.js
+EDGE post() --calls [INFERRED]--> startServer()
+EDGE post() --calls [INFERRED]--> registerPaymentRoutes()
+EDGE post() --contains [EXTRACTED]--> LiveMapView.tsx
+EDGE realtime.js --contains [EXTRACTED]--> getTripRiders()
+EDGE realtime.js --contains [EXTRACTED]--> upsertRiderLocation()
+EDGE realtime.js --contains [EXTRACTED]--> removeRiderLocation()
+EDGE realtime.js --contains [EXTRACTED]--> haversineMeters()
+EDGE realtime.js --contains [EXTRACTED]--> emitToPrivileged()
+EDGE realtime.js --contains [EXTRACTED]--> emitMapPinRequestedToStaff()
+EDGE realtime.js --contains [EXTRACTED]--> emitMapPinReviewedToUser()
+EDGE realtime.js --contains [EXTRACTED]--> broadcast()
+EDGE registerLiveTripMapRoutes.ts --imports_from [EXTRACTED]--> server.impl.ts
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> startServer()
+NODE LiveTripScreen.tsx [src=mobile\src\screens\LiveTripScreen.tsx loc=L1 community=2]
+NODE catch() [src=mobile\src\screens\PayoutScreen.tsx loc=L231 community=0]
+NODE apiFetch() [src=mobile\src\api\client.ts loc=L54 community=1]
+NODE readApiErrorMessage() [src=mobile\src\api\client.ts loc=L33 community=1]
+NODE startServer() [src=backend\server.impl.ts loc=L47 community=3]
+NODE server.impl.ts [src=backend\server.impl.ts loc=L1 community=3]
+NODE supabaseServerClient.ts [src=backend\src\lib\supabaseServerClient.ts loc=L1 community=3]
+NODE tripCheckpointRoutes.ts [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L1 community=3]
+NODE createSupabaseServerClient() [src=frontend\src\lib\supabaseServerClient.ts loc=L58 community=3]
+NODE memberUserId() [src=mobile\src\screens\LiveTripScreen.tsx loc=L291 community=2]
+NODE post() [src=mobile\src\components\LiveMapView.tsx loc=L475 community=3]
+NODE registerPaymentRoutes.ts [src=backend\payments\registerPaymentRoutes.ts loc=L1 community=3]
+NODE registerLiveTripMapRoutes() [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L35 community=3]
+NODE toNum() [src=mobile\src\screens\LiveTripScreen.tsx loc=L148 community=2]
+NODE endTrip() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1973 community=1]
+NODE emitLastKnownPosition() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1264 community=2]
+NODE tick() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1586 community=1]
+NODE registerTripCheckpointRoutes() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L73 community=3]
+NODE refreshLiveAccess() [src=mobile\src\screens\LiveTripScreen.tsx loc=L926 community=1]
+NODE getServerApp() [src=backend\server.impl.ts loc=L2397 community=3]
+NODE dedupeMembersForMapPins() [src=mobile\src\screens\LiveTripScreen.tsx loc=L170 community=2]
+NODE registerLiveTripMapRoutes.ts [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L1 community=3]
+NODE appUserNumericId() [src=mobile\src\screens\LiveTripScreen.tsx loc=L263 community=2]
+NODE registerPaymentRoutes() [src=backend\payments\registerPaymentRoutes.ts loc=L38 community=3]
+NODE hasValidMapCoords() [src=mobile\src\screens\LiveTripScreen.tsx loc=L153 community=2]
+NODE mergeRidersIntoMembers() [src=mobile\src\screens\LiveTripScreen.tsx loc=L417 community=2]
+NODE getRouteFilterReferencePoints() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L49 community=3]
+NODE denySpeakerOnly() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1911 community=2]
+NODE uint8ArrayFromBase64() [src=mobile\src\screens\LiveTripScreen.tsx loc=L199 community=2]
+NODE startLocalServer() [src=backend\server.impl.ts loc=L2404 community=3]
+NODE mapBadgeNameForMember() [src=mobile\src\screens\LiveTripScreen.tsx loc=L319 community=2]
+NODE LiveMapView.tsx [src=mobile\src\components\LiveMapView.tsx loc=L1 community=3]
+NODE allowSpeaker() [src=frontend\src\App.tsx loc=L3597 community=2]
+NODE liveMemberRowIsSelf() [src=mobile\src\screens\LiveTripScreen.tsx loc=L306 community=2]
+NODE joinAndAnnounce() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1276 community=2]
+NODE getRouteSegmentMidpoints() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L37 community=3]
+NODE uploadAttractionImagesToStorage() [src=mobile\src\screens\LiveTripScreen.tsx loc=L207 community=2]
+NODE onBroadcastPositionNow() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1317 community=2]
+NODE denySpeaker() [src=frontend\src\App.tsx loc=L3605 community=2]
+NODE onLocationUpdated() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1335 community=2]
+NODE canonicalMemberIdStr() [src=mobile\src\screens\LiveTripScreen.tsx loc=L301 community=2]
+NODE allowSpeakerAndUnmute() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1906 community=2]
+NODE onDisconnect() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1437 community=2]
+NODE onTripMemberPresence() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1310 community=2]
+NODE haversineMeters() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L25 community=3]
+NODE onConvoyAction() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1416 community=2]
+NODE roleBadgeStyle() [src=mobile\src\screens\LiveTripScreen.tsx loc=L125 community=2]
+NODE formatElapsedStrava() [src=mobile\src\screens\LiveTripScreen.tsx loc=L117 community=2]
+NODE normalizeTripRole() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L60 community=3]
+NODE onTripStateSync() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1410 community=2]
+NODE haversineKm() [src=mobile\src\screens\LiveTripScreen.tsx loc=L103 community=2]
+NODE onCheckpointsUpdated() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1452 community=2]
+NODE onConnectErr() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1303 community=2]
+NODE requestToSpeak() [src=mobile\src\screens\LiveTripScreen.tsx loc=L741 community=2]
+NODE onMapPinRequested() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1479 community=2]
+NODE locationUpdatedAtMs() [src=mobile\src\screens\LiveTripScreen.tsx loc=L160 community=2]
+NODE spreadPeersForMap() [src=mobile\src\screens\LiveTripScreen.tsx loc=L328 community=2]
+NODE mergeLiveMembersFromApi() [src=mobile\src\screens\LiveTripScreen.tsx loc=L348 community=2]
+NODE normalizeRole() [src=mobile\src\screens\LiveTripScreen.tsx loc=L139 community=2]
+NODE onMapPinReviewed() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1487 community=2]
+NODE assignRole() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1970 community=2]
+NODE getAdaptiveInterval() [src=mobile\src\screens\LiveTripScreen.tsx loc=L283 community=2]
+NODE weatherLoading() [src=mobile\src\screens\LiveTripScreen.tsx loc=L3581 community=2]
+NODE onRiderLeft() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1321 community=2]
+NODE lanIPv4Urls() [src=backend\server.impl.ts loc=L17 community=3]
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> startServer()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> post()
+EDGE registerTripCheckpointRoutes() --calls [INFERRED]--> post()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACT
+... (truncated to ~2000 token budget)
+NODE LiveTripScreen.tsx [src=mobile\src\screens\LiveTripScreen.tsx loc=L1 community=2]
+NODE catch() [src=mobile\src\screens\PayoutScreen.tsx loc=L231 community=0]
+NODE apiFetch() [src=mobile\src\api\client.ts loc=L54 community=1]
+NODE readApiErrorMessage() [src=mobile\src\api\client.ts loc=L33 community=1]
+NODE startServer() [src=backend\server.impl.ts loc=L47 community=3]
+NODE server.impl.ts [src=backend\server.impl.ts loc=L1 community=3]
+NODE tripCheckpointRoutes.ts [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L1 community=3]
+NODE createSupabaseServerClient() [src=frontend\src\lib\supabaseServerClient.ts loc=L58 community=3]
+NODE post() [src=mobile\src\components\LiveMapView.tsx loc=L475 community=3]
+NODE memberUserId() [src=mobile\src\screens\LiveTripScreen.tsx loc=L291 community=2]
+NODE registerLiveTripMapRoutes() [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L35 community=3]
+NODE toNum() [src=mobile\src\screens\LiveTripScreen.tsx loc=L148 community=2]
+NODE endTrip() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1973 community=1]
+NODE emitLastKnownPosition() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1264 community=2]
+NODE refreshLiveAccess() [src=mobile\src\screens\LiveTripScreen.tsx loc=L926 community=1]
+NODE hasValidMapCoords() [src=mobile\src\screens\LiveTripScreen.tsx loc=L153 community=2]
+NODE registerTripCheckpointRoutes() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L73 community=3]
+NODE registerLiveTripMapRoutes.ts [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L1 community=3]
+NODE getServerApp() [src=backend\server.impl.ts loc=L2397 community=3]
+NODE dedupeMembersForMapPins() [src=mobile\src\screens\LiveTripScreen.tsx loc=L170 community=2]
+NODE tick() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1586 community=1]
+NODE registerPaymentRoutes() [src=backend\payments\registerPaymentRoutes.ts loc=L38 community=3]
+NODE appUserNumericId() [src=mobile\src\screens\LiveTripScreen.tsx loc=L263 community=2]
+NODE LiveTripMapNoProvider.tsx [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L1 community=18]
+NODE joinAndAnnounce() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1276 community=2]
+NODE LiveMapView.tsx [src=mobile\src\components\LiveMapView.tsx loc=L1 community=3]
+NODE canonicalMemberIdStr() [src=mobile\src\screens\LiveTripScreen.tsx loc=L301 community=2]
+NODE allowSpeakerAndUnmute() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1906 community=2]
+NODE allowSpeaker() [src=frontend\src\App.tsx loc=L3597 community=2]
+NODE joinTripRoom() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L101 community=18]
+NODE liveMemberRowIsSelf() [src=mobile\src\screens\LiveTripScreen.tsx loc=L306 community=2]
+NODE mapBadgeNameForMember() [src=mobile\src\screens\LiveTripScreen.tsx loc=L319 community=2]
+NODE uint8ArrayFromBase64() [src=mobile\src\screens\LiveTripScreen.tsx loc=L199 community=2]
+NODE onLocationUpdated() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1335 community=2]
+NODE denySpeaker() [src=frontend\src\App.tsx loc=L3605 community=2]
+NODE mergeRidersIntoMembers() [src=mobile\src\screens\LiveTripScreen.tsx loc=L417 community=2]
+NODE uploadAttractionImagesToStorage() [src=mobile\src\screens\LiveTripScreen.tsx loc=L207 community=2]
+NODE denySpeakerOnly() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1911 community=2]
+NODE onConnect() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L108 community=18]
+NODE onBroadcastPositionNow() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1317 community=2]
+NODE startLocalServer() [src=backend\server.impl.ts loc=L2404 community=3]
+NODE onConvoyAction() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1416 community=2]
+NODE spreadPeersForMap() [src=mobile\src\screens\LiveTripScreen.tsx loc=L328 community=2]
+NODE onCheckpointsUpdated() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1452 community=2]
+NODE getAdaptiveInterval() [src=mobile\src\screens\LiveTripScreen.tsx loc=L283 community=2]
+NODE requestToSpeak() [src=mobile\src\screens\LiveTripScreen.tsx loc=L741 community=2]
+NODE roleBadgeStyle() [src=mobile\src\screens\LiveTripScreen.tsx loc=L125 community=2]
+NODE haversineKm() [src=mobile\src\screens\LiveTripScreen.tsx loc=L103 community=2]
+NODE weatherLoading() [src=mobile\src\screens\LiveTripScreen.tsx loc=L3581 community=2]
+NODE onDisconnect() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1437 community=2]
+NODE onTripStateSync() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1410 community=2]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMapNoProviderMapbox.tsx loc=L17 community=25]
+NODE onRiderLeft() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1321 community=2]
+NODE onTripMemberPresence() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1310 community=2]
+NODE locationUpdatedAtMs() [src=mobile\src\screens\LiveTripScreen.tsx loc=L160 community=2]
+NODE LiveTripMapNoProviderMapbox.tsx [src=frontend\src\components\LiveTripMapNoProviderMapbox.tsx loc=L1 community=25]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L18 community=18]
+NODE normalizeRole() [src=mobile\src\screens\LiveTripScreen.tsx loc=L139 community=2]
+NODE onMapPinReviewed() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1487 community=2]
+NODE formatElapsedStrava() [src=mobile\src\screens\LiveTripScreen.tsx loc=L117 community=2]
+NODE mergeLiveMembersFromApi() [src=mobile\src\screens\LiveTripScreen.tsx loc=L348 community=2]
+NODE onConnectErr() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1303 community=2]
+NODE assignRole() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1970 community=2]
+NODE onMapPinRequested() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1479 community=2]
+EDGE LiveTripMapNoProviderMapbox.tsx --contains [EXTRACTED]--> readLiveMapStoredTheme()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> startServer()
+EDGE registerLiveTripMapRoutes() --contains [EXTRACTED]--> registerLiveTripMapRoutes.ts
+EDGE registerLiv
+... (truncated to ~2000 token budget)
+NODE LiveTripScreen.tsx [src=mobile\src\screens\LiveTripScreen.tsx loc=L1 community=2]
+NODE apiFetch() [src=mobile\src\api\client.ts loc=L54 community=1]
+NODE catch() [src=mobile\src\screens\PayoutScreen.tsx loc=L231 community=0]
+NODE readApiErrorMessage() [src=mobile\src\api\client.ts loc=L33 community=1]
+NODE startServer() [src=backend\server.impl.ts loc=L47 community=3]
+NODE server.impl.ts [src=backend\server.impl.ts loc=L1 community=3]
+NODE tripCheckpointRoutes.ts [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L1 community=3]
+NODE createSupabaseServerClient() [src=frontend\src\lib\supabaseServerClient.ts loc=L58 community=3]
+NODE post() [src=mobile\src\components\LiveMapView.tsx loc=L475 community=3]
+NODE memberUserId() [src=mobile\src\screens\LiveTripScreen.tsx loc=L291 community=2]
+NODE endTrip() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1973 community=1]
+NODE registerLiveTripMapRoutes() [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L35 community=3]
+NODE toNum() [src=mobile\src\screens\LiveTripScreen.tsx loc=L148 community=2]
+NODE registerLiveTripMapRoutes.ts [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L1 community=3]
+NODE hasValidMapCoords() [src=mobile\src\screens\LiveTripScreen.tsx loc=L153 community=2]
+NODE LiveTripMapNoProvider.tsx [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L1 community=18]
+NODE refreshLiveAccess() [src=mobile\src\screens\LiveTripScreen.tsx loc=L926 community=1]
+NODE emitLastKnownPosition() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1264 community=2]
+NODE registerPaymentRoutes() [src=backend\payments\registerPaymentRoutes.ts loc=L38 community=3]
+NODE registerTripCheckpointRoutes() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L73 community=3]
+NODE appUserNumericId() [src=mobile\src\screens\LiveTripScreen.tsx loc=L263 community=2]
+NODE dedupeMembersForMapPins() [src=mobile\src\screens\LiveTripScreen.tsx loc=L170 community=2]
+NODE getServerApp() [src=backend\server.impl.ts loc=L2397 community=3]
+NODE tick() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1586 community=1]
+NODE onLocationUpdated() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1335 community=2]
+NODE liveMemberRowIsSelf() [src=mobile\src\screens\LiveTripScreen.tsx loc=L306 community=2]
+NODE mapBadgeNameForMember() [src=mobile\src\screens\LiveTripScreen.tsx loc=L319 community=2]
+NODE LiveTripMap.tsx [src=frontend\src\components\LiveTripMap.tsx loc=L1 community=19]
+NODE allowSpeakerAndUnmute() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1906 community=2]
+NODE joinAndAnnounce() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1276 community=2]
+NODE canonicalMemberIdStr() [src=mobile\src\screens\LiveTripScreen.tsx loc=L301 community=2]
+NODE allowSpeaker() [src=frontend\src\App.tsx loc=L3597 community=2]
+NODE denySpeaker() [src=frontend\src\App.tsx loc=L3605 community=2]
+NODE denySpeakerOnly() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1911 community=2]
+NODE joinTripRoom() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L101 community=18]
+NODE onBroadcastPositionNow() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1317 community=2]
+NODE uploadAttractionImagesToStorage() [src=mobile\src\screens\LiveTripScreen.tsx loc=L207 community=2]
+NODE onConnect() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L108 community=18]
+NODE LiveMapView.tsx [src=mobile\src\components\LiveMapView.tsx loc=L1 community=3]
+NODE startLocalServer() [src=backend\server.impl.ts loc=L2404 community=3]
+NODE mergeRidersIntoMembers() [src=mobile\src\screens\LiveTripScreen.tsx loc=L417 community=2]
+NODE uint8ArrayFromBase64() [src=mobile\src\screens\LiveTripScreen.tsx loc=L199 community=2]
+NODE onMapPinRequested() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1479 community=2]
+NODE onConvoyAction() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1416 community=2]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L18 community=18]
+NODE onMapPinReviewed() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1487 community=2]
+NODE onCheckpointsUpdated() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1452 community=2]
+NODE onTripMemberPresence() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1310 community=2]
+NODE onRiderLeft() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1321 community=2]
+NODE requestToSpeak() [src=mobile\src\screens\LiveTripScreen.tsx loc=L741 community=2]
+NODE mergeLiveMembersFromApi() [src=mobile\src\screens\LiveTripScreen.tsx loc=L348 community=2]
+NODE formatElapsedStrava() [src=mobile\src\screens\LiveTripScreen.tsx loc=L117 community=2]
+NODE onDisconnect() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1437 community=2]
+NODE locationUpdatedAtMs() [src=mobile\src\screens\LiveTripScreen.tsx loc=L160 community=2]
+NODE onTripStateSync() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1410 community=2]
+NODE haversineKm() [src=mobile\src\screens\LiveTripScreen.tsx loc=L103 community=2]
+NODE LiveTripMapNoProviderMapbox.tsx [src=frontend\src\components\LiveTripMapNoProviderMapbox.tsx loc=L1 community=25]
+NODE weatherLoading() [src=mobile\src\screens\LiveTripScreen.tsx loc=L3581 community=2]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMapNoProviderMapbox.tsx loc=L17 community=25]
+NODE getAdaptiveInterval() [src=mobile\src\screens\LiveTripScreen.tsx loc=L283 community=2]
+NODE roleBadgeStyle() [src=mobile\src\screens\LiveTripScreen.tsx loc=L125 community=2]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMap.tsx loc=L20 community=19]
+NODE assignRole() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1970 community=2]
+NODE normalizeRole() [src=mobile\src\screens\LiveTripScreen.tsx loc=L139 community=2]
+NODE spreadPeersForMap() [src=mobile\src\screens\LiveTripScreen.tsx loc=L328 community=2]
+NODE onConnectErr() [src=mobile\src\screens\LiveTripScreen.tsx loc=L1303 community=2]
+NODE injectGlobalStyles() [src=frontend\src\components\LiveTripMap.tsx loc=L1
+... (truncated to ~2000 token budget)
+NODE startServer() [src=backend\server.impl.ts loc=L47 community=3]
+NODE server.impl.ts [src=backend\server.impl.ts loc=L1 community=3]
+NODE supabaseServerClient.ts [src=backend\src\lib\supabaseServerClient.ts loc=L1 community=3]
+NODE tripCheckpointRoutes.ts [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L1 community=3]
+NODE createSupabaseServerClient() [src=frontend\src\lib\supabaseServerClient.ts loc=L58 community=3]
+NODE registerPaymentRoutes.ts [src=backend\payments\registerPaymentRoutes.ts loc=L1 community=3]
+NODE post() [src=mobile\src\components\LiveMapView.tsx loc=L475 community=3]
+NODE registerLiveTripMapRoutes() [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L35 community=3]
+NODE registerTripCheckpointRoutes() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L73 community=3]
+NODE getServerApp() [src=backend\server.impl.ts loc=L2397 community=3]
+NODE registerLiveTripMapRoutes.ts [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L1 community=3]
+NODE registerPaymentRoutes() [src=backend\payments\registerPaymentRoutes.ts loc=L38 community=3]
+NODE getRouteFilterReferencePoints() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L49 community=3]
+NODE LiveMapView.tsx [src=mobile\src\components\LiveMapView.tsx loc=L1 community=3]
+NODE startLocalServer() [src=backend\server.impl.ts loc=L2404 community=3]
+NODE getRouteSegmentMidpoints() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L37 community=3]
+NODE haversineMeters() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L25 community=3]
+NODE normalizeTripRole() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L60 community=3]
+NODE lanIPv4Urls() [src=backend\server.impl.ts loc=L17 community=3]
+EDGE registerTripCheckpointRoutes() --calls [INFERRED]--> post()
+EDGE registerLiveTripMapRoutes.ts --imports_from [EXTRACTED]--> server.impl.ts
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> haversineMeters()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> getRouteSegmentMidpoints()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> getRouteFilterReferencePoints()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> startServer()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> post()
+EDGE startServer() --calls [EXTRACTED]--> getServerApp()
+EDGE startServer() --calls [EXTRACTED]--> startLocalServer()
+EDGE startServer() --calls [INFERRED]--> createSupabaseServerClient()
+EDGE startServer() --calls [INFERRED]--> registerPaymentRoutes()
+EDGE post() --calls [INFERRED]--> registerPaymentRoutes()
+EDGE post() --contains [EXTRACTED]--> LiveMapView.tsx
+EDGE server.impl.ts --imports_from [EXTRACTED]--> supabaseServerClient.ts
+EDGE server.impl.ts --imports_from [EXTRACTED]--> registerPaymentRoutes.ts
+EDGE server.impl.ts --contains [EXTRACTED]--> lanIPv4Urls()
+EDGE server.impl.ts --contains [EXTRACTED]--> getServerApp()
+EDGE server.impl.ts --contains [EXTRACTED]--> startLocalServer()
+NODE server.impl.ts [src=backend\server.impl.ts loc=L1 community=3]
+NODE startServer() [src=backend\server.impl.ts loc=L47 community=3]
+NODE supabaseServerClient.ts [src=backend\src\lib\supabaseServerClient.ts loc=L1 community=3]
+NODE createSupabaseServerClient() [src=frontend\src\lib\supabaseServerClient.ts loc=L58 community=3]
+NODE tripCheckpointRoutes.ts [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L1 community=3]
+NODE post() [src=mobile\src\components\LiveMapView.tsx loc=L475 community=3]
+NODE registerPaymentRoutes.ts [src=backend\payments\registerPaymentRoutes.ts loc=L1 community=3]
+NODE registerLiveTripMapRoutes() [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L35 community=3]
+NODE registerLiveTripMapRoutes.ts [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L1 community=3]
+NODE LiveTripMapNoProvider.tsx [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L1 community=18]
+NODE registerPaymentRoutes() [src=backend\payments\registerPaymentRoutes.ts loc=L38 community=3]
+NODE registerTripCheckpointRoutes() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L73 community=3]
+NODE getServerApp() [src=backend\server.impl.ts loc=L2397 community=3]
+NODE onConnect() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L108 community=18]
+NODE getRouteSegmentMidpoints() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L37 community=3]
+NODE getRouteFilterReferencePoints() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L49 community=3]
+NODE LiveTripMap.tsx [src=frontend\src\components\LiveTripMap.tsx loc=L1 community=19]
+NODE joinTripRoom() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L101 community=18]
+NODE startLocalServer() [src=backend\server.impl.ts loc=L2404 community=3]
+NODE LiveMapView.tsx [src=mobile\src\components\LiveMapView.tsx loc=L1 community=3]
+NODE haversineMeters() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L25 community=3]
+NODE injectGlobalStyles() [src=frontend\src\components\LiveTripMap.tsx loc=L139 community=19]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMapNoProviderMapbox.tsx loc=L17 community=25]
+NODE lanIPv4Urls() [src=backend\server.impl.ts loc=L17 community=3]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L18 community=18]
+NODE LiveTripMapNoProviderMapbox.tsx [src=frontend\src\components\LiveTripMapNoProviderMapbox.tsx loc=L1 community=25]
+NODE normalizeTripRole() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L60 community=3]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMap.tsx loc=L20 community=19]
+EDGE LiveTripMap.tsx --contains [EXTRACTED]--> readLiveMapStoredTheme()
+EDGE LiveTripMap.tsx --contains [EXTRACTED]--> injectGlobalStyles()
+EDGE registerLiveTripMapRoutes.ts --imports_from [EXTRACTED]--> server.impl.ts
+EDGE registerLiveTripMapRoutes.ts --imports_from [EXTRACTED]--> tripCheckpointRoutes.ts
+EDGE LiveTripMapNoProviderMapbox.tsx --contains [EXTRACTED]--> readLiveMapStoredTheme()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> startServer()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> post()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> registerTripCheckpointRoutes()
+EDGE LiveTripMapNoProvider.tsx --contains [EXTRACTED]--> readLiveMapStoredTheme()
+EDGE LiveTripMapNoProvider.tsx --contains [EXTRACTED]--> joinTripRoom()
+EDGE LiveTripMapNoProvider.tsx --contains [EXTRACTED]--> onConnect()
+EDGE startServer() --calls [EXTRACTED]--> getServerApp()
+EDGE startServer() --calls [EXTRACTED]--> startLocalServer()
+EDGE startServer() --calls [INFERRED]--> createSupabaseServerClient()
+EDGE startServer() --calls [INFERRED]--> registerPaymentRoutes()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> haversineMeters()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> getRouteSegmentMidpoints()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> getRouteFilterReferencePoints()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> normalizeTripRole()
+EDGE post() --calls [INFERRED]--> registerPaymentRoutes()
+EDGE post() --contains [EXTRACTED]--> LiveMapView.tsx
+EDGE server.impl.ts --imports_from [EXTRACTED]--> supabaseServerClient.ts
+EDGE server.impl.ts --imports_from [EXTRACTED]--> registerPaymentRoutes.ts
+EDGE server.impl.ts --contains [EXTRACTED]--> lanIPv4Urls()
+EDGE server.impl.ts --contains [EXTRACTED]--> getServerApp()
+EDGE server.impl.ts --contains [EXTRACTED]--> startLocalServer()
+NODE server.impl.ts [src=backend\server.impl.ts loc=L1 community=3]
+NODE startServer() [src=backend\server.impl.ts loc=L47 community=3]
+NODE supabaseServerClient.ts [src=backend\src\lib\supabaseServerClient.ts loc=L1 community=3]
+NODE tripCheckpointRoutes.ts [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L1 community=3]
+NODE createSupabaseServerClient() [src=frontend\src\lib\supabaseServerClient.ts loc=L58 community=3]
+NODE post() [src=mobile\src\components\LiveMapView.tsx loc=L475 community=3]
+NODE registerPaymentRoutes.ts [src=backend\payments\registerPaymentRoutes.ts loc=L1 community=3]
+NODE registerLiveTripMapRoutes() [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L35 community=3]
+NODE getServerApp() [src=backend\server.impl.ts loc=L2397 community=3]
+NODE LiveTripMapNoProvider.tsx [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L1 community=18]
+NODE registerLiveTripMapRoutes.ts [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L1 community=3]
+NODE registerPaymentRoutes() [src=backend\payments\registerPaymentRoutes.ts loc=L38 community=3]
+NODE registerTripCheckpointRoutes() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L73 community=3]
+NODE startLocalServer() [src=backend\server.impl.ts loc=L2404 community=3]
+NODE onConnect() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L108 community=18]
+NODE LiveTripMap.tsx [src=frontend\src\components\LiveTripMap.tsx loc=L1 community=19]
+NODE getRouteSegmentMidpoints() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L37 community=3]
+NODE getRouteFilterReferencePoints() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L49 community=3]
+NODE joinTripRoom() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L101 community=18]
+NODE LiveMapView.tsx [src=mobile\src\components\LiveMapView.tsx loc=L1 community=3]
+NODE LiveTripMapNoProviderMapbox.tsx [src=frontend\src\components\LiveTripMapNoProviderMapbox.tsx loc=L1 community=25]
+NODE haversineMeters() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L25 community=3]
+NODE normalizeTripRole() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L60 community=3]
+NODE injectGlobalStyles() [src=frontend\src\components\LiveTripMap.tsx loc=L139 community=19]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMapNoProvider.tsx loc=L18 community=18]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMap.tsx loc=L20 community=19]
+NODE readLiveMapStoredTheme() [src=frontend\src\components\LiveTripMapNoProviderMapbox.tsx loc=L17 community=25]
+NODE lanIPv4Urls() [src=backend\server.impl.ts loc=L17 community=3]
+EDGE LiveTripMapNoProviderMapbox.tsx --contains [EXTRACTED]--> readLiveMapStoredTheme()
+EDGE registerLiveTripMapRoutes.ts --imports_from [EXTRACTED]--> server.impl.ts
+EDGE registerLiveTripMapRoutes.ts --imports_from [EXTRACTED]--> tripCheckpointRoutes.ts
+EDGE LiveTripMap.tsx --contains [EXTRACTED]--> readLiveMapStoredTheme()
+EDGE LiveTripMap.tsx --contains [EXTRACTED]--> injectGlobalStyles()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> startServer()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> post()
+EDGE registerLiveTripMapRoutes() --calls [INFERRED]--> registerTripCheckpointRoutes()
+EDGE LiveTripMapNoProvider.tsx --contains [EXTRACTED]--> readLiveMapStoredTheme()
+EDGE LiveTripMapNoProvider.tsx --contains [EXTRACTED]--> joinTripRoom()
+EDGE LiveTripMapNoProvider.tsx --contains [EXTRACTED]--> onConnect()
+EDGE post() --calls [INFERRED]--> registerPaymentRoutes()
+EDGE post() --contains [EXTRACTED]--> LiveMapView.tsx
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> haversineMeters()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> getRouteSegmentMidpoints()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> getRouteFilterReferencePoints()
+EDGE tripCheckpointRoutes.ts --contains [EXTRACTED]--> normalizeTripRole()
+EDGE server.impl.ts --imports_from [EXTRACTED]--> supabaseServerClient.ts
+EDGE server.impl.ts --imports_from [EXTRACTED]--> registerPaymentRoutes.ts
+EDGE server.impl.ts --contains [EXTRACTED]--> lanIPv4Urls()
+EDGE server.impl.ts --contains [EXTRACTED]--> getServerApp()
+EDGE server.impl.ts --contains [EXTRACTED]--> startLocalServer()
+EDGE startServer() --calls [EXTRACTED]--> getServerApp()
+EDGE startServer() --calls [EXTRACTED]--> startLocalServer()
+EDGE startServer() --calls [INFERRED]--> createSupabaseServerClient()
+EDGE startServer() --calls [INFERRED]--> registerPaymentRoutes()
+No path found between 'LiveTripScreen.tsx' and 'LiveMapView.tsx'.
+Shortest path (14 hops):
+  onLocationUpdated() --contains [EXTRACTED]--> LiveTripScreen.tsx --contains [EXTRACTED]--> allowSpeakerAndUnmute() --calls [INFERRED]--> allowSpeaker() --contains [EXTRACTED]--> App.tsx --contains [EXTRACTED]--> cleanup() --calls [INFERRED]--> .stop() --method [EXTRACTED]--> WaitingRoomP2P --method [EXTRACTED]--> .sendSignal() --calls [INFERRED]--> send() --calls [INFERRED]--> broadcastRaiseHand() --calls [INFERRED]--> tripChannel() --calls [INFERRED]--> broadcast() --contains [EXTRACTED]--> realtime.js --contains [EXTRACTED]--> emitMapPinReviewedToUser()
+Shortest path (0 hops):
+  
+No path found between 'Voice Participant Action' and 'Realtime Backend'.
+No path found between 'Live Alert Event' and 'Frontend Mobile Notification UI'.
+
+
+# local server logs 
+
+PS C:\projects\ui optimization\Trip-Sync> npm run dev
+
+> react-example@0.0.0 dev
+> tsx backend/server.ts
+
+[dotenv@17.3.1] injecting env (9) from .env -- tip: ⚡️ secrets for agents: https://dotenvx.com/as2
+[dotenv@17.3.1] injecting env (7) from backend\.env -- tip: ⚙️  specify custom .env file path with { path: '/custom/path/.env' }
+[dotenv@17.3.1] injecting env (9) from .env -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
+[env] Using SUPABASE_URL: https://uuoudrwgbuonftjvsfwc.supabase.co
+[Supabase] Server client: https://uuoudrwgbuonftjvsfwc.supabase.co
+[payments] Cashfree checkout enabled (create-order / webhook / verify).
+Server running on http://localhost:3000
+
+  Phone / tablet: connect to the SAME Wi‑Fi as this PC, then open (not localhost on the phone):
+    → http://10.36.243.177:3000
+  • Mobile data (5G/4G) cannot reach these private IPs — turn Wi‑Fi on and join the same network as this computer.
+  • If it still times out: Windows Firewall → allow Node.js on Private networks, and disable router “AP/client isolation” or use the main SSID (not guest Wi‑Fi).
+
+User connected: oznc3aReJ7ztJGDbAAAB
+[socket] oznc3aReJ7ztJGDbAAAB disconnected (client namespace disconnect)
+GET /api/trips
+GET /api/trips
+GET /api/users/86/bookings
+GET /api/trips
+GET /api/organizers/4/coupons
+GET /api/organizers/4/events
+GET /api/organizers/4/dashboard-summary
+User connected: jC3Csd4nZPJAsV7RAAAD
+GET /api/trips/43/checkpoints?user_id=86
+GET /api/trips/43/live-access?user_id=86
+GET /api/trips/43
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-access?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/checkpoints?user_id=4
+GET /api/trips/43/live-access?user_id=4
+GET /api/trips/43
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-access?user_id=86
+PATCH /api/trips/43/status
+GET /api/trips/43/live-access?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/driving-route
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-access?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/driving-route
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/checkpoints?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/checkpoints?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+POST /api/trips/43/map-pin-requests
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+Inserting map_pin_request (pending): { tripId: 43, userId: 86, lat: 26.7828033, lng: 75.8631493 }
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/checkpoints?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/checkpoints?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/checkpoints?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/checkpoints?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+POST /api/trips/43/map-pin-requests
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+Inserting map_pin_request (pending): { tripId: 43, userId: 86, lat: 26.7828033, lng: 75.8631493 }
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/checkpoints?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/checkpoints?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/checkpoints?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+POST /api/trips/43/map-pin-requests
+GET /api/trips/43/checkpoints?user_id=86
+Inserting map_pin_request (staff auto): { tripId: 43, userId: 4, lat: 26.7825659, lng: 75.8631004 }
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/checkpoints?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+POST /api/trips/43/map-pin-requests
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+Inserting map_pin_request (staff auto): { tripId: 43, userId: 4, lat: 26.7825659, lng: 75.8631004 }
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/checkpoints?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/checkpoints?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/checkpoints?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/checkpoints?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-access?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/driving-route
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/checkpoints?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/checkpoints?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+POST /api/trips/43/nearby-attractions
+GET /api/trips/43/alerts?user_id=86&limit=50
+POST nearby-attractions: saving with images count: 5 tripId: 43
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/checkpoints?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/checkpoints?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+POST /api/trips/43/map-pin-requests
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+Inserting map_pin_request (pending): { tripId: 43, userId: 86, lat: 26.7832047, lng: 75.8632368 }
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/checkpoints?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/checkpoints?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-access?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/driving-route
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/driving-route
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=4&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/live-state?user_id=4
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+GET /api/trips/43/alerts?user_id=86&limit=50
+GET /api/trips/43/live-state?user_id=86
+[socket] jC3Csd4nZPJAsV7RAAAD disconnected (transport close)
+User connected: TbmNwDNlqqKTGO2_AAAF
+[socket] TbmNwDNlqqKTGO2_AAAF disconnected (transport close)
+
+
+# locally expo logs
+
+The following packages should be updated for best compatibility with the installed expo version:
+  expo@54.0.33 - expected version: ~54.0.34
+  expo-asset@12.0.12 - expected version: ~12.0.13
+  expo-image-picker@17.0.10 - expected version: ~17.0.11
+  react-native-webview@13.16.1 - expected version: 13.15.0
+Your project may not work correctly until you install the expected versions of the packages.
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+█ ▄▄▄▄▄ █▄▄███▀▄█▀█ ▄▄▄▄▄ █
+█ █   █ █ ▀█ ▄ ▄▀ █ █   █ █
+█ █▄▄▄█ █▄ ▄▄▀█▀▄▀█ █▄▄▄█ █
+█▄▄▄▄▄▄▄█▄▀▄▀▄█▄▀ █▄▄▄▄▄▄▄█
+█ ▄  ██▄█ ▀███▀▀▄▄ ██▄ ▄▀▄█
+█  ▀▄ ▀▄█▀██▀▀ ▄▀  ▀█▀█▀███
+█▄ ▀██ ▄ ▄ ▀ █ █ ▄█ █ █ █▀█
+█▀▄▀██ ▄ ██▄█ ▄█▀ ▄█▄█▀█ ▀█
+███████▄▄ ▀ ▄▀  ▀ ▄▄▄ ▀▄█▀█
+█ ▄▄▄▄▄ ██ █▄ █▀█ █▄█ █▄ ▄█
+█ █   █ █▀▀▄▄▀▀▀▀ ▄   █▀▀ █
+█ █▄▄▄█ █ █▀▄▄▀▄▀█  █▄▄ ▄██
+█▄▄▄▄▄▄▄█▄▄▄██▄█▄██████▄▄▄█
+
+› Metro waiting on exp://10.36.243.177:8081
+› Scan the QR code above with Expo Go (Android) or the Camera app (iOS)
+
+› Web is waiting on http://localhost:8081
+
+› Using Expo Go
+› Press s │ switch to development build
+
+› Press a │ open Android
+› Press w │ open web
+
+› Press j │ open debugger
+› Press r │ reload app
+› Press m │ toggle menu
+› shift+m │ more tools
+› Press o │ open project code in your editor
+
+› Press ? │ show all commands
+
+Logs for your project will appear below. Press Ctrl+C to exit.
+› Reloading apps
+ WARN  Attempted to import the module "C:\projects\ui optimization\Trip-Sync\mobile\node_modules\react-native-webrtc\node_modules\event-target-shim\index" which is not listed in the "exports" of "C:\projects\ui optimization\Trip-Sync\mobile\node_modules\react-native-webrtc\node_modules\event-target-shim" under the requested subpath "./index". Falling back to file-based resolution. Consider updating the call site or asking the package maintainer(s) to expose this API.
+Android Bundled 945ms index.ts (1420 modules)
+Android Bundled 528ms index.ts (1 module)
+ WARN  setLayoutAnimationEnabledExperimental is currently a no-op in the New Architecture.
+ WARN  setLayoutAnimationEnabledExperimental is currently a no-op in the New Architecture.
+ LOG  onboardingDone: true
+ LOG  authToken: eyJhbGciOiJFUzI1NiIsImtpZCI6ImRlZTE4ODUxLWEzZjYtNDg0YS05ZmI2LWIxMWIzYzM4ZTZlYiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3V1b3VkcndnYnVvbmZ0anZzZndjLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI1OGJiOGIxMC03ZDU1LTRhYzUtODhmMC1lYjEzNjQ0NTJhZTgiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc3MzkzNzgxLCJpYXQiOjE3NzczOTAxODEsImVtYWlsIjoic2h1YmhhbXJhdGhpNDU4QGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWwiOiJzaHViaGFtcmF0aGk0NThAZ21haWwuY29tIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsInBob25lX3ZlcmlmaWVkIjpmYWxzZSwic3ViIjoiNThiYjhiMTAtN2Q1NS00YWM1LTg4ZjAtZWIxMzY0NDUyYWU4In0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzczOTAxODF9XSwic2Vzc2lvbl9pZCI6IjU1OTJiYjExLTI5ZTUtNGFjMi04N2Q0LTUxNzYzYTE5M2ExNCIsImlzX2Fub255bW91cyI6ZmFsc2V9.cpnwJIbjZS2_M6KsTUyLnV693gZquIejJF3rXe7c2YaX2G6RgivE93nIyE1a5xseyyG53HUQixCZiPHlVZZu0A
+ LOG  onboardingDone: true
+ LOG  authToken: eyJhbGciOiJFUzI1NiIsImtpZCI6ImRlZTE4ODUxLWEzZjYtNDg0YS05ZmI2LWIxMWIzYzM4ZTZlYiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3V1b3VkcndnYnVvbmZ0anZzZndjLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiJiNTlkZGFiZi1hZGEwLTRiZjctODVlOS01Mjk3M2IxNTNkMzAiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc3MzkzNzM1LCJpYXQiOjE3NzczOTAxMzUsImVtYWlsIjoibWVldHNhbnRpbmZvQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWwiOiJtZWV0c2FudGluZm9AZ21haWwuY29tIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsInBob25lX3ZlcmlmaWVkIjpmYWxzZSwic3ViIjoiYjU5ZGRhYmYtYWRhMC00YmY3LTg1ZTktNTI5NzNiMTUzZDMwIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzczOTAxMzV9XSwic2Vzc2lvbl9pZCI6ImQ5ODAzYzg3LWEzMTAtNDRmNC1hYTdmLWVkZWJlOGM5MDdiZiIsImlzX2Fub255bW91cyI6ZmFsc2V9.YBGsLPM3wEYy1KQ6yyo64faRjY009l8VfyigXfzbq57kj0__03vi5uPSPzcU9Wv31gG6ZXe_BSYCeEE2fiVkRw
+ LOG  [socket] joined + announced, tripId: 43
+ LOG  [socket] joined + announced, tripId: 43
+ LOG  📍 location-updated: 4 26.7825659 75.8631004
+ LOG  📍 location-updated: 86 26.7832412 75.8632857
+ LOG  📍 EMIT my location (broadcast to trip room) {"lat": 26.783101071999997, "lng": 75.863242052, "userId": 86}
+ LOG  📍 location-updated: 86 26.783101071999997 75.863242052
+ WARN  [expo-image-picker] `ImagePicker.MediaTypeOptions` have been deprecated. Use `ImagePicker.MediaType` or an array of `ImagePicker.MediaType` instead.
+ LOG  📍 location-updated: 86 26.7828033 75.8631493
+ LOG  📍 location-updated: 86 26.7832047 75.8632368
+ LOG  [attraction] picker: 5 asset(s)
+ LOG  [attraction] selected: [{"hasBase64": true, "uri": "file:///data/user/0/host.exp.exponent/cache/Imag"}, {"hasBase64": true, "uri": "file:///data/user/0/host.exp.exponent/cache/Imag"}, {"hasBase64": true, "uri": "file:///data/user/0/host.exp.exponent/cache/Imag"}, {"hasBase64": true, "uri": "file:///data/user/0/host.exp.exponent/cache/Imag"}, {"hasBase64": true, "uri": "file:///data/user/0/host.exp.exponent/cache/Imag"}]
+ LOG  [attraction] uploading 5 image(s)
+ LOG  [attraction] upload 0 via base64 attractions/attr-43-1777390934686-0-g52li8pu.jpg
+ LOG  [attraction] upload result: {"error": undefined, "path": "attractions/attr-43-1777390934686-0-g52li8pu.jpg"}
+ LOG  [attraction] public URL: https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390934686-0-g52li8pu.jpg
+ LOG  [attraction] upload 1 via base64 attractions/attr-43-1777390935870-1-c6383zpx.jpg
+ LOG  [attraction] upload result: {"error": undefined, "path": "attractions/attr-43-1777390935870-1-c6383zpx.jpg"}
+ LOG  [attraction] public URL: https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390935870-1-c6383zpx.jpg
+ LOG  [attraction] upload 2 via base64 attractions/attr-43-1777390936224-2-8mpa07hl.jpg
+ LOG  [attraction] upload result: {"error": undefined, "path": "attractions/attr-43-1777390936224-2-8mpa07hl.jpg"}
+ LOG  [attraction] public URL: https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390936224-2-8mpa07hl.jpg
+ LOG  [attraction] upload 3 via base64 attractions/attr-43-1777390936628-3-8gfkd4c2.jpg
+ LOG  [attraction] upload result: {"error": undefined, "path": "attractions/attr-43-1777390936628-3-8gfkd4c2.jpg"}
+ LOG  [attraction] public URL: https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390936628-3-8gfkd4c2.jpg
+ LOG  [attraction] upload 4 via base64 attractions/attr-43-1777390937052-4-9rui6mtn.jpg
+ LOG  [attraction] upload result: {"error": undefined, "path": "attractions/attr-43-1777390937052-4-9rui6mtn.jpg"}
+ LOG  [attraction] public URL: https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390937052-4-9rui6mtn.jpg
+ LOG  [attraction] uploaded URLs: ["https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390934686-0-g52li8pu.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390935870-1-c6383zpx.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390936224-2-8mpa07hl.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390936628-3-8gfkd4c2.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390937052-4-9rui6mtn.jpg"]
+ LOG  [attraction] upload 4 via base64 attractions/attr-43-1777390937052-4-9rui6mtn.jpg      
+ LOG  [attraction] upload result: {"error": undefined, "path": "attractions/attr-43-1777390937052-4-9rui6mtn.jpg"}
+ LOG  [attraction] public URL: https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390937052-4-9rui6mtn.jpg
+ LOG  [attraction] uploaded URLs: ["https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390934686-0-g52li8pu.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390935870-1-c6383zpx.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390936224-2-8mpa07hl.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390936628-3-8gfkd4c2.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attra LOG  [attraction] upload result: {"error": undefined, "path": "attractions/attr-43-1777390937052-4-9rui6mtn.jpg"}
+ LOG  [attraction] public URL: https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390937052-4-9rui6mtn.jpg
+ LOG  [attraction] uploaded URLs: ["https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390934686-0-g52li8pu.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390935870-1-c6383zpx.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390936224-2-8mpa07hl.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390936628-3-8gfkd4c2.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attra LOG  [attraction] public URL: https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390937052-4-9rui6mtn.jpg
+ LOG  [attraction] uploaded URLs: ["https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390934686-0-g52li8pu.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390935870-1-c6383zpx.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390936224-2-8mpa07hl.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390936628-3-8gfkd4c2.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attrawgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390935870-1-c6383zpx.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390936224-2-8mpa07hl.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390936628-3-8gfkd4c2.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attratjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390936628-3-8gfkd4c2.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attra LOG  [attraction] API body: {"description": "Flat", "images": ["https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390934686-0-g52li8pu.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390935870-1-c6383zpx.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390936224-2-8mpa07hl.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390936628-3-8gfkd4c2.jpg", "https://uuoudrwgbuonftjvsfwc.supabase.co/storage/v1/object/public/attraction-images/attractions/attr-43-1777390937052-4-9rui6mtn.jpg"], "latitude": 26.7825659, "longitude": 75.8631004, "name": "Manhattan riviera", "trip_id": 43, "user_id": 4}
+ LOG  [convoy] rider left: 4
+
+
+
+
+# error in expo build 
+when user going to mark map pin on map it didn't received at organiser so organiser are not able to approve it hence its not added in checkpoints.
+
+organiser side error - when organiser try to app map pin click on map pin button then focus markup apper on screen organiser set it on the location of map they want to add as a map pin then add but it adds current location as a map pin automatically.

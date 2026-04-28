@@ -10,7 +10,9 @@
     "moduleResolution": "bundler",
     "isolatedModules": true,
     "allowJs": false,
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "noEmit": true
   },
   "include": [
@@ -20,5 +22,8 @@
     "backend/server.impl.ts",
     "backend/api"
   ],
-  "exclude": ["frontend", "mobile"]
+  "exclude": [
+    "frontend",
+    "mobile"
+  ]
 }

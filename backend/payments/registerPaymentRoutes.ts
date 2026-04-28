@@ -64,15 +64,26 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
 
   function detectPublicBaseUrl(req: Request): string {
     const explicit = String(backendPublicUrl || "").trim();
-    if (explicit && !/^https?:\/\/localhost(?::\d+)?$/i.test(explicit)) {
+    // If an explicit public URL is set and it is not localhost, trust it.
+    if (explicit && !/^https?:\/\/localhost(?::\d+)?$/i.test(explicit) && !explicit.startsWith("http://127.")) {
       return explicit.replace(/\/$/, "");
     }
+    // Vercel / reverse-proxy headers
     const xfProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
     const xfHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
     const host = xfHost || String(req.headers.host || "").trim();
-    const proto = xfProto || (host.includes("localhost") || host.startsWith("127.") ? "http" : "http");
-    if (host) return `${proto}://${host}`.replace(/\/$/, "");
-    return explicit.replace(/\/$/, "") || "http://localhost:3000";
+    const proto = xfProto || (host.includes("localhost") || host.startsWith("127.") ? "http" : "https");
+    if (host && !host.includes("localhost") && !host.startsWith("127.")) {
+      return `${proto}://${host}`.replace(/\/$/, "");
+    }
+    // Fallback: if we still only have localhost, return the explicit value anyway
+    // so that local dev continues to work, but log a warning.
+    const fallback = explicit.replace(/\/$/, "") || "http://localhost:3000";
+    if (!fallback.includes("localhost") && !fallback.startsWith("http://127.")) {
+      return fallback;
+    }
+    console.warn("[payments] detectPublicBaseUrl falling back to localhost — Cashfree return/webhook URLs will NOT work outside this machine. Set BACKEND_URL env var to your deployed/public URL.");
+    return fallback;
   }
 
   async function hasBookingCashfreeColumns(): Promise<boolean> {

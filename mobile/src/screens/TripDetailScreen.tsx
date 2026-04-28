@@ -107,6 +107,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
     }
     setIsPaymentLoading(true);
     try {
+      console.log("[startCashfreeCheckout] creating order for booking", bookingId, "amount", amount);
       const res = await apiFetch("/api/payments/create-order", {
         method: "POST",
         body: JSON.stringify({
@@ -120,6 +121,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
         }),
       });
       const body = await res.json().catch(() => ({}));
+      console.log("[startCashfreeCheckout] create-order response:", res.status, JSON.stringify(body));
       if (!res.ok) {
         Alert.alert("Payment", typeof body?.error === "string" ? body.error : await readApiErrorMessage(res));
         return;
@@ -145,6 +147,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
     }
     setBooking(true);
     try {
+      console.log("[book] Creating booking for trip", id, "user", user.id);
       const res = await apiFetch("/api/bookings", {
         method: "POST",
         body: JSON.stringify({
@@ -155,6 +158,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
         }),
       });
       const body = await res.json().catch(() => ({}));
+      console.log("[book] Bookings response:", res.status, JSON.stringify(body));
       if (!res.ok) {
         Alert.alert("Booking", await readApiErrorMessage(res));
         return;
@@ -169,11 +173,22 @@ export function TripDetailScreen({ route, navigation }: Props) {
 
       if (body?.needs_payment === true && body?.id != null) {
         const amt = Number(body.amount ?? 0);
+        console.log("[book] needs_payment=true, amount=", amt, "bookingId=", body.id);
         await startCashfreeCheckout(Number(body.id), amt);
         return;
       }
 
-      Alert.alert("Success", "You're in!", [{ text: "OK", onPress: () => navigation.goBack() }]);
+      if (body?.needs_payment === false) {
+        console.log("[book] needs_payment=false, confirming free booking");
+        Alert.alert("Success", "You're in!", [{ text: "OK", onPress: () => navigation.goBack() }]);
+        return;
+      }
+
+      console.warn("[book] Unexpected booking response — missing needs_payment flag", body);
+      Alert.alert("Booking", "Unexpected response from server. Please check My Trips or try again.");
+    } catch (e) {
+      console.error("[book] Exception:", e);
+      Alert.alert("Booking", "Something went wrong. Please try again.");
     } finally {
       setBooking(false);
     }

@@ -1,7 +1,7 @@
 # Graph Report - Trip-Sync  (2026-04-28)
 
 ## Corpus Check
-- 109 files · ~3,592,566 words
+- 109 files · ~3,592,594 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary

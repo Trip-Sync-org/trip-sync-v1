@@ -1,0 +1,491 @@
+NODE server.impl.ts [src=backend\server.impl.ts loc=L1 community=3]
+NODE startServer() [src=backend\server.impl.ts loc=L47 community=3]
+NODE createSupabaseServerClient() [src=frontend\src\lib\supabaseServerClient.ts loc=L58 community=3]
+NODE supabaseServerClient.ts [src=backend\src\lib\supabaseServerClient.ts loc=L1 community=3]
+NODE organizerRevenue.ts [src=backend\payments\organizerRevenue.ts loc=L1 community=3]
+NODE registerPaymentRoutes.ts [src=backend\payments\registerPaymentRoutes.ts loc=L1 community=3]
+NODE post() [src=mobile\src\components\LiveMapView.tsx loc=L475 community=3]
+NODE registerLiveTripMapRoutes() [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L35 community=3]
+NODE computeOrganizerRevenue() [src=backend\payments\organizerRevenue.ts loc=L238 community=3]
+NODE getServerApp() [src=backend\server.impl.ts loc=L2397 community=3]
+NODE registerPaymentRoutes() [src=backend\payments\registerPaymentRoutes.ts loc=L38 community=3]
+NODE registerTripCheckpointRoutes() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L73 community=3]
+NODE aggregateRevenueFromRows() [src=backend\payments\organizerRevenue.ts loc=L92 community=3]
+NODE registerLiveTripMapRoutes.ts [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L1 community=3]
+NODE num() [src=backend\payments\organizerRevenue.ts loc=L63 community=3]
+NODE normalizeRevenueDateRange() [src=backend\payments\organizerRevenue.ts loc=L68 community=3]
+NODE LiveMapView.tsx [src=mobile\src\components\LiveMapView.tsx loc=L1 community=3]
+NODE startLocalServer() [src=backend\server.impl.ts loc=L2404 community=3]
+NODE maskAccountNumber() [src=backend\payments\registerPaymentRoutes.ts loc=L34 community=3]
+NODE useOrganizerPaymentsSocket.ts [src=mobile\src\hooks\useOrganizerPaymentsSocket.ts loc=L1 community=33]
+NODE paidAtInRange() [src=backend\payments\organizerRevenue.ts loc=L83 community=3]
+NODE lanIPv4Urls() [src=backend\server.impl.ts loc=L17 community=3]
+NODE useOrganizerPaymentsSocket() [src=mobile\src\hooks\useOrganizerPaymentsSocket.ts loc=L10 community=33]
+NODE parseBookingIdFromOrderId() [src=backend\payments\registerPaymentRoutes.ts loc=L27 community=3]
+EDGE registerPaymentRoutes.ts --imports_from [EXTRACTED]--> server.impl.ts
+EDGE registerPaymentRoutes.ts --imports_from [EXTRACTED]--> organizerRevenue.ts
+EDGE registerPaymentRoutes.ts --contains [EXTRACTED]--> parseBookingIdFromOrderId()
+EDGE registerPaymentRoutes.ts --contains [EXTRACTED]--> maskAccountNumber()
+EDGE registerPaymentRoutes() --calls [INFERRED]--> startServer()
+EDGE registerPaymentRoutes() --calls [INFERRED]--> post()
+EDGE computeOrganizerRevenue() --contains [EXTRACTED]--> organizerRevenue.ts
+EDGE computeOrganizerRevenue() --calls [EXTRACTED]--> num()
+EDGE computeOrganizerRevenue() --calls [EXTRACTED]--> normalizeRevenueDateRange()
+EDGE computeOrganizerRevenue() --calls [EXTRACTED]--> aggregateRevenueFromRows()
+EDGE server.impl.ts --imports_from [EXTRACTED]--> supabaseServerClient.ts
+EDGE server.impl.ts --imports_from [EXTRACTED]--> registerLiveTripMapRoutes.ts
+EDGE server.impl.ts --contains [EXTRACTED]--> lanIPv4Urls()
+EDGE server.impl.ts --contains [EXTRACTED]--> getServerApp()
+EDGE server.impl.ts --contains [EXTRACTED]--> startLocalServer()
+EDGE startServer() --calls [EXTRACTED]--> getServerApp()
+EDGE startServer() --calls [EXTRACTED]--> startLocalServer()
+EDGE startServer() --calls [INFERRED]--> createSupabaseServerClient()
+EDGE startServer() --calls [INFERRED]--> registerLiveTripMapRoutes()
+EDGE post() --calls [INFERRED]--> registerLiveTripMapRoutes()
+EDGE post() --calls [INFERRED]--> registerTripCheckpointRoutes()
+EDGE post() --contains [EXTRACTED]--> LiveMapView.tsx
+EDGE organizerRevenue.ts --contains [EXTRACTED]--> paidAtInRange()
+NODE server.impl.ts [src=backend\server.impl.ts loc=L1 community=3]
+NODE startServer() [src=backend\server.impl.ts loc=L47 community=3]
+NODE organizerRevenue.ts [src=backend\payments\organizerRevenue.ts loc=L1 community=3]
+NODE supabaseServerClient.ts [src=backend\src\lib\supabaseServerClient.ts loc=L1 community=3]
+NODE createSupabaseServerClient() [src=frontend\src\lib\supabaseServerClient.ts loc=L58 community=3]
+NODE post() [src=mobile\src\components\LiveMapView.tsx loc=L475 community=3]
+NODE registerPaymentRoutes.ts [src=backend\payments\registerPaymentRoutes.ts loc=L1 community=3]
+NODE registerLiveTripMapRoutes() [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L35 community=3]
+NODE computeOrganizerRevenue() [src=backend\payments\organizerRevenue.ts loc=L238 community=3]
+NODE aggregateRevenueFromRows() [src=backend\payments\organizerRevenue.ts loc=L92 community=3]
+NODE registerLiveTripMapRoutes.ts [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L1 community=3]
+NODE getServerApp() [src=backend\server.impl.ts loc=L2397 community=3]
+NODE num() [src=backend\payments\organizerRevenue.ts loc=L63 community=3]
+NODE registerTripCheckpointRoutes() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L73 community=3]
+NODE registerPaymentRoutes() [src=backend\payments\registerPaymentRoutes.ts loc=L38 community=3]
+NODE normalizeRevenueDateRange() [src=backend\payments\organizerRevenue.ts loc=L68 community=3]
+NODE startLocalServer() [src=backend\server.impl.ts loc=L2404 community=3]
+NODE LiveMapView.tsx [src=mobile\src\components\LiveMapView.tsx loc=L1 community=3]
+NODE useOrganizerPaymentsSocket() [src=mobile\src\hooks\useOrganizerPaymentsSocket.ts loc=L10 community=33]
+NODE useOrganizerPaymentsSocket.ts [src=mobile\src\hooks\useOrganizerPaymentsSocket.ts loc=L1 community=33]
+NODE maskAccountNumber() [src=backend\payments\registerPaymentRoutes.ts loc=L34 community=3]
+NODE paidAtInRange() [src=backend\payments\organizerRevenue.ts loc=L83 community=3]
+NODE parseBookingIdFromOrderId() [src=backend\payments\registerPaymentRoutes.ts loc=L27 community=3]
+NODE lanIPv4Urls() [src=backend\server.impl.ts loc=L17 community=3]
+EDGE organizerRevenue.ts --contains [EXTRACTED]--> num()
+EDGE organizerRevenue.ts --contains [EXTRACTED]--> normalizeRevenueDateRange()
+EDGE organizerRevenue.ts --contains [EXTRACTED]--> paidAtInRange()
+EDGE organizerRevenue.ts --contains [EXTRACTED]--> aggregateRevenueFromRows()
+EDGE organizerRevenue.ts --contains [EXTRACTED]--> computeOrganizerRevenue()
+EDGE registerPaymentRoutes() --calls [INFERRED]--> startServer()
+EDGE registerPaymentRoutes() --calls [INFERRED]--> post()
+EDGE registerPaymentRoutes.ts --imports_from [EXTRACTED]--> server.impl.ts
+EDGE registerPaymentRoutes.ts --contains [EXTRACTED]--> parseBookingIdFromOrderId()
+EDGE registerPaymentRoutes.ts --contains [EXTRACTED]--> maskAccountNumber()
+EDGE post() --calls [INFERRED]--> registerLiveTripMapRoutes()
+EDGE post() --calls [INFERRED]--> registerTripCheckpointRoutes()
+EDGE post() --contains [EXTRACTED]--> LiveMapView.tsx
+EDGE server.impl.ts --imports_from [EXTRACTED]--> supabaseServerClient.ts
+EDGE server.impl.ts --imports_from [EXTRACTED]--> registerLiveTripMapRoutes.ts
+EDGE server.impl.ts --contains [EXTRACTED]--> lanIPv4Urls()
+EDGE server.impl.ts --contains [EXTRACTED]--> getServerApp()
+EDGE server.impl.ts --contains [EXTRACTED]--> startLocalServer()
+EDGE startServer() --calls [EXTRACTED]--> getServerApp()
+EDGE startServer() --calls [EXTRACTED]--> startLocalServer()
+EDGE startServer() --calls [INFERRED]--> createSupabaseServerClient()
+EDGE startServer() --calls [INFERRED]--> registerLiveTripMapRoutes()
+NODE StubVoiceManager [src=mobile\src\lib\voiceManagerStub.ts loc=L7 community=7]
+NODE WaitingRoomP2P [src=mobile\src\voice\waitingRoomP2P.ts loc=L50 community=8]
+NODE send() [src=mobile\src\screens\SupportChatScreen.tsx loc=L23 community=6]
+NODE .sendSignal() [src=mobile\src\voice\waitingRoomP2P.ts loc=L279 community=8]
+NODE .start() [src=mobile\src\voice\waitingRoomP2P.ts loc=L74 community=8]
+NODE .syncRemotePeers() [src=mobile\src\voice\waitingRoomP2P.ts loc=L156 community=8]
+NODE .makeOfferTo() [src=mobile\src\voice\waitingRoomP2P.ts loc=L177 community=8]
+NODE .stop() [src=mobile\src\voice\waitingRoomP2P.ts loc=L284 community=8]
+NODE waitingRoomP2P.ts [src=mobile\src\voice\waitingRoomP2P.ts loc=L1 community=8]
+NODE .handleOffer() [src=mobile\src\voice\waitingRoomP2P.ts loc=L213 community=8]
+NODE .setRemoteMuted() [src=mobile\src\lib\voiceManagerStub.ts loc=L45 community=7]
+NODE .setVoiceMode() [src=mobile\src\lib\voiceManagerStub.ts loc=L41 community=7]
+NODE .setMuted() [src=mobile\src\lib\voiceManagerStub.ts loc=L35 community=7]
+NODE .removeRider() [src=mobile\src\lib\voiceManagerStub.ts loc=L33 community=7]
+NODE .constructor() [src=mobile\src\voice\waitingRoomP2P.ts loc=L62 community=8]
+NODE .stop() [src=mobile\src\lib\voiceManagerStub.ts loc=L23 community=7]
+NODE .start() [src=mobile\src\lib\voiceManagerStub.ts loc=L17 community=7]
+NODE .callRider() [src=mobile\src\lib\voiceManagerStub.ts loc=L25 community=7]
+NODE .handleOffer() [src=mobile\src\lib\voiceManagerStub.ts loc=L27 community=7]
+NODE .handleAnswer() [src=mobile\src\lib\voiceManagerStub.ts loc=L29 community=7]
+NODE .setBlocked() [src=mobile\src\lib\voiceManagerStub.ts loc=L43 community=7]
+NODE voiceManagerStub.ts [src=mobile\src\lib\voiceManagerStub.ts loc=L1 community=7]
+NODE .constructor() [src=mobile\src\lib\voiceManagerStub.ts loc=L12 community=7]
+NODE .handleAnswer() [src=mobile\src\voice\waitingRoomP2P.ts loc=L257 community=8]
+NODE .handleIce() [src=mobile\src\voice\waitingRoomP2P.ts loc=L267 community=8]
+NODE .handleIceCandidate() [src=mobile\src\lib\voiceManagerStub.ts loc=L31 community=7]
+NODE .getConnectedRiders() [src=mobile\src\lib\voiceManagerStub.ts loc=L47 community=7]
+NODE .getMuted() [src=mobile\src\lib\voiceManagerStub.ts loc=L37 community=7]
+NODE run-expo-android.ps1 [src=mobile\scripts\run-expo-android.ps1 loc=L1 community=58]
+EDGE .handleOffer() --method [EXTRACTED]--> StubVoiceManager
+EDGE .handleAnswer() --method [EXTRACTED]--> WaitingRoomP2P
+EDGE .handleIce() --method [EXTRACTED]--> WaitingRoomP2P
+EDGE .handleOffer() --method [EXTRACTED]--> WaitingRoomP2P
+EDGE .handleOffer() --calls [EXTRACTED]--> .sendSignal()
+EDGE WaitingRoomP2P --contains [EXTRACTED]--> waitingRoomP2P.ts
+EDGE WaitingRoomP2P --method [EXTRACTED]--> .constructor()
+EDGE WaitingRoomP2P --method [EXTRACTED]--> .start()
+EDGE WaitingRoomP2P --method [EXTRACTED]--> .syncRemotePeers()
+EDGE WaitingRoomP2P --method [EXTRACTED]--> .makeOfferTo()
+EDGE WaitingRoomP2P --method [EXTRACTED]--> .stop()
+EDGE StubVoiceManager --contains [EXTRACTED]--> voiceManagerStub.ts
+EDGE StubVoiceManager --method [EXTRACTED]--> .constructor()
+EDGE StubVoiceManager --method [EXTRACTED]--> .start()
+EDGE StubVoiceManager --method [EXTRACTED]--> .stop()
+EDGE StubVoiceManager --method [EXTRACTED]--> .callRider()
+EDGE StubVoiceManager --method [EXTRACTED]--> .handleAnswer()
+EDGE StubVoiceManager --method [EXTRACTED]--> .handleIceCandidate()
+EDGE StubVoiceManager --method [EXTRACTED]--> .removeRider()
+EDGE StubVoiceManager --method [EXTRACTED]--> .setMuted()
+EDGE StubVoiceManager --method [EXTRACTED]--> .getMuted()
+EDGE StubVoiceManager --method [EXTRACTED]--> .setVoiceMode()
+EDGE StubVoiceManager --method [EXTRACTED]--> .setBlocked()
+EDGE StubVoiceManager --method [EXTRACTED]--> .setRemoteMuted()
+EDGE StubVoiceManager --method [EXTRACTED]--> .getConnectedRiders()
+EDGE .sendSignal() --calls [INFERRED]--> send()
+EDGE .sendSignal() --calls [EXTRACTED]--> .start()
+EDGE .sendSignal() --calls [EXTRACTED]--> .makeOfferTo()
+NODE startServer() [src=backend\server.impl.ts loc=L47 community=3]
+NODE server.impl.ts [src=backend\server.impl.ts loc=L1 community=3]
+NODE organizerRevenue.ts [src=backend\payments\organizerRevenue.ts loc=L1 community=3]
+NODE supabaseServerClient.ts [src=backend\src\lib\supabaseServerClient.ts loc=L1 community=3]
+NODE createSupabaseServerClient() [src=frontend\src\lib\supabaseServerClient.ts loc=L58 community=3]
+NODE registerPaymentRoutes.ts [src=backend\payments\registerPaymentRoutes.ts loc=L1 community=3]
+NODE post() [src=mobile\src\components\LiveMapView.tsx loc=L475 community=3]
+NODE computeOrganizerRevenue() [src=backend\payments\organizerRevenue.ts loc=L238 community=3]
+NODE registerLiveTripMapRoutes() [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L35 community=3]
+NODE getServerApp() [src=backend\server.impl.ts loc=L2397 community=3]
+NODE aggregateRevenueFromRows() [src=backend\payments\organizerRevenue.ts loc=L92 community=3]
+NODE registerLiveTripMapRoutes.ts [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L1 community=3]
+NODE registerTripCheckpointRoutes() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L73 community=3]
+NODE registerPaymentRoutes() [src=backend\payments\registerPaymentRoutes.ts loc=L38 community=3]
+NODE num() [src=backend\payments\organizerRevenue.ts loc=L63 community=3]
+NODE LiveMapView.tsx [src=mobile\src\components\LiveMapView.tsx loc=L1 community=3]
+NODE startLocalServer() [src=backend\server.impl.ts loc=L2404 community=3]
+NODE normalizeRevenueDateRange() [src=backend\payments\organizerRevenue.ts loc=L68 community=3]
+NODE useOrganizerPaymentsSocket() [src=mobile\src\hooks\useOrganizerPaymentsSocket.ts loc=L10 community=33]
+NODE useOrganizerPaymentsSocket.ts [src=mobile\src\hooks\useOrganizerPaymentsSocket.ts loc=L1 community=33]
+NODE paidAtInRange() [src=backend\payments\organizerRevenue.ts loc=L83 community=3]
+NODE maskAccountNumber() [src=backend\payments\registerPaymentRoutes.ts loc=L34 community=3]
+NODE lanIPv4Urls() [src=backend\server.impl.ts loc=L17 community=3]
+NODE parseBookingIdFromOrderId() [src=backend\payments\registerPaymentRoutes.ts loc=L27 community=3]
+EDGE registerPaymentRoutes.ts --imports_from [EXTRACTED]--> server.impl.ts
+EDGE registerPaymentRoutes.ts --imports_from [EXTRACTED]--> organizerRevenue.ts
+EDGE registerPaymentRoutes.ts --contains [EXTRACTED]--> parseBookingIdFromOrderId()
+EDGE registerPaymentRoutes.ts --contains [EXTRACTED]--> maskAccountNumber()
+EDGE registerPaymentRoutes() --calls [INFERRED]--> startServer()
+EDGE registerPaymentRoutes() --calls [INFERRED]--> post()
+EDGE computeOrganizerRevenue() --contains [EXTRACTED]--> organizerRevenue.ts
+EDGE computeOrganizerRevenue() --calls [EXTRACTED]--> num()
+EDGE computeOrganizerRevenue() --calls [EXTRACTED]--> normalizeRevenueDateRange()
+EDGE computeOrganizerRevenue() --calls [EXTRACTED]--> aggregateRevenueFromRows()
+EDGE startServer() --calls [EXTRACTED]--> getServerApp()
+EDGE startServer() --calls [EXTRACTED]--> startLocalServer()
+EDGE startServer() --calls [INFERRED]--> createSupabaseServerClient()
+EDGE startServer() --calls [INFERRED]--> registerLiveTripMapRoutes()
+EDGE organizerRevenue.ts --contains [EXTRACTED]--> paidAtInRange()
+EDGE post() --calls [INFERRED]--> registerLiveTripMapRoutes()
+EDGE post() --calls [INFERRED]--> registerTripCheckpointRoutes()
+EDGE post() --contains [EXTRACTED]--> LiveMapView.tsx
+EDGE server.impl.ts --imports_from [EXTRACTED]--> supabaseServerClient.ts
+EDGE server.impl.ts --imports_from [EXTRACTED]--> registerLiveTripMapRoutes.ts
+EDGE server.impl.ts --contains [EXTRACTED]--> lanIPv4Urls()
+EDGE server.impl.ts --contains [EXTRACTED]--> getServerApp()
+EDGE server.impl.ts --contains [EXTRACTED]--> startLocalServer()
+NODE realtime.js [src=backend\lib\realtime.js loc=L1 community=11]
+NODE handler() [src=backend\api\voice\kick.js loc=L24 community=4]
+NODE handler() [src=backend\api\voice\role.js loc=L29 community=4]
+NODE handler() [src=backend\api\voice\mode.js loc=L25 community=4]
+NODE supabase.js [src=backend\lib\supabase.js loc=L1 community=4]
+NODE handler() [src=backend\api\voice\mute.js loc=L26 community=4]
+NODE broadcast() [src=backend\lib\realtime.js loc=L142 community=4]
+NODE sendError() [src=backend\lib\permissions.js loc=L106 community=4]
+NODE handleOptions() [src=backend\lib\permissions.js loc=L116 community=4]
+NODE permissions.js [src=backend\lib\permissions.js loc=L1 community=4]
+NODE getAuthContext() [src=backend\lib\permissions.js loc=L74 community=4]
+NODE requireCapability() [src=backend\lib\permissions.js loc=L29 community=4]
+NODE tripChannel() [src=shared\voiceConstants.js loc=L43 community=4]
+NODE setMemberMuted() [src=backend\lib\supabase.js loc=L68 community=4]
+NODE handler() [src=backend\api\signal\ice.js loc=L10 community=4]
+NODE parseBody() [src=backend\api\voice\mute.js loc=L14 community=4]
+NODE parseBody() [src=backend\api\voice\kick.js loc=L12 community=4]
+NODE role.js [src=backend\api\voice\role.js loc=L1 community=4]
+NODE updateMemberRole() [src=backend\lib\supabase.js loc=L56 community=4]
+NODE parseBody() [src=backend\api\voice\mode.js loc=L13 community=4]
+NODE setTripVoiceMode() [src=backend\lib\supabase.js loc=L106 community=4]
+NODE mode.js [src=backend\api\voice\mode.js loc=L1 community=4]
+NODE canAssignRole() [src=backend\lib\permissions.js loc=L42 community=4]
+NODE kick.js [src=backend\api\voice\kick.js loc=L1 community=4]
+NODE parseBody() [src=backend\api\voice\role.js loc=L17 community=4]
+NODE mute.js [src=backend\api\voice\mute.js loc=L1 community=4]
+NODE blockMember() [src=backend\lib\supabase.js loc=L80 community=4]
+NODE useOrganizerPaymentsSocket.ts [src=mobile\src\hooks\useOrganizerPaymentsSocket.ts loc=L1 community=33]
+NODE isTripStaffRole() [src=backend\lib\permissions.js loc=L18 community=4]
+NODE ice.js [src=backend\api\signal\ice.js loc=L1 community=4]
+NODE useOrganizerPaymentsSocket() [src=mobile\src\hooks\useOrganizerPaymentsSocket.ts loc=L10 community=33]
+NODE run-expo-android.ps1 [src=mobile\scripts\run-expo-android.ps1 loc=L1 community=58]
+EDGE handleOptions() --calls [INFERRED]--> handler()
+EDGE handleOptions() --calls [INFERRED]--> handler()
+EDGE handleOptions() --calls [INFERRED]--> handler()
+EDGE handleOptions() --calls [INFERRED]--> handler()
+EDGE handleOptions() --contains [EXTRACTED]--> permissions.js
+EDGE handler() --contains [EXTRACTED]--> role.js
+EDGE handler() --calls [EXTRACTED]--> parseBody()
+EDGE handler() --calls [INFERRED]--> getAuthContext()
+EDGE handler() --calls [INFERRED]--> requireCapability()
+EDGE handler() --calls [INFERRED]--> canAssignRole()
+EDGE handler() --calls [INFERRED]--> updateMemberRole()
+EDGE handler() --calls [INFERRED]--> broadcast()
+EDGE handler() --calls [INFERRED]--> sendError()
+EDGE broadcast() --contains [EXTRACTED]--> realtime.js
+EDGE broadcast() --calls [INFERRED]--> tripChannel()
+EDGE handler() --contains [EXTRACTED]--> ice.js
+EDGE handler() --contains [EXTRACTED]--> mode.js
+EDGE handler() --calls [EXTRACTED]--> parseBody()
+EDGE handler() --calls [INFERRED]--> setTripVoiceMode()
+EDGE handler() --contains [EXTRACTED]--> kick.js
+EDGE handler() --calls [EXTRACTED]--> parseBody()
+EDGE handler() --calls [INFERRED]--> blockMember()
+EDGE handler() --calls [INFERRED]--> setMemberMuted()
+EDGE permissions.js --contains [EXTRACTED]--> isTripStaffRole()
+EDGE handler() --contains [EXTRACTED]--> mute.js
+EDGE handler() --calls [EXTRACTED]--> parseBody()
+EDGE handler() --calls [INFERRED]--> setMemberMuted()
+EDGE updateMemberRole() --contains [EXTRACTED]--> supabase.js
+NODE server.impl.ts [src=backend\server.impl.ts loc=L1 community=3]
+NODE startServer() [src=backend\server.impl.ts loc=L47 community=3]
+NODE organizerRevenue.ts [src=backend\payments\organizerRevenue.ts loc=L1 community=3]
+NODE createSupabaseServerClient() [src=frontend\src\lib\supabaseServerClient.ts loc=L58 community=3]
+NODE registerPaymentRoutes.ts [src=backend\payments\registerPaymentRoutes.ts loc=L1 community=3]
+NODE post() [src=mobile\src\components\LiveMapView.tsx loc=L475 community=3]
+NODE computeOrganizerRevenue() [src=backend\payments\organizerRevenue.ts loc=L238 community=3]
+NODE registerLiveTripMapRoutes() [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L35 community=3]
+NODE registerTripCheckpointRoutes() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L73 community=3]
+NODE getServerApp() [src=backend\server.impl.ts loc=L2397 community=3]
+NODE aggregateRevenueFromRows() [src=backend\payments\organizerRevenue.ts loc=L92 community=3]
+NODE num() [src=backend\payments\organizerRevenue.ts loc=L63 community=3]
+NODE registerPaymentRoutes() [src=backend\payments\registerPaymentRoutes.ts loc=L38 community=3]
+NODE LiveMapView.tsx [src=mobile\src\components\LiveMapView.tsx loc=L1 community=3]
+NODE normalizeRevenueDateRange() [src=backend\payments\organizerRevenue.ts loc=L68 community=3]
+NODE startLocalServer() [src=backend\server.impl.ts loc=L2404 community=3]
+NODE paidAtInRange() [src=backend\payments\organizerRevenue.ts loc=L83 community=3]
+NODE useOrganizerPaymentsSocket.ts [src=mobile\src\hooks\useOrganizerPaymentsSocket.ts loc=L1 community=33]
+NODE useOrganizerPaymentsSocket() [src=mobile\src\hooks\useOrganizerPaymentsSocket.ts loc=L10 community=33]
+NODE maskAccountNumber() [src=backend\payments\registerPaymentRoutes.ts loc=L34 community=3]
+NODE parseBookingIdFromOrderId() [src=backend\payments\registerPaymentRoutes.ts loc=L27 community=3]
+EDGE computeOrganizerRevenue() --contains [EXTRACTED]--> organizerRevenue.ts
+EDGE computeOrganizerRevenue() --calls [EXTRACTED]--> num()
+EDGE computeOrganizerRevenue() --calls [EXTRACTED]--> normalizeRevenueDateRange()
+EDGE aggregateRevenueFromRows() --contains [EXTRACTED]--> organizerRevenue.ts
+EDGE aggregateRevenueFromRows() --calls [EXTRACTED]--> num()
+EDGE registerPaymentRoutes() --calls [INFERRED]--> startServer()
+EDGE registerPaymentRoutes() --contains [EXTRACTED]--> registerPaymentRoutes.ts
+EDGE registerPaymentRoutes() --calls [INFERRED]--> post()
+EDGE registerPaymentRoutes.ts --imports_from [EXTRACTED]--> server.impl.ts
+EDGE registerPaymentRoutes.ts --contains [EXTRACTED]--> parseBookingIdFromOrderId()
+EDGE registerPaymentRoutes.ts --contains [EXTRACTED]--> maskAccountNumber()
+EDGE post() --calls [INFERRED]--> registerLiveTripMapRoutes()
+EDGE post() --calls [INFERRED]--> registerTripCheckpointRoutes()
+EDGE post() --contains [EXTRACTED]--> LiveMapView.tsx
+EDGE organizerRevenue.ts --contains [EXTRACTED]--> paidAtInRange()
+EDGE startServer() --contains [EXTRACTED]--> server.impl.ts
+EDGE startServer() --calls [EXTRACTED]--> getServerApp()
+EDGE startServer() --calls [EXTRACTED]--> startLocalServer()
+EDGE startServer() --calls [INFERRED]--> createSupabaseServerClient()
+EDGE startServer() --calls [INFERRED]--> registerLiveTripMapRoutes()
+NODE startServer() [src=backend\server.impl.ts loc=L47 community=3]
+NODE server.impl.ts [src=backend\server.impl.ts loc=L1 community=3]
+NODE supabaseServerClient.ts [src=backend\src\lib\supabaseServerClient.ts loc=L1 community=3]
+NODE createSupabaseServerClient() [src=frontend\src\lib\supabaseServerClient.ts loc=L58 community=3]
+NODE organizerRevenue.ts [src=backend\payments\organizerRevenue.ts loc=L1 community=3]
+NODE post() [src=mobile\src\components\LiveMapView.tsx loc=L475 community=3]
+NODE registerPaymentRoutes.ts [src=backend\payments\registerPaymentRoutes.ts loc=L1 community=3]
+NODE registerLiveTripMapRoutes() [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L35 community=3]
+NODE computeOrganizerRevenue() [src=backend\payments\organizerRevenue.ts loc=L238 community=3]
+NODE registerTripCheckpointRoutes() [src=backend\livetripmap\tripCheckpointRoutes.ts loc=L73 community=3]
+NODE registerPaymentRoutes() [src=backend\payments\registerPaymentRoutes.ts loc=L38 community=3]
+NODE registerLiveTripMapRoutes.ts [src=backend\livetripmap\registerLiveTripMapRoutes.ts loc=L1 community=3]
+NODE num() [src=backend\payments\organizerRevenue.ts loc=L63 community=3]
+NODE aggregateRevenueFromRows() [src=backend\payments\organizerRevenue.ts loc=L92 community=3]
+NODE getServerApp() [src=backend\server.impl.ts loc=L2397 community=3]
+NODE LiveMapView.tsx [src=mobile\src\components\LiveMapView.tsx loc=L1 community=3]
+NODE normalizeRevenueDateRange() [src=backend\payments\organizerRevenue.ts loc=L68 community=3]
+NODE startLocalServer() [src=backend\server.impl.ts loc=L2404 community=3]
+NODE paidAtInRange() [src=backend\payments\organizerRevenue.ts loc=L83 community=3]
+NODE maskAccountNumber() [src=backend\payments\registerPaymentRoutes.ts loc=L34 community=3]
+NODE parseBookingIdFromOrderId() [src=backend\payments\registerPaymentRoutes.ts loc=L27 community=3]
+NODE lanIPv4Urls() [src=backend\server.impl.ts loc=L17 community=3]
+NODE fetchWeatherNow() [src=mobile\src\lib\weather.ts loc=L23 community=35]
+NODE useOrganizerPaymentsSocket.ts [src=mobile\src\hooks\useOrganizerPaymentsSocket.ts loc=L1 community=33]
+NODE useOrganizerPaymentsSocket() [src=mobile\src\hooks\useOrganizerPaymentsSocket.ts loc=L10 community=33]
+NODE weather.ts [src=mobile\src\lib\weather.ts loc=L1 community=35]
+EDGE fetchWeatherNow() --contains [EXTRACTED]--> weather.ts
+EDGE registerPaymentRoutes() --calls [INFERRED]--> startServer()
+EDGE registerPaymentRoutes() --calls [INFERRED]--> post()
+EDGE registerPaymentRoutes.ts --imports_from [EXTRACTED]--> server.impl.ts
+EDGE registerPaymentRoutes.ts --imports_from [EXTRACTED]--> organizerRevenue.ts
+EDGE registerPaymentRoutes.ts --contains [EXTRACTED]--> parseBookingIdFromOrderId()
+EDGE registerPaymentRoutes.ts --contains [EXTRACTED]--> maskAccountNumber()
+EDGE organizerRevenue.ts --contains [EXTRACTED]--> num()
+EDGE organizerRevenue.ts --contains [EXTRACTED]--> normalizeRevenueDateRange()
+EDGE organizerRevenue.ts --contains [EXTRACTED]--> paidAtInRange()
+EDGE organizerRevenue.ts --contains [EXTRACTED]--> aggregateRevenueFromRows()
+EDGE organizerRevenue.ts --contains [EXTRACTED]--> computeOrganizerRevenue()
+EDGE startServer() --calls [EXTRACTED]--> getServerApp()
+EDGE startServer() --calls [EXTRACTED]--> startLocalServer()
+EDGE startServer() --calls [INFERRED]--> createSupabaseServerClient()
+EDGE startServer() --calls [INFERRED]--> registerLiveTripMapRoutes()
+EDGE server.impl.ts --imports_from [EXTRACTED]--> supabaseServerClient.ts
+EDGE server.impl.ts --imports_from [EXTRACTED]--> registerLiveTripMapRoutes.ts
+EDGE server.impl.ts --contains [EXTRACTED]--> lanIPv4Urls()
+EDGE server.impl.ts --contains [EXTRACTED]--> getServerApp()
+EDGE server.impl.ts --contains [EXTRACTED]--> startLocalServer()
+EDGE post() --calls [INFERRED]--> registerLiveTripMapRoutes()
+EDGE post() --calls [INFERRED]--> registerTripCheckpointRoutes()
+EDGE post() --contains [EXTRACTED]--> LiveMapView.tsx
+No path found between 'OrganizerScreen.tsx' and 'registerPaymentRoutes.ts'.
+No path found between 'PayoutScreen.tsx' and 'Organizer Revenue Database'.
+Shortest path (0 hops):
+  
+No path found between 'Mobile Payment Flow' and 'Backend Payment API'.
+
+
+
+# localserver logs 
+PS C:\projects\ui optimization\Trip-Sync> npm run dev
+
+> react-example@0.0.0 dev
+> tsx backend/server.ts
+
+[dotenv@17.3.1] injecting env (9) from .env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+[dotenv@17.3.1] injecting env (7) from backend\.env -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
+[dotenv@17.3.1] injecting env (9) from .env -- tip: ⚙️  suppress all logs with { quiet: true }
+[env] Using SUPABASE_URL: https://uuoudrwgbuonftjvsfwc.supabase.co
+[Supabase] Server client: https://uuoudrwgbuonftjvsfwc.supabase.co
+[payments] Cashfree checkout enabled (create-order / webhook / verify).
+Server running on http://localhost:3000
+
+  Phone / tablet: connect to the SAME Wi‑Fi as this PC, then open (not localhost on the phone):
+    → http://10.36.243.177:3000
+  • Mobile data (5G/4G) cannot reach these private IPs — turn Wi‑Fi on and join the same network as this computer.
+  • If it still times out: Windows Firewall → allow Node.js on Private networks, and disable router “AP/client isolation” or use the main SSID (not guest Wi‑Fi).
+
+
+POST /api/auth/login
+Login attempt: { email: 'meetsantinfo@gmail.com', role: 'organizer' }
+Login success: 4
+GET /api/trips
+POST /api/auth/login
+Login attempt: { email: 'shubhamrathi458@gmail.com', role: 'user' }
+Login success: 86
+GET /api/trips
+GET /api/trips/42
+POST /api/bookings
+GET /api/users/86/bookings
+GET /api/trips
+GET /api/organizers/4/coupons
+GET /api/organizers/4/events
+GET /api/organizers/4/dashboard-summary
+User connected: ODyUn0AuNEhQwaodAAAB
+GET /api/maps/reverse?lat=26.782567&lng=75.863101
+GET /api/maps/geocode?query=Jaipur%20Municipal%20Corporation%2C%20Sanganer%20Tehsil%2C%20Jaipur%2C%20Rajasthan%2C%20302025%2C%20India&limit=5
+GET /api/maps/geocode?query=Jecrc&limit=5
+POST /api/maps/route
+GET /api/maps/geocode?query=JECRC%20University%2C%20Mahal%20Road%2C%20Jaipur%20Municipal%20Corporation%2C%20Sanganer%20Tehsil%2C%20Jaipur%2C%20Rajasthan%2C%20302025%2C%20India&limit=5   
+GET /api/maps/community-route-suggestions?user_id=4&routeCoords=%5B%5B26.7828319%2C75.8629222%5D%2C%5B26.7756716%2C75.8787382%5D%5D
+GET /api/maps/community-route-suggestions?user_id=4&routeCoords=%5B%5B26.782832%2C75.862922%5D%2C%5B26.782214%2C75.862006%5D%2C%5B26.781499%2C75.860981%5D%2C%5B26.780316%2C75.859354%5D%2C%5B26.780223%2C75.859227%5D%2C%5B26.780075%2C75.858999%5D%2C%5B26.779967%2C75.858864%5D%2C%5B26.779927%2C75.858876%5D%2C%5B26.779886%2C75.85888%5D%2C%5B26.779845%2C75.858874%5D%2C%5B26.779805%2C75.85886%5D%2C%5B26.779769%2C75.858837%5D%2C%5B26.779701%2C75.858881%5D%2C%5B26.779043%2C75.859312%5D%2C%5B26.777599%2C75.860257%5D%2C%5B26.776718%2C75.860834%5D%2C%5B26.776668%2C75.860845%5D%2C%5B26.775652%2C75.861489%5D%2C%5B26.775581%2C75.861514%5D%2C%5B26.775529%2C75.861522%5D%2C%5B26.775432%2C75.861525%5D%2C%5B26.775229%2C75.861498%5D%2C%5B26.77519%2C75.861642%5D%2C%5B26.775081%2C75.861957%5D%2C%5B26.775028%2C75.862128%5D%2C%5B26.775002%2C75.862199%5D%2C%5B26.774985%2C75.862602%5D%2C%5B26.7751%2C75.862977%5D%2C%5B26.775299%2C75.863381%5D%2C%5B26.775347%2C75.863493%5D%2C%5B26.775504%2C75.863809%5D%2C%5B26.775511%2C75.863825%5D%2C%5B26.775801%2C75.864474%5D%2C%5B26.775896%2C75.864781%5D%2C%5B26.776029%2C75.865209%5D%2C%5B26.776179%2C75.865709%5D%2C%5B26.776234%2C75.865862%5D%2C%5B26.77626%2C75.865984%5D%2C%5B26.776454%2C75.866933%5D%2C%5B26.776479%2C75.867053%5D%2C%5B26.776637%2C75.867825%5D%2C%5B26.776676%2C75.868015%5D%2C%5B26.776846%2C75.86884%5D%2C%5B26.776891%2C75.869063%5D%2C%5B26.776978%2C75.869486%5D%2C%5B26.777001%2C75.869595%5D%2C%5B26.777317%2C75.871136%5D%2C%5B26.777312%2C75.871394%5D%2C%5B26.777261%2C75.871752%5D%2C%5B26.77717%2C75.872103%5D%2C%5B26.777141%2C75.872384%5D%2C%5B26.777164%2C75.872627%5D%2C%5B26.777166%2C75.872757%5D%2C%5B26.77717%2C75.873042%5D%2C%5B26.777243%2C75.874141%5D%2C%5B26.77729%2C75.874841%5D%2C%5B26.77737%2C75.876078%5D%2C%5B26.777377%2C75.876185%5D%2C%5B26.777388%2C75.876544%5D%2C%5B26.777415%2C75.877389%5D%2C%5B26.777417%2C75.87797%5D%2C%5B26.77739%2C75.878133%5D%2C%5B26.777187%2C75.879325%5D%2C%5B26.777116%2C75.879776%5D%2C%5B26.777049%2C75.879756%5D%2C%5B26.776936%2C75.879822%5D%2C%5B26.776816%2C75.879843%5D%2C%5B26.776192%2C75.879835%5D%2C%5B26.77566%2C75.879828%5D%5D
+POST /api/trips
+POST /api/trips/43/checkpoints
+POST /api/trips/43/checkpoints
+GET /api/trips/43
+GET /api/organizers/4/events
+GET /api/organizer/revenue/4?year=2026
+GET /api/organizers/4/coupons
+GET /api/organizers/4/dashboard-summary
+GET /api/organizer/revenue/4?year=2026
+GET /api/organizers/4/dashboard-summary
+GET /api/organizers/4/coupons
+GET /api/organizers/4/events
+GET /api/users/86/bookings
+GET /api/trips
+GET /api/trips
+GET /api/trips
+GET /api/trips/43
+POST /api/bookings
+POST /api/payments/create-order
+GET /api/payments/return?order_id=TS_43_36_1777390319754
+GET /api/payments/verify/TS_43_36_1777390319754
+GET /api/trips/43
+POST /api/bookings
+PS C:\projects\ui optimization\Trip-Sync> 
+
+#locally expo side logs 
+
+PS C:\projects\ui optimization\Trip-Sync\mobile> npx expo start
+env: load .env
+env: export EXPO_PUBLIC_API_URL EXPO_PUBLIC_SOCKET_URL EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_ANON_KEY EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN
+Starting project at C:\projects\ui optimization\Trip-Sync\mobile
+Starting Metro Bundler
+The following packages should be updated for best compatibility with the installed expo version:
+  expo@54.0.33 - expected version: ~54.0.34
+  expo-asset@12.0.12 - expected version: ~12.0.13
+  expo-image-picker@17.0.10 - expected version: ~17.0.11
+  react-native-webview@13.16.1 - expected version: 13.15.0
+Your project may not work correctly until you install the expected versions of the packages.
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+█ ▄▄▄▄▄ █▄▄███▀▄█▀█ ▄▄▄▄▄ █
+█ █   █ █ ▀█ ▄ ▄▀ █ █   █ █
+█ █▄▄▄█ █▄ ▄▄▀█▀▄▀█ █▄▄▄█ █
+█▄▄▄▄▄▄▄█▄▀▄▀▄█▄▀ █▄▄▄▄▄▄▄█
+█ ▄  ██▄█ ▀███▀▀▄▄ ██▄ ▄▀▄█
+█  ▀▄ ▀▄█▀██▀▀ ▄▀  ▀█▀█▀███
+█▄ ▀██ ▄ ▄ ▀ █ █ ▄█ █ █ █▀█
+█▀▄▀██ ▄ ██▄█ ▄█▀ ▄█▄█▀█ ▀█
+███████▄▄ ▀ ▄▀  ▀ ▄▄▄ ▀▄█▀█
+█ ▄▄▄▄▄ ██ █▄ █▀█ █▄█ █▄ ▄█
+█ █   █ █▀▀▄▄▀▀▀▀ ▄   █▀▀ █
+█ █▄▄▄█ █ █▀▄▄▀▄▀█  █▄▄ ▄██
+█▄▄▄▄▄▄▄█▄▄▄██▄█▄██████▄▄▄█
+
+› Metro waiting on exp://10.36.243.177:8081
+› Scan the QR code above with Expo Go (Android) or the Camera app (iOS)
+
+› Web is waiting on http://localhost:8081
+
+› Using Expo Go
+› Press s │ switch to development build
+
+› Press a │ open Android
+› Press w │ open web
+
+› Press j │ open debugger
+› Press r │ reload app
+› Press m │ toggle menu
+› shift+m │ more tools
+› Press o │ open project code in your editor
+
+› Press ? │ show all commands
+
+Logs for your project will appear below. Press Ctrl+C to exit.
+ WARN  Attempted to import the module "C:\projects\ui optimization\Trip-Sync\mobile\node_modules\react-native-webrtc\node_modules\event-target-shim\index" which is not listed in the "exports" of "C:\projects\ui optimization\Trip-Sync\mobile\node_modules\react-native-webrtc\node_modules\event-target-shim" under the requested subpath "./index". Falling back to file-based resolution. Consider updating the call site or asking the package maintainer(s) to expose this API.
+Android Bundled 2496ms index.ts (1431 modules)
+ WARN  setLayoutAnimationEnabledExperimental is currently a no-op in the New Architecture.
+ LOG  onboardingDone: null
+ LOG  authToken: null
+ LOG  Onboarding marked done
+ LOG  onboardingDone: true
+ LOG  authToken: eyJhbGciOiJFUzI1NiIsImtpZCI6ImRlZTE4ODUxLWEzZjYtNDg0YS05ZmI2LWIxMWIzYzM4ZTZlYiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3V1b3VkcndnYnVvbmZ0anZzZndjLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiJiNTlkZGFiZi1hZGEwLTRiZjctODVlOS01Mjk3M2IxNTNkMzAiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc3MzkzNzM1LCJpYXQiOjE3NzczOTAxMzUsImVtYWlsIjoibWVldHNhbnRpbmZvQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWwiOiJtZWV0c2FudGluZm9AZ21haWwuY29tIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsInBob25lX3ZlcmlmaWVkIjpmYWxzZSwic3ViIjoiYjU5ZGRhYmYtYWRhMC00YmY3LTg1ZTktNTI5NzNiMTUzZDMwIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzczOTAxMzV9XSwic2Vzc2lvbl9pZCI6ImQ5ODAzYzg3LWEzMTAtNDRmNC1hYTdmLWVkZWJlOGM5MDdiZiIsImlzX2Fub255bW91cyI6ZmFsc2V9.YBGsLPM3wEYy1KQ6yyo64faRjY009l8VfyigXfzbq57kj0__03vi5uPSPzcU9Wv31gG6ZXe_BSYCeEE2fiVkRw
+Android Bundled 65ms index.ts (1 module)
+ WARN  setLayoutAnimationEnabledExperimental is currently a no-op in the New Architecture.
+ LOG  onboardingDone: null
+ LOG  authToken: null
+ LOG  Onboarding marked done
+ LOG  onboardingDone: true
+ LOG  authToken: eyJhbGciOiJFUzI1NiIsImtpZCI6ImRlZTE4ODUxLWEzZjYtNDg0YS05ZmI2LWIxMWIzYzM4ZTZlYiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3V1b3VkcndnYnVvbmZ0anZzZndjLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI1OGJiOGIxMC03ZDU1LTRhYzUtODhmMC1lYjEzNjQ0NTJhZTgiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc3MzkzNzgxLCJpYXQiOjE3NzczOTAxODEsImVtYWlsIjoic2h1YmhhbXJhdGhpNDU4QGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWwiOiJzaHViaGFtcmF0aGk0NThAZ21haWwuY29tIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsInBob25lX3ZlcmlmaWVkIjpmYWxzZSwic3ViIjoiNThiYjhiMTAtN2Q1NS00YWM1LTg4ZjAtZWIxMzY0NDUyYWU4In0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzczOTAxODF9XSwic2Vzc2lvbl9pZCI6IjU1OTJiYjExLTI5ZTUtNGFjMi04N2Q0LTUxNzYzYTE5M2ExNCIsImlzX2Fub255bW91cyI6ZmFsc2V9.cpnwJIbjZS2_M6KsTUyLnV693gZquIejJF3rXe7c2YaX2G6RgivE93nIyE1a5xseyyG53HUQixCZiPHlVZZu0A
+ LOG  VirtualizedList: You have a large list that is slow to update - make sure your renderItem function renders components that follow React performance best practices like PureComponent, shouldComponentUpdate, etc. {"contentLength": 8609.818359375, "dt": 110928, "prevDt": 945}
+› Stopped server
+PS C:\projects\ui optimization\Trip-Sync\mobile> 
+

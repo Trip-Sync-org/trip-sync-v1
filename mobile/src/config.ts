@@ -24,3 +24,10 @@ export const SUPABASE_ANON_KEY = (
 export const MAPBOX_TOKEN = (
   process.env["EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN"] ?? ""
 ).replace(/^["']|["']$/g, "").trim();
+
+// Debug log (visible in Metro / flipper) so you can verify at runtime
+// which URL the APK build is actually using.
+if (__DEV__) {
+  console.log("[config] API_BASE_URL:", API_BASE_URL);
+  console.log("[config] SOCKET_URL:", SOCKET_URL);
+}

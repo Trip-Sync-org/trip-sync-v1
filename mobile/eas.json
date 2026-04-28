@@ -17,7 +17,8 @@
         "buildType": "apk"
       },
       "env": {
-        "APP_VARIANT": "preview"
+        "APP_VARIANT": "preview",
+        "EXPO_PUBLIC_API_URL": "https://your-deployed-backend-url.vercel.app"
       },
       "releaseChannel": "preview"
     },
@@ -26,6 +27,9 @@
       "node": "20.18.0",
       "android": {
         "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://your-deployed-backend-url.vercel.app"
       }
     }
   },

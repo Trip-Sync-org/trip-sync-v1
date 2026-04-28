@@ -1,9 +1,11 @@
 ﻿node_modules/
 .expo/
 .git
-.env
-.env*
-!.env.example
+# NOTE: .env is intentionally kept here so EAS builds can read
+# EXPO_PUBLIC_* variables at build time. For secrets, use
+# `eas env:create` or the EAS dashboard instead.
+.env.local
+.env.*.local
 *.log
 .idea
 .vscode
