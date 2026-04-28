@@ -18,7 +18,7 @@
       },
       "env": {
         "APP_VARIANT": "preview",
-        "EXPO_PUBLIC_API_URL": "https://your-deployed-backend-url.vercel.app"
+        "EXPO_PUBLIC_API_URL": "https://trip-sync-v1.vercel.app"
       },
       "releaseChannel": "preview"
     },
@@ -29,7 +29,7 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://your-deployed-backend-url.vercel.app"
+        "EXPO_PUBLIC_API_URL": "https://trip-sync-v1.vercel.app"
       }
     }
   },
