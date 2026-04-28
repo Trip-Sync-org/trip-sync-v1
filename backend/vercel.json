@@ -8,12 +8,24 @@
     {
       "src": "api/index.ts",
       "use": "@vercel/node"
+    },
+    {
+      "src": "api/**/*.js",
+      "use": "@vercel/node"
     }
   ],
   "routes": [
     {
       "src": "/api/health",
       "dest": "/api/health.ts"
+    },
+    {
+      "src": "/api/signal/(.*)",
+      "dest": "/api/signal/$1"
+    },
+    {
+      "src": "/api/voice/(.*)",
+      "dest": "/api/voice/$1"
     },
     {
       "src": "/(.*)",
