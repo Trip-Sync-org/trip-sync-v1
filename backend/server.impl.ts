@@ -91,6 +91,11 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     next();
   });
 
+  // Payment readiness (Cashfree env vars) — evaluated early so health check can report it
+  const cashfreeAppId = String(process.env.CASHFREE_APP_ID ?? "").trim();
+  const cashfreeSecretKey = String(process.env.CASHFREE_SECRET_KEY ?? "").trim();
+  const paymentsReady = Boolean(cashfreeAppId && cashfreeSecretKey);
+
   try {
     supabase = createSupabaseServerClient();
   } catch (supabaseInitError) {
@@ -101,6 +106,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
         service: "trip-sync",
         api: "express",
         supabase_ready: false,
+        payments_ready: false,
         supabase_error:
           supabaseInitError instanceof Error
             ? supabaseInitError.message
@@ -117,7 +123,16 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
   }
 
   app.get("/api/health", (_req, res) => {
-    res.json({ ok: true, service: "trip-sync", api: "express", supabase_ready: true });
+    res.json({
+      ok: true,
+      service: "trip-sync",
+      api: "express",
+      supabase_ready: true,
+      payments_ready: paymentsReady,
+      payments_hint: paymentsReady
+        ? "Cashfree checkout enabled"
+        : "Cashfree not configured. Set CASHFREE_APP_ID and CASHFREE_SECRET_KEY in Vercel env vars to enable payments.",
+    });
   });
 
   function toFiniteNumber(value: unknown): number | null {
