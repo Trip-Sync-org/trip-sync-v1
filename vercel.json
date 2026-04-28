@@ -2,6 +2,12 @@
   "version": 2,
   "framework": null,
   "buildCommand": "npm run vercel-build",
+  "builds": [
+    {
+      "src": "api/index.ts",
+      "use": "@vercel/node"
+    }
+  ],
   "routes": [
     {
       "src": "/(.*)",
