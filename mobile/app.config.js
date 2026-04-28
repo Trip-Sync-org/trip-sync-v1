@@ -1,12 +1,12 @@
 module.exports = {
   expo: {
-    name: "Trip-Sync",
+    name: "TripSync",
     slug: "trip-sync-deploy",
     owner: "tripsync-dev",
     scheme: "tripsync",
     version: "1.0.1",
     orientation: "portrait",
-    icon: "./assets/icon.png",
+    icon: "./assets/images/apk-logo.png",
     userInterfaceStyle: "automatic",
     splash: {
       image: "./assets/splash-icon.png",
@@ -36,10 +36,8 @@ module.exports = {
         "android.permission.BLUETOOTH_SCAN",
       ],
       adaptiveIcon: {
-        backgroundColor: "#E6F4FE",
-        foregroundImage: "./assets/android-icon-foreground.png",
-        backgroundImage: "./assets/android-icon-background.png",
-        monochromeImage: "./assets/android-icon-monochrome.png",
+        foregroundImage: "./assets/images/apk-logo.png",
+        backgroundColor: "#ffffff",
       },
       predictiveBackGestureEnabled: false,
     },
