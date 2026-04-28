@@ -2,10 +2,15 @@
   "version": 2,
   "framework": null,
   "buildCommand": "npm run vercel-build",
-  "rewrites": [
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 30
+    }
+  },
+  "routes": [
     {
-      "source": "/(.*)",
-      "destination": "/api/index.ts"
+      "src": "/(.*)",
+      "dest": "/api/index.ts"
     }
   ]
 }
