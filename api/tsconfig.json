@@ -18,7 +18,8 @@
     "../backend/server.ts",
     "../backend/server.impl.ts",
     "../backend/src/**/*.ts",
-    "../backend/livetripmap/**/*.ts"
+    "../backend/livetripmap/**/*.ts",
+    "../backend/payments/**/*.ts"
   ],
   "exclude": [
     "../frontend",
