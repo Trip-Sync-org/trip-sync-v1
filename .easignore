@@ -1,0 +1,12 @@
+# Ignore all non-mobile content
+backend/
+frontend/
+api/
+sql/
+shared/
+.cursor/
+node_modules/
+dist/
+.git/
+*.log
+.env

@@ -1,4 +1,3 @@
-# EAS: paths relative to the app / monorepo as archived (do not list "mobile/..." here)
 node_modules/
 .expo/
 .git
@@ -17,11 +16,11 @@ android/build
 android/.cxx
 android/app/.cxx
 android/local.properties
+android/app/debug.keystore
 
-# iOS + web exports
-ios
-dist
-web-build
+ios/
+dist/
+web-build/
 
 *.log
 *.tmp
@@ -31,7 +30,9 @@ npm-debug.*
 yarn-debug.*
 yarn-error.*
 
-# Monorepo paths when archive includes parent (same as root .easignore intent)
-backend
-frontend
-sql
+backend/
+frontend/
+sql/
+api/
+shared/
+scripts/

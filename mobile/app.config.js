@@ -1,14 +1,10 @@
-/**
- * Expo loads `.env` before evaluating this file. Single source of truth (no app.json) so
- * `expo-doctor` is satisfied and we can set android.usesCleartextTraffic in JS (not allowed in app.json schema).
- */
 module.exports = {
   expo: {
     name: "Trip-Sync",
     slug: "trip-sync-deploy",
-    owner: "trip-sync",
+    owner: "tripsync-dev",
     scheme: "tripsync",
-    version: "1.0.0",
+    version: "1.0.1",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "automatic",
@@ -28,7 +24,7 @@ module.exports = {
       },
     },
     android: {
-      package: "com.tripsync.mobile",
+      package: "com.tripsync.app",
       versionCode: 1,
       usesCleartextTraffic: true,
       permissions: [
@@ -67,7 +63,7 @@ module.exports = {
     ],
     extra: {
       eas: {
-        projectId: "09cc91aa-0098-4bbe-833c-b70e201e1544",
+        projectId: "2655de30-8a6d-4f1a-a272-5c712f9abc98",
       },
       mapboxPublicToken: (process.env.EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN || "").trim(),
     },

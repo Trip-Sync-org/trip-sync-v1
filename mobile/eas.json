@@ -1,7 +1,9 @@
 {
   "cli": {
     "version": ">= 18.8.1",
-    "appVersionSource": "remote"
+    "appVersionSource": "remote",
+    "promptToConfigurePushNotifications": false,
+    "requireCommit": true
   },
   "build": {
     "development": {
@@ -16,7 +18,8 @@
       },
       "env": {
         "APP_VARIANT": "preview"
-      }
+      },
+      "releaseChannel": "preview"
     },
     "production": {
       "autoIncrement": true,
