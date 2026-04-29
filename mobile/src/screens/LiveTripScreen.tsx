@@ -744,6 +744,30 @@ export function LiveTripScreen({ route, navigation }: Props) {
     setMembers((prev) => prev.map((m) => (m.id === localMemberId ? { ...m, muted: true } : m)));
   };
 
+  /** Mute all regular members (non-staff) — used by organizer/staff in Talk All mode */
+  const muteAllMembers = useCallback(() => {
+    if (!canModerateVoice) return;
+    setMembers((prev) =>
+      prev.map((m) => {
+        const isStaff =
+          m.role === "organizer" || m.role === "admin" || m.role === "co-admin" || m.role === "moderator";
+        if (isStaff) return m;
+        // Mute locally
+        if (isInVoice && m.userId != null) {
+          muteRemoteRider(m.userId, true);
+        }
+        return { ...m, muted: true };
+      }),
+    );
+    // Broadcast mute-all signal via socket
+    socketRef.current?.emit("voice-signal", {
+      tripId: tripIdNum,
+      toUserId: -1,
+      fromUserId: appUid,
+      signal: { type: "voice-mute-all", mutedBy: appUid },
+    });
+  }, [canModerateVoice, isInVoice, muteRemoteRider, tripIdNum, appUid]);
+
   const nameByUserId = useCallback(
     (uid: number | null | undefined) => {
       if (uid == null) return "A member";
@@ -2808,7 +2832,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
                   style={[styles.voicePill, voiceMode === "open" && styles.voicePillActive]}
                 >
                   <Text style={[styles.voicePillText, voiceMode === "open" && styles.voicePillTextOn]}>
-                    Talk All
+                    🎙 Talk All
                   </Text>
                 </Pressable>
                 <Pressable
@@ -2819,10 +2843,16 @@ export function LiveTripScreen({ route, navigation }: Props) {
                   <Text
                     style={[styles.voicePillText, voiceMode === "controlled" && styles.voicePillTextOn]}
                   >
-                    Staff Talk
+                    🔒 Staff Talk
                   </Text>
                 </Pressable>
               </View>
+              {/* Mode description */}
+              <Text style={[styles.mutedSmall, { marginTop: 6, lineHeight: 16 }]}>
+                {voiceMode === "open"
+                  ? "All members can talk. Staff can mute all riders anytime."
+                  : "Only organizer & staff can talk. Riders cannot hear this channel."}
+              </Text>
 
               {!isInVoice ? (
                 <Pressable
@@ -2857,59 +2887,77 @@ export function LiveTripScreen({ route, navigation }: Props) {
               )}
 
               {isInVoice ? (
-                <View style={[styles.connBadge, styles.connBadgeOn, { marginTop: 8 }]}>
-                  <Text style={[styles.connBadgeText, { color: "#34d399" }]}>
-                    🎙 {voiceRiders.length + 1} in voice
-                  </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}>
+                  <View style={[styles.connBadge, styles.connBadgeOn, { flex: 1 }]}>
+                    <Text style={[styles.connBadgeText, { color: "#34d399" }]}>
+                      🎙 {voiceRiders.length + 1} in voice
+                    </Text>
+                  </View>
+                  {/* Mute All — visible to staff in Talk All mode */}
+                  {canModerateVoice && voiceMode === "open" ? (
+                    <Pressable
+                      onPress={() => {
+                        Alert.alert(
+                          "Mute All Members",
+                          "Mute all regular members so only staff can speak?",
+                          [
+                            { text: "Cancel", style: "cancel" },
+                            { text: "Mute All", style: "destructive", onPress: muteAllMembers },
+                          ],
+                        );
+                      }}
+                      style={styles.muteAllBtn}
+                    >
+                      <Ionicons name="mic-off" size={12} color="#fca5a5" />
+                      <Text style={styles.muteAllBtnText}>Mute All</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
               ) : null}
 
-              {isInVoice && voiceMode === "controlled" && (
-                <>
-                  {!canModerateVoice ? (
-                    localMemberId ? (
-                      <Pressable
-                        disabled={localAllowedInControlled || speakRequests.includes(localMemberId)}
-                        onPress={requestToSpeak}
-                        style={styles.raiseHand}
-                      >
-                        <Text style={styles.raiseHandText}>
-                          {localAllowedInControlled
-                            ? "Approved to speak"
-                            : speakRequests.includes(localMemberId)
-                              ? "Request Sent"
-                              : "Raise Hand (Request to Speak)"}
-                        </Text>
-                      </Pressable>
-                    ) : null
+              {/* Raise Hand — available in both modes so riders can signal */}
+              {isInVoice && !canModerateVoice && localMemberId ? (
+                <Pressable
+                  disabled={localAllowedInControlled || speakRequests.includes(localMemberId)}
+                  onPress={requestToSpeak}
+                  style={[styles.raiseHand, { marginTop: 8 }]}
+                >
+                  <Text style={styles.raiseHandText}>
+                    {localAllowedInControlled
+                      ? "✓ Approved to speak"
+                      : speakRequests.includes(localMemberId)
+                        ? "✋ Request Sent"
+                        : "✋ Raise Hand (Request to Speak)"}
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              {isInVoice && voiceMode === "controlled" && canModerateVoice ? (
+                <View style={{ marginTop: 8 }}>
+                  <Text style={styles.cardTitle}>SPEAK REQUESTS</Text>
+                  {speakRequests.length === 0 ? (
+                    <Text style={[styles.mutedSmall, { marginTop: 6 }]}>No requests yet</Text>
                   ) : (
-                    <View style={{ marginTop: 8 }}>
-                      <Text style={styles.cardTitle}>SPEAK REQUESTS</Text>
-                      {speakRequests.length === 0 ? (
-                        <Text style={[styles.mutedSmall, { marginTop: 6 }]}>No requests yet</Text>
-                      ) : (
-                        speakRequests.map((rid) => {
-                          const rm = members.find((m) => m.id === rid);
-                          if (!rm) return null;
-                          return (
-                            <View key={rid} style={styles.reqRow}>
-                              <Text style={{ color: "#fff", fontWeight: "600", fontSize: 12, flex: 1 }} numberOfLines={1}>
-                                {rm.name}
-                              </Text>
-                              <Pressable onPress={() => allowSpeakerAndUnmute(rid)} style={styles.miniAllow}>
-                                <Text style={{ color: "#34d399", fontWeight: "700", fontSize: 10 }}>Allow</Text>
-                              </Pressable>
-                              <Pressable onPress={() => denySpeakerOnly(rid)} style={styles.miniDeny}>
-                                <Text style={{ color: "#f87171", fontWeight: "700", fontSize: 10 }}>Deny</Text>
-                              </Pressable>
-                            </View>
-                          );
-                        })
-                      )}
-                    </View>
+                    speakRequests.map((rid) => {
+                      const rm = members.find((m) => m.id === rid);
+                      if (!rm) return null;
+                      return (
+                        <View key={rid} style={styles.reqRow}>
+                          <Text style={{ color: "#fff", fontWeight: "600", fontSize: 12, flex: 1 }} numberOfLines={1}>
+                            {rm.name}
+                          </Text>
+                          <Pressable onPress={() => allowSpeakerAndUnmute(rid)} style={styles.miniAllow}>
+                            <Text style={{ color: "#34d399", fontWeight: "700", fontSize: 10 }}>Allow</Text>
+                          </Pressable>
+                          <Pressable onPress={() => denySpeakerOnly(rid)} style={styles.miniDeny}>
+                            <Text style={{ color: "#f87171", fontWeight: "700", fontSize: 10 }}>Deny</Text>
+                          </Pressable>
+                        </View>
+                      );
+                    })
                   )}
-                </>
-              )}
+                </View>
+              ) : null}
 
               <View style={{ marginTop: 12, gap: 8 }}>
                 {members
@@ -4236,6 +4284,18 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.04)",
   },
   muteBtnHot: { borderColor: "rgba(248,113,113,0.35)", backgroundColor: "rgba(248,113,113,0.12)" },
+  muteAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(248,113,113,0.35)",
+    backgroundColor: "rgba(248,113,113,0.1)",
+  },
+  muteAllBtnText: { color: "#fca5a5", fontSize: 10, fontWeight: "800" },
   raiseHand: {
     marginTop: 10,
     paddingVertical: 12,
