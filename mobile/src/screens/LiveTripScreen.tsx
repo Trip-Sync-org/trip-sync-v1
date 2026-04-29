@@ -1302,9 +1302,9 @@ export function LiveTripScreen({ route, navigation }: Props) {
 
     const onConnectErr = (err: Error) => {
       setMapDiag(
-        `Live socket: ${err.message || "cannot connect"}. Same Wi‑Fi/LAN as the API? EXPO_PUBLIC_API_URL must be http://<PC-IP>:3000 not localhost.`,
+        `Socket error (${SOCKET_URL}): ${err.message || "cannot connect"}`,
       );
-      if (__DEV__) console.log("[socket] connect error:", err.message);
+      console.log("[socket] connect error:", err.message, "url:", SOCKET_URL);
     };
 
     const onTripMemberPresence = (payload: { userId?: number; online?: boolean }) => {
