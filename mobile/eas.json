@@ -18,7 +18,8 @@
       },
       "env": {
         "APP_VARIANT": "preview",
-        "EXPO_PUBLIC_API_URL": "https://trip-sync-v1.vercel.app"
+        "EXPO_PUBLIC_API_URL": "https://trip-sync-v1.vercel.app",
+        "EXPO_PUBLIC_SOCKET_URL": "http://165.232.179.143"
       },
       "releaseChannel": "preview"
     },
@@ -29,7 +30,8 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://trip-sync-v1.vercel.app"
+        "EXPO_PUBLIC_API_URL": "https://trip-sync-v1.vercel.app",
+        "EXPO_PUBLIC_SOCKET_URL": "http://165.232.179.143"
       }
     }
   },
