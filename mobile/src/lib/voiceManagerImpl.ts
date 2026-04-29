@@ -147,37 +147,86 @@ export class VoiceManager implements VoiceManagerApi {
   }
 
   async callRider(remoteUserId: number): Promise<void> {
-    if (this.peers.has(remoteUserId)) return;
+    // If a peer already exists and is not closed, don't create a duplicate offer.
+    const existing = this.peers.get(remoteUserId);
+    if (existing) {
+      const state = (existing as RTCPeerConnection & { signalingState?: string }).signalingState ?? "";
+      // Only skip if already negotiating or connected — allow retry if closed/failed
+      if (state && state !== "closed") return;
+      // Clean up stale peer before re-creating
+      existing.close();
+      this.peers.delete(remoteUserId);
+    }
+
+    // Only the peer with the HIGHER userId sends the offer (prevents glare / double-offer)
+    // Both sides call callRider on voice-rider-joined, but only one should send the offer.
+    if (this.myUserId < remoteUserId) {
+      // I have lower id — I wait for the offer from the higher-id peer
+      // Still create the peer connection so we're ready to receive
+      this.createPeer(remoteUserId);
+      return;
+    }
+
     const pc = this.createPeer(remoteUserId);
 
-    const offer = await pc.createOffer({
-      offerToReceiveAudio: true,
-      offerToReceiveVideo: false,
-    });
-    await pc.setLocalDescription(offer);
+    try {
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: false,
+      });
+      await pc.setLocalDescription(offer);
 
-    this.onSignal?.({
-      type: "voice-offer",
-      fromUserId: this.myUserId,
-      toUserId: remoteUserId,
-      sdp: offer.sdp ?? "",
-    });
+      this.onSignal?.({
+        type: "voice-offer",
+        fromUserId: this.myUserId,
+        toUserId: remoteUserId,
+        sdp: offer.sdp ?? "",
+      });
+    } catch (e) {
+      console.warn("[voice] callRider offer failed:", e);
+      pc.close();
+      this.peers.delete(remoteUserId);
+    }
   }
 
   async handleOffer(fromUserId: number, sdp: string): Promise<void> {
-    const existing = this.peers.get(fromUserId);
-    const pc = existing ?? this.createPeer(fromUserId);
+    // Get or create peer — if we already have one from callRider (lower-id side), reuse it
+    let pc = this.peers.get(fromUserId);
+    if (!pc) {
+      pc = this.createPeer(fromUserId);
+    } else {
+      const state = (pc as RTCPeerConnection & { signalingState?: string }).signalingState;
+      // If we already sent an offer (glare), the higher-id peer wins — lower-id peer rolls back
+      if (state === "have-local-offer") {
+        // We are the lower-id peer (we should not have sent an offer, but just in case)
+        // Roll back and accept the incoming offer
+        try {
+          await pc.setLocalDescription(new RTCSessionDescription({ type: "rollback", sdp: "" }));
+        } catch {
+          // rollback not supported on all versions — recreate peer
+          pc.close();
+          this.peers.delete(fromUserId);
+          pc = this.createPeer(fromUserId);
+        }
+      }
+    }
 
-    await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp }));
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp }));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
 
-    this.onSignal?.({
-      type: "voice-answer",
-      fromUserId: this.myUserId,
-      toUserId: fromUserId,
-      sdp: answer.sdp ?? "",
-    });
+      this.onSignal?.({
+        type: "voice-answer",
+        fromUserId: this.myUserId,
+        toUserId: fromUserId,
+        sdp: answer.sdp ?? "",
+      });
+    } catch (e) {
+      console.warn("[voice] handleOffer failed:", e);
+      pc.close();
+      this.peers.delete(fromUserId);
+    }
   }
 
   async handleAnswer(fromUserId: number, sdp: string): Promise<void> {

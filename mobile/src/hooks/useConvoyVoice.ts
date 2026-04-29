@@ -187,6 +187,11 @@ export function useConvoyVoice({
       const uid = Number(data?.userId);
       if (!Number.isFinite(uid)) return;
       setVoiceRiders((prev) => (prev.includes(uid) ? prev : [...prev, uid]));
+      // Existing rider must initiate the WebRTC offer to the new joiner.
+      // Without this, the new rider sends an offer but existing rider has no
+      // peer connection yet — ICE candidates arrive before setRemoteDescription
+      // causing a crash / connection failure.
+      void managerRef.current?.callRider(uid);
     };
 
     const onVoiceRiderLeft = (data: { userId?: number }) => {
