@@ -1,1 +1,5 @@
-﻿<resources>`n  <string name="app_name>TripSync</string>`n <string name=expo_splash_screen_resize_mode translatable=false>contain</string>`n <string name=expo_splash_screen_status_bar_translucent translatable=false>false</string>`n</resources>
+﻿<resources>
+  <string name="app_name">TripSync</string>
+  <string name="expo_splash_screen_resize_mode" translatable="false">contain</string>
+  <string name="expo_splash_screen_status_bar_translucent" translatable="false">false</string>
+</resources>
