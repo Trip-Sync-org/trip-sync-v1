@@ -2,7 +2,6 @@
  * WebRTC mesh for convoy voice — loaded only when native react-native-webrtc exists (dev / release builds).
  */
 
-import InCallManager from "react-native-incall-manager";
 import {
   MediaStream,
   RTCIceCandidate,
@@ -10,6 +9,20 @@ import {
   RTCSessionDescription,
   mediaDevices,
 } from "react-native-webrtc";
+
+// Lazy-load InCallManager — it crashes on some devices if imported at module level
+type InCallManagerType = { start: (o: object) => void; stop: () => void; setForceSpeakerphoneOn: (v: boolean) => void; setSpeakerphoneOn: (v: boolean) => void };
+let InCallManager: InCallManagerType | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const mod = require("react-native-incall-manager") as { default?: unknown } | unknown;
+  const resolved = (mod as { default?: unknown })?.default ?? mod;
+  if (resolved && typeof (resolved as { start?: unknown }).start === "function") {
+    InCallManager = resolved as unknown as InCallManagerType;
+  }
+} catch {
+  console.warn("[voice] react-native-incall-manager not available (non-fatal)");
+}
 import type { SignalPayload, VoiceManagerApi, VoiceMode } from "./voiceManagerTypes";
 
 export type { VoiceMode, SignalPayload } from "./voiceManagerTypes";
@@ -41,20 +54,25 @@ export class VoiceManager implements VoiceManagerApi {
   }
 
   async start(): Promise<void> {
-    this.localStream = await mediaDevices.getUserMedia({
-      // RN accepts extended audio constraints; DOM typings omit them.
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-      video: false,
-    } as Parameters<typeof mediaDevices.getUserMedia>[0]);
+    try {
+      this.localStream = await mediaDevices.getUserMedia({
+        // RN accepts extended audio constraints; DOM typings omit them.
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      } as Parameters<typeof mediaDevices.getUserMedia>[0]);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`Microphone access failed: ${msg}. Check mic permission in Settings.`);
+    }
 
     try {
-      InCallManager.start({ media: "audio", ringback: "" });
-      InCallManager.setForceSpeakerphoneOn(true);
-      InCallManager.setSpeakerphoneOn(true);
+      InCallManager?.start({ media: "audio", ringback: "" });
+      InCallManager?.setForceSpeakerphoneOn(true);
+      InCallManager?.setSpeakerphoneOn(true);
     } catch (err) {
       console.warn("[voice] InCallManager start failed (non-fatal):", err);
     }
@@ -74,7 +92,7 @@ export class VoiceManager implements VoiceManagerApi {
     this.localStream = null;
 
     try {
-      InCallManager.stop();
+      InCallManager?.stop();
     } catch (err) {
       console.warn("[voice] InCallManager stop failed (non-fatal):", err);
     }
