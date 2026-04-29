@@ -129,8 +129,20 @@ io.on('connection', (socket) => {
       socket.emit('trip-state-sync', { riders: currentRiders });
     }
 
-    // Announce this rider to others
+    // Announce this rider to others in the room
     socket.to(`trip_${tid}`).emit('rider-joined', { userId: uid });
+
+    // If this rider has a last known position, broadcast it to existing riders immediately
+    // so they don't have to wait for the next location-update from this rider
+    const lastPos = tripLocations[tid]?.[uid];
+    if (lastPos) {
+      socket.to(`trip_${tid}`).emit('location-updated', {
+        u: String(uid),
+        userId: uid,
+        lat: lastPos.lat,
+        lng: lastPos.lng,
+      });
+    }
   });
 
   // ── LEAVE TRIP ────────────────────────────────────────────────────────────
@@ -170,11 +182,13 @@ io.on('connection', (socket) => {
     if (!Number.isFinite(uid)) return;
 
     // SERVER-SIDE MOVEMENT FILTER — ignore GPS jitter < 15m
+    // Skip filter for first position (prev is null) so new riders appear immediately
     const prev = tripLocations[tid]?.[uid];
     if (prev) {
       const dist = haversineMeters(prev.lat, prev.lng, lat, lng);
       if (dist < 15) return; // didn't actually move, skip broadcast
     }
+    // First position: always broadcast so existing riders see the new rider immediately
 
     // Store in memory
     if (!tripLocations[tid]) tripLocations[tid] = {};

@@ -1332,6 +1332,15 @@ export function LiveTripScreen({ route, navigation }: Props) {
       );
     };
 
+    // When a new rider joins, ask the server for all current positions so
+    // existing riders (U4, U8) immediately see the new rider on the map.
+    const onRiderJoined = (payload: { userId?: number }) => {
+      const uid = Number(payload?.userId);
+      if (__DEV__) console.log("[convoy] rider joined:", uid);
+      // Ask server to re-send all current positions (trip-state-sync)
+      socket.emit("request-positions", { tripId: id, userId: selfUid });
+    };
+
     const onLocationUpdated = (payload: {
       userId?: number;
       u?: string;
@@ -1444,6 +1453,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
     socket.on("trip-member-presence", onTripMemberPresence);
     socket.on("broadcast-position-now", onBroadcastPositionNow);
     socket.on("rider-left", onRiderLeft);
+    socket.on("rider-joined", onRiderJoined);
     socket.on("location-updated", onLocationUpdated);
     socket.on("convoy-action", onConvoyAction);
     socket.on("trip-state-sync", onTripStateSync);
@@ -1508,6 +1518,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
       socket.off("trip-member-presence", onTripMemberPresence);
       socket.off("broadcast-position-now", onBroadcastPositionNow);
       socket.off("rider-left", onRiderLeft);
+      socket.off("rider-joined", onRiderJoined);
       socket.off("location-updated", onLocationUpdated);
       socket.off("convoy-action", onConvoyAction);
       socket.off("trip-state-sync", onTripStateSync);
