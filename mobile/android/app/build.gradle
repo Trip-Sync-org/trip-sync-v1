@@ -152,12 +152,13 @@ android {
     }
 }
 
-// ─── Exclude Jitsi WebRTC to prevent duplicate class conflict with LiveKit WebRTC ───
-// react-native-incall-manager pulls in org.jitsi:webrtc:124 as a transitive dep.
-// @livekit/react-native-webrtc already provides io.github.webrtc-sdk:android:144.
-// We exclude the older Jitsi AAR globally so only one WebRTC implementation exists.
+// ─── Exclude duplicate WebRTC implementations ─────────────────────────────────────
+// react-native-incall-manager pulls in react-native-webrtc as a transitive dep.
+// @livekit/react-native-webrtc already provides the full WebRTC implementation.
+// Exclude both the Jitsi Maven AAR and the react-native-webrtc project module.
 configurations.all {
     exclude group: "org.jitsi", module: "webrtc"
+    exclude group: "com.oney", module: "react-native-webrtc"
 }
 
 dependencies {
