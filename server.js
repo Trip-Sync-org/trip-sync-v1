@@ -5,14 +5,19 @@
  *
  * Supports the mobile app's event protocol:
  *   Location : join-trip, leave-trip, location-update  →  location-updated, trip-state-sync, rider-left, rider-joined
- *   Voice    : voice-join, voice-leave, voice-signal   →  voice-peers, voice-rider-joined, voice-rider-left, voice-signal
+ *   Voice    : LiveKit SFU — token issued via POST /get-voice-token
  *   Misc     : identify, request-positions, convoy-action
+ *   Waiting  : voice:waiting-join, voice:waiting-leave, voice:raise-hand, voice:lower-hand, voice:speak-approved
  */
 
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import { AccessToken } from 'livekit-server-sdk';
+
+const LIVEKIT_API_KEY    = '3d4b9e638d613281';
+const LIVEKIT_API_SECRET = 'ce0d64f01c7c191dd535533962df9e0e837fa6750b24fa697912083a4879a077';
 
 const app = express();
 const httpServer = createServer(app);
@@ -36,14 +41,38 @@ app.use(express.json());
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => {
   const tripCount = Object.keys(tripLocations).length;
-  const voiceCount = Object.keys(voiceRooms).length;
   res.json({
     status: 'ok',
     riders: tripCount,
-    voiceRooms: voiceCount,
     uptime: Math.floor(process.uptime()),
     connections: io.engine.clientsCount,
   });
+});
+
+// ─── LiveKit voice token endpoint ─────────────────────────────────────────────
+// POST /get-voice-token  { roomName, participantName }
+app.post('/get-voice-token', async (req, res) => {
+  try {
+    const { roomName, participantName } = req.body;
+    if (!roomName || !participantName) {
+      return res.status(400).json({ error: 'roomName and participantName are required' });
+    }
+    const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
+      identity: String(participantName),
+      ttl: '6h',
+    });
+    at.addGrant({
+      roomJoin: true,
+      room: String(roomName),
+      canPublish: true,
+      canSubscribe: true,
+    });
+    const token = await at.toJwt();
+    res.json({ token });
+  } catch (err) {
+    console.error('[voice-token] error:', err);
+    res.status(500).json({ error: 'Failed to generate token' });
+  }
 });
 
 // ─── HTTP polling fallback for live rider positions ────────────────────────────
@@ -60,10 +89,7 @@ app.get('/socket-api/trips/:tripId/riders', (req, res) => {
 // tripLocations[tripId][userId] = { lat, lng, ts }
 const tripLocations = {};
 
-// voiceRooms[tripId] = Map<socketId, userId(number)>
-const voiceRooms = {};
-
-// userId → socketId mapping (for voice signal routing by userId)
+// userId → socketId mapping (used for trip/location routing)
 // userSocketMap[tripId][userId] = socketId
 const userSocketMap = {};
 
@@ -95,7 +121,7 @@ io.on('connection', (socket) => {
     socket.tripId = tid;
     socket.role = role || 'member';
 
-    // Register userId→socketId for voice signal routing
+    // Register userId→socketId for routing
     if (!userSocketMap[tid]) userSocketMap[tid] = {};
     userSocketMap[tid][uid] = socket.id;
 
@@ -133,7 +159,6 @@ io.on('connection', (socket) => {
     socket.to(`trip_${tid}`).emit('rider-joined', { userId: uid });
 
     // If this rider has a last known position, broadcast it to existing riders immediately
-    // so they don't have to wait for the next location-update from this rider
     const lastPos = tripLocations[tid]?.[uid];
     if (lastPos) {
       socket.to(`trip_${tid}`).emit('location-updated', {
@@ -212,115 +237,8 @@ io.on('connection', (socket) => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // VOICE — Mobile app protocol:
-  //   emit:    voice-join, voice-leave, voice-signal
-  //   listen:  voice-peers, voice-rider-joined, voice-rider-left, voice-signal
-  //
-  // voice-signal payload: { tripId, toUserId, fromUserId, signal: { type, ... } }
-  //   type = "voice-offer"  → sdp
-  //   type = "voice-answer" → sdp
-  //   type = "voice-ice"    → candidate
-  //   type = "voice-muted"  → userId, muted  (broadcast toUserId=-1)
-  //   type = "voice-force-mute" → userId, muted
-  // ─────────────────────────────────────────────────────────────────────────
-
-  // ── VOICE JOIN ────────────────────────────────────────────────────────────
-  socket.on('voice-join', ({ tripId, userId }) => {
-    if (!tripId || userId == null) return;
-    const tid = String(tripId);
-    const uid = Number(userId);
-    if (!Number.isFinite(uid)) return;
-
-    socket.join(`voice_${tid}`);
-    socket.voiceTripId = tid;
-    socket.voiceUserId = uid;
-
-    if (!voiceRooms[tid]) voiceRooms[tid] = new Map();
-    voiceRooms[tid].set(socket.id, uid);
-
-    // Register userId→socketId for signal routing
-    if (!userSocketMap[tid]) userSocketMap[tid] = {};
-    userSocketMap[tid][uid] = socket.id;
-
-    // Tell this user who is already in the voice room (as userId array — mobile protocol)
-    const existingPeerUserIds = [];
-    voiceRooms[tid].forEach((existingUserId, existingSocketId) => {
-      if (existingSocketId !== socket.id && Number.isFinite(existingUserId)) {
-        existingPeerUserIds.push(existingUserId);
-      }
-    });
-    socket.emit('voice-peers', { peers: existingPeerUserIds });
-
-    // Tell everyone else a new peer joined
-    socket.to(`voice_${tid}`).emit('voice-rider-joined', { userId: uid });
-
-    console.log(
-      `[voice] user ${uid} joined voice room ${tid} (${voiceRooms[tid].size} peers)`,
-    );
-  });
-
-  // ── VOICE LEAVE ───────────────────────────────────────────────────────────
-  socket.on('voice-leave', ({ tripId, userId }) => {
-    if (!tripId) return;
-    const tid = String(tripId);
-    const uid = userId != null ? Number(userId) : socket.voiceUserId;
-    socket.leave(`voice_${tid}`);
-    cleanupVoice(tid, socket.id);
-    socket.to(`voice_${tid}`).emit('voice-rider-left', { userId: uid });
-    console.log(`[voice] user ${uid} left voice room ${tid}`);
-  });
-
-  // ── VOICE SIGNAL RELAY ────────────────────────────────────────────────────
-  // Routes by toUserId (numeric) using userSocketMap
-  socket.on('voice-signal', ({ tripId, toUserId, fromUserId, signal }) => {
-    if (!signal || typeof signal !== 'object') return;
-
-    const tid = tripId ? String(tripId) : socket.voiceTripId ?? socket.tripId;
-    if (!tid) return;
-
-    const fromUid = Number(fromUserId ?? socket.voiceUserId ?? socket.userId);
-
-    // Broadcast (mute status) — toUserId === -1 means send to all in voice room
-    if (toUserId === -1 || toUserId == null) {
-      socket.to(`voice_${tid}`).emit('voice-signal', {
-        tripId: tid,
-        toUserId,
-        fromUserId: fromUid,
-        signal,
-      });
-      return;
-    }
-
-    const toUid = Number(toUserId);
-    if (!Number.isFinite(toUid)) return;
-
-    // Route to specific peer by userId
-    const targetSocketId = userSocketMap[tid]?.[toUid];
-    if (targetSocketId) {
-      io.to(targetSocketId).emit('voice-signal', {
-        tripId: tid,
-        toUserId: toUid,
-        fromUserId: fromUid,
-        signal,
-      });
-    } else {
-      // Fallback: broadcast to voice room (peer may have reconnected with new socketId)
-      socket.to(`voice_${tid}`).emit('voice-signal', {
-        tripId: tid,
-        toUserId: toUid,
-        fromUserId: fromUid,
-        signal,
-      });
-      console.warn(
-        `[voice] no socketId for userId=${toUid} in trip=${tid}, broadcasting to room`,
-      );
-    }
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────
   // WAITING ROOM VOICE EVENTS (forwarded to trip room)
-  // These are used by useWaitingRoomVoice via Supabase Realtime, but some
-  // clients may also use socket for these — relay them just in case.
+  // These are used by useWaitingRoomVoice — relay them for real-time sync.
   // ─────────────────────────────────────────────────────────────────────────
   socket.on('voice:waiting-join', ({ tripId, userId }) => {
     if (!tripId) return;
@@ -361,13 +279,6 @@ io.on('connection', (socket) => {
         delete userSocketMap[socket.tripId][socket.userId];
       }
     }
-
-    if (socket.voiceTripId != null) {
-      cleanupVoice(socket.voiceTripId, socket.id);
-      socket.to(`voice_${socket.voiceTripId}`).emit('voice-rider-left', {
-        userId: socket.voiceUserId,
-      });
-    }
   });
 });
 
@@ -379,15 +290,6 @@ function cleanupRider(tripId, userId, _socketId) {
     delete tripLocations[tid][uid];
     if (Object.keys(tripLocations[tid]).length === 0) {
       delete tripLocations[tid];
-    }
-  }
-}
-
-function cleanupVoice(tripId, socketId) {
-  if (voiceRooms[tripId]) {
-    voiceRooms[tripId].delete(socketId);
-    if (voiceRooms[tripId].size === 0) {
-      delete voiceRooms[tripId];
     }
   }
 }
