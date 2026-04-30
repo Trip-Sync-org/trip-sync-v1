@@ -19,7 +19,8 @@
       "env": {
         "APP_VARIANT": "preview",
         "EXPO_PUBLIC_API_URL": "https://trip-sync-v1.vercel.app",
-        "EXPO_PUBLIC_SOCKET_URL": "https://socket.tripsync.live"
+        "EXPO_PUBLIC_SOCKET_URL": "https://socket.tripsync.live",
+        "EXPO_PUBLIC_LIVEKIT_URL": "wss://voice.tripsync.live"
       },
       "releaseChannel": "preview"
     },
@@ -31,7 +32,8 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://trip-sync-v1.vercel.app",
-        "EXPO_PUBLIC_SOCKET_URL": "https://socket.tripsync.live"
+        "EXPO_PUBLIC_SOCKET_URL": "https://socket.tripsync.live",
+        "EXPO_PUBLIC_LIVEKIT_URL": "wss://voice.tripsync.live"
       }
     }
   },

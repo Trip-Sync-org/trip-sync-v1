@@ -29,7 +29,7 @@ try {
   // Expo Go or package not installed — voice gracefully disabled
 }
 
-const LIVEKIT_WS_URL = "wss://voice.tripsync.live";
+const LIVEKIT_WS_URL = process.env.EXPO_PUBLIC_LIVEKIT_URL ?? "wss://voice.tripsync.live";
 
 export type VoiceMode = "open" | "controlled";
 

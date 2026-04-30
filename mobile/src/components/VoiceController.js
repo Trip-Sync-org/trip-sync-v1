@@ -14,7 +14,7 @@ try {
 }
 
 const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'https://socket.tripsync.live';
-const LIVEKIT_WS_URL = 'wss://voice.tripsync.live';
+const LIVEKIT_WS_URL = process.env.EXPO_PUBLIC_LIVEKIT_URL ?? 'wss://voice.tripsync.live';
 
 /**
  * VoiceController
