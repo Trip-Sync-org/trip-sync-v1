@@ -1,0 +1,176 @@
+cat > /var/www/tripsync-socket/server.js << 'SERVEREOF'
+import express from 'express';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
+import cors from 'cors';
+import { AccessToken } from 'livekit-server-sdk';
+
+const LIVEKIT_API_KEY    = '3d4b9e638d613281';
+const LIVEKIT_API_SECRET = 'ce0d64f01c7c191dd535533962df9e0e837fa6750b24fa697912083a4879a077';
+
+const app = express();
+const httpServer = createServer(app);
+
+const io = new Server(httpServer, {
+  cors: { origin: '*', methods: ['GET', 'POST'] },
+  transports: ['polling', 'websocket'],
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  connectTimeout: 45000,
+});
+
+app.use(cors());
+app.use(express.json());
+
+const tripLocations = {};
+const userSocketMap = {};
+
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok', riders: Object.keys(tripLocations).length, uptime: Math.floor(process.uptime()), connections: io.engine.clientsCount });
+});
+
+app.post('/get-voice-token', async (req, res) => {
+  try {
+    const { roomName, participantName } = req.body;
+    if (!roomName || !participantName) return res.status(400).json({ error: 'roomName and participantName are required' });
+    const at = new AccessToken('3d4b9e638d613281', 'ce0d64f01c7c191dd535533962df9e0e837fa6750b24fa697912083a4879a077', { identity: String(participantName), ttl: '6h' });
+    at.addGrant({ roomJoin: true, room: String(roomName), canPublish: true, canSubscribe: true });
+    const token = await at.toJwt();
+    res.json({ token });
+  } catch (err) {
+    console.error('[voice-token] error:', err);
+    res.status(500).json({ error: 'Failed to generate token' });
+  }
+});
+
+app.get('/socket-api/trips/:tripId/riders', (req, res) => {
+  const { tripId } = req.params;
+  const riders = Object.entries(tripLocations[tripId] ?? {}).map(([userId, loc]) => ({ userId, ...loc }));
+  res.json({ riders });
+});
+
+function haversineMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+io.on('connection', (socket) => {
+  console.log(`[socket] connected: ${socket.id}`);
+
+  socket.on('identify', ({ userId, tripId, role }) => {
+    if (!userId || !tripId) return;
+    const uid = Number(userId);
+    const tid = String(tripId);
+    if (!Number.isFinite(uid)) return;
+    socket.userId = uid; socket.tripId = tid; socket.role = role || 'member';
+    if (!userSocketMap[tid]) userSocketMap[tid] = {};
+    userSocketMap[tid][uid] = socket.id;
+    console.log(`[socket] identified: userId=${uid} tripId=${tid} role=${role}`);
+  });
+
+  socket.on('join-trip', ({ tripId, userId }) => {
+    if (!tripId || userId == null) return;
+    const tid = String(tripId);
+    const uid = Number(userId);
+    socket.join(`trip_${tid}`);
+    socket.tripId = tid;
+    if (Number.isFinite(uid)) {
+      socket.userId = uid;
+      if (!userSocketMap[tid]) userSocketMap[tid] = {};
+      userSocketMap[tid][uid] = socket.id;
+    }
+    console.log(`[socket] user ${uid} joined trip ${tid}`);
+    const currentRiders = Object.entries(tripLocations[tid] ?? {}).filter(([ruid]) => Number(ruid) !== uid).map(([ruid, loc]) => ({ userId: ruid, ...loc }));
+    if (currentRiders.length > 0) socket.emit('trip-state-sync', { riders: currentRiders });
+    socket.to(`trip_${tid}`).emit('rider-joined', { userId: uid });
+    const lastPos = tripLocations[tid]?.[uid];
+    if (lastPos) socket.to(`trip_${tid}`).emit('location-updated', { u: String(uid), userId: uid, lat: lastPos.lat, lng: lastPos.lng });
+  });
+
+  socket.on('leave-trip', ({ tripId, userId }) => {
+    if (!tripId || userId == null) return;
+    const tid = String(tripId); const uid = Number(userId);
+    socket.leave(`trip_${tid}`);
+    cleanupRider(tid, uid, socket.id);
+    socket.to(`trip_${tid}`).emit('rider-left', { userId: uid });
+    console.log(`[socket] user ${uid} left trip ${tid}`);
+  });
+
+  socket.on('request-positions', ({ tripId, userId }) => {
+    if (!tripId) return;
+    const tid = String(tripId); const uid = userId != null ? Number(userId) : null;
+    const currentRiders = Object.entries(tripLocations[tid] ?? {}).filter(([ruid]) => uid == null || Number(ruid) !== uid).map(([ruid, loc]) => ({ userId: ruid, ...loc }));
+    if (currentRiders.length > 0) socket.emit('trip-state-sync', { riders: currentRiders });
+  });
+
+  socket.on('location-update', ({ tripId, userId, lat, lng }) => {
+    if (!tripId || userId == null || lat == null || lng == null) return;
+    if (!isFinite(lat) || !isFinite(lng)) return;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+    const tid = String(tripId); const uid = Number(userId);
+    if (!Number.isFinite(uid)) return;
+    const prev = tripLocations[tid]?.[uid];
+    if (prev) { const dist = haversineMeters(prev.lat, prev.lng, lat, lng); if (dist < 15) return; }
+    if (!tripLocations[tid]) tripLocations[tid] = {};
+    tripLocations[tid][uid] = { lat, lng, ts: Date.now() };
+    socket.to(`trip_${tid}`).emit('location-updated', { u: String(uid), userId: uid, lat, lng });
+  });
+
+  socket.on('convoy-action', (payload) => {
+    const tid = payload?.tripId ? String(payload.tripId) : socket.tripId;
+    if (!tid) return;
+    io.to(`trip_${tid}`).emit('convoy-action', payload);
+  });
+
+  socket.on('voice:waiting-join', ({ tripId, userId }) => { if (!tripId) return; socket.to(`trip_${tripId}`).emit('voice:waiting-join', { userId }); });
+  socket.on('voice:waiting-leave', ({ tripId, userId }) => { if (!tripId) return; socket.to(`trip_${tripId}`).emit('voice:waiting-leave', { userId }); });
+  socket.on('voice:raise-hand', ({ tripId, userId }) => { if (!tripId) return; socket.to(`trip_${tripId}`).emit('voice:raise-hand', { userId }); });
+  socket.on('voice:lower-hand', ({ tripId, userId }) => { if (!tripId) return; socket.to(`trip_${tripId}`).emit('voice:lower-hand', { userId }); });
+  socket.on('voice:speak-approved', ({ tripId, userId, approvedBy }) => { if (!tripId) return; socket.to(`trip_${tripId}`).emit('voice:speak-approved', { userId, approvedBy }); });
+
+  socket.on('disconnect', (reason) => {
+    console.log(`[socket] disconnected: ${socket.id} (${reason})`);
+    if (socket.tripId != null && socket.userId != null) {
+      cleanupRider(socket.tripId, socket.userId, socket.id);
+      socket.to(`trip_${socket.tripId}`).emit('rider-left', { userId: socket.userId });
+      if (userSocketMap[socket.tripId]?.[socket.userId] === socket.id) delete userSocketMap[socket.tripId][socket.userId];
+    }
+  });
+});
+
+function cleanupRider(tripId, userId, _socketId) {
+  const tid = String(tripId); const uid = Number(userId);
+  if (tripLocations[tid] && Number.isFinite(uid)) {
+    delete tripLocations[tid][uid];
+    if (Object.keys(tripLocations[tid]).length === 0) delete tripLocations[tid];
+  }
+}
+
+setInterval(() => {
+  const now = Date.now(); const STALE_MS = 30 * 60 * 1000;
+  Object.keys(tripLocations).forEach((tripId) => {
+    Object.keys(tripLocations[tripId]).forEach((userId) => { if (now - tripLocations[tripId][userId].ts > STALE_MS) delete tripLocations[tripId][userId]; });
+    if (Object.keys(tripLocations[tripId]).length === 0) delete tripLocations[tripId];
+  });
+  Object.keys(userSocketMap).forEach((tripId) => { if (Object.keys(userSocketMap[tripId]).length === 0) delete userSocketMap[tripId]; });
+}, 5 * 60 * 1000);
+
+const PORT = process.env.PORT || 4000;
+httpServer.listen(PORT, () => {
+  console.log(`[server] Trip-Sync Socket.IO running on port ${PORT}`);
+  console.log(`[server] Health: http://localhost:${PORT}/health`);
+});
+SERVEREOF
+
+echo "=== server.js written ==="
+wc -l /var/www/tripsync-socket/server.js
+
+cd /var/www/tripsync-socket
+npm install livekit-server-sdk
+pm2 restart tripsync-socket
+sleep 4
+pm2 logs tripsync-socket --lines 15 --nostream
+curl -s http://localhost:4000/health

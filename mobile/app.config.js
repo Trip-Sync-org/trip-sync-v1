@@ -2,7 +2,7 @@ module.exports = {
   expo: {
     name: "TripSync",
     slug: "trip-sync-deploy",
-    owner: "tripsync-dev",
+    owner: "trip-sync",
     scheme: "tripsync",
     version: "1.0.1",
     orientation: "portrait",
@@ -61,7 +61,7 @@ module.exports = {
     ],
     extra: {
       eas: {
-        projectId: "2655de30-8a6d-4f1a-a272-5c712f9abc98",
+        projectId: "09cc91aa-0098-4bbe-833c-b70e201e1544",
       },
       mapboxPublicToken: (process.env.EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN || "").trim(),
     },
