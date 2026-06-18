@@ -1,3 +1,4 @@
+//App.tsx
 import React from "react";
 import { KeyboardAvoidingView, Platform, View } from "react-native";
 import { StatusBar } from "expo-status-bar";

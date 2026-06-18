@@ -14,6 +14,8 @@ import { ForgotPasswordScreen } from "../screens/ForgotPasswordScreen";
 import { ResetEmailSentScreen } from "../screens/ResetEmailSentScreen";
 import { SetNewPasswordScreen } from "../screens/SetNewPasswordScreen";
 import { OnboardingScreen } from "../screens/OnboardingScreen";
+import { OnboardingPermissionsScreen } from "../screens/OnboardingPermissionsScreen";
+import { AuthBootstrapScreen } from "../screens/AuthBootstrapScreen";
 import { ExploreScreen } from "../screens/ExploreScreen";
 import { UserDashboardScreen } from "../screens/UserDashboardScreen";
 import { OrganizerScreen } from "../screens/OrganizerScreen";
@@ -113,6 +115,8 @@ function OrganizerHeaderMenu() {
 export type RootStackParamList = {
   Splash: undefined;
   Onboarding: undefined;
+  AuthBootstrap: undefined;
+  OnboardingPermissions: undefined;
   Login: undefined;
   Signup: undefined;
   ForgotPassword: undefined;
@@ -206,6 +210,7 @@ export function AppNavigator() {
   return (
     <NavigationContainer theme={navTheme}>
       <Stack.Navigator
+        key={user ? "authenticated" : "guest"}
         initialRouteName="Splash"
         screenOptions={{
           headerShown: false,
@@ -226,6 +231,8 @@ export function AppNavigator() {
           </>
         ) : (
           <>
+            <Stack.Screen name="AuthBootstrap" component={AuthBootstrapScreen} />
+            <Stack.Screen name="OnboardingPermissions" component={OnboardingPermissionsScreen} />
             <Stack.Screen name="Main" component={MainTabs} />
             <Stack.Screen name="TripDetail" component={TripDetailScreen} options={{ headerShown: true, title: "Trip" }} />
             <Stack.Screen

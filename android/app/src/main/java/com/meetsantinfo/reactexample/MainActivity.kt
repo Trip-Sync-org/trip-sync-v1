@@ -1,4 +1,4 @@
-package com.anonymous.reactexample
+package com.meetsantinfo.reactexample
 
 import android.os.Build
 import android.os.Bundle

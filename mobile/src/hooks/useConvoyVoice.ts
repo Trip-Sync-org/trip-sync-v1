@@ -75,6 +75,8 @@ export function useConvoyVoice({
   const roomRef = useRef<any>(null);
   const localMutedRef = useRef(isMuted);
   localMutedRef.current = isMuted;
+  const canSpeakRef = useRef(canSpeak);
+  canSpeakRef.current = canSpeak;
 
   // ── JOIN ──────────────────────────────────────────────────────────────────
   const joinVoice = useCallback(async (): Promise<boolean> => {
@@ -132,8 +134,10 @@ export function useConvoyVoice({
         dynacast: false,
       });
 
-      // Apply initial mute state
-      await room.localParticipant?.setMicrophoneEnabled(!localMutedRef.current);
+      // Apply initial mic state from permission gate + manual mute preference
+      await room.localParticipant?.setMicrophoneEnabled(
+        canSpeakRef.current && !localMutedRef.current,
+      );
 
       // Track remote participants
       const syncRiders = () => {
@@ -186,7 +190,8 @@ export function useConvoyVoice({
     const room = roomRef.current;
     if (!room?.localParticipant) return false;
     const nowMuted = !localMutedRef.current;
-    room.localParticipant.setMicrophoneEnabled(!nowMuted).catch((e: unknown) => {
+    const effectiveOn = canSpeakRef.current && !nowMuted;
+    room.localParticipant.setMicrophoneEnabled(effectiveOn).catch((e: unknown) => {
       console.warn("[voice] setMicrophoneEnabled error:", e);
     });
     return nowMuted;
@@ -195,7 +200,8 @@ export function useConvoyVoice({
   const setMuted = useCallback((muted: boolean) => {
     const room = roomRef.current;
     if (!room?.localParticipant) return;
-    room.localParticipant.setMicrophoneEnabled(!muted).catch((e: unknown) => {
+    const shouldBeOn = canSpeakRef.current && !muted;
+    room.localParticipant.setMicrophoneEnabled(shouldBeOn).catch((e: unknown) => {
       console.warn("[voice] setMicrophoneEnabled error:", e);
     });
   }, []);
@@ -225,20 +231,14 @@ export function useConvoyVoice({
     // using room.remoteParticipants.get(identity)?.audioTrackPublications
   }, []);
 
-  // ── SYNC isMuted prop → LiveKit ───────────────────────────────────────────
+  // ── Single source of truth: LiveKit mic = canSpeak AND NOT manual mute ────
   useEffect(() => {
-    if (!isInVoice) return;
-    setMuted(isMuted);
-  }, [isMuted, isInVoice, setMuted]);
-
-  // ── SYNC canSpeak (voice mode changes) ────────────────────────────────────
-  useEffect(() => {
-    if (!isInVoice) return;
-    // In controlled mode, non-speakers are muted
-    if (!canSpeak) {
-      setMuted(true);
-    }
-  }, [canSpeak, isInVoice, setMuted]);
+    if (!isInVoice || !roomRef.current?.localParticipant) return;
+    const shouldBeOn = canSpeak && !isMuted;
+    roomRef.current.localParticipant
+      .setMicrophoneEnabled(shouldBeOn)
+      .catch((e: unknown) => console.warn("[voice] mic sync error:", e));
+  }, [canSpeak, isMuted, isInVoice]);
 
   // ── CLEANUP on unmount ────────────────────────────────────────────────────
   useEffect(() => {

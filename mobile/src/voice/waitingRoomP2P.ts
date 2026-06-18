@@ -2,7 +2,6 @@
  * WebRTC peer mesh for waiting-room voice (P2P audio via free STUN; signaling over Supabase Realtime).
  * Requires a development build â€” Expo Go does not ship react-native-webrtc native code.
  */
-
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import { NativeModules } from "react-native";
 import { EVENTS, ICE_SERVERS, signalingChannel } from "../../shared/voiceConstants.js";

@@ -1,3 +1,4 @@
+//voiceConstants.js
 /**
  * Shared voice channel constants (no external services — plain JS for mobile + web + backend).
  */

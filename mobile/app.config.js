@@ -27,6 +27,7 @@ module.exports = {
       package: "com.tripsync.app",
       versionCode: 1,
       usesCleartextTraffic: true,
+      // NOTE: REQUEST_IGNORE_BATTERY_OPTIMIZATIONS is Play-restricted — see batteryOptimization.ts
       permissions: [
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
@@ -34,6 +35,11 @@ module.exports = {
         "android.permission.BLUETOOTH",
         "android.permission.BLUETOOTH_CONNECT",
         "android.permission.BLUETOOTH_SCAN",
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+      ],
+      blockedPermissions: [
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.CAMERA",
       ],
       adaptiveIcon: {
         foregroundImage: "./assets/images/apk-logo.png",
@@ -56,6 +62,15 @@ module.exports = {
         {
           locationAlwaysAndWhenInUsePermission:
             "Trip-Sync uses your location to set the meetup or drop-off point.",
+        },
+      ],
+      [
+        "expo-image-picker",
+        {
+          photosPermission:
+            "Allow TripSync to access your photos to add images to nearby attractions.",
+          cameraPermission: false,
+          microphonePermission: false,
         },
       ],
     ],

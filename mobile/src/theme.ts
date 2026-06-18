@@ -1,3 +1,4 @@
+//theme.ts
 import { Platform, TextStyle } from "react-native";
 
 /** Aligns with web `index.css`: Inter + Space Grotesk feel (system fonts on device). */

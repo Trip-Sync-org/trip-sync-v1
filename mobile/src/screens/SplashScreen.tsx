@@ -38,7 +38,7 @@ export function SplashScreen({ navigation }: Props) {
         console.log("authToken:", authToken);
 
         if (user || (authToken && authToken !== "null" && authToken !== "")) {
-          navigation.replace("Main");
+          navigation.replace("AuthBootstrap");
         } else if (!onboardingDone || onboardingDone !== "true") {
           navigation.replace("Onboarding");
         } else {

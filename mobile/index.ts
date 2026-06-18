@@ -1,3 +1,4 @@
+//index.ts
 import "react-native-gesture-handler";
 
 // LiveKit WebRTC globals — MUST be called before any LiveKit or WebRTC code runs.

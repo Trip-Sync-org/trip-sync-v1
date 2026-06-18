@@ -1,3 +1,4 @@
+//config.ts
 const rawApiUrl = process.env["EXPO_PUBLIC_API_URL"] ?? "";
 const rawSocketUrl = process.env["EXPO_PUBLIC_SOCKET_URL"] ?? "";
 

@@ -1,4 +1,4 @@
-package com.anonymous.reactexample
+package com.meetsantinfo.reactexample
 
 import android.app.Application
 import android.content.res.Configuration

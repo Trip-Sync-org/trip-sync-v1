@@ -20,7 +20,9 @@
     "eas:android": "cd mobile && npx eas-cli@latest build --platform android --profile preview",
     "eas:android:production": "cd mobile && npx eas-cli@latest build --platform android --profile production",
     "clean": "rm -rf dist",
-    "lint": "tsc -p backend/tsconfig.json --noEmit"
+    "lint": "tsc -p backend/tsconfig.json --noEmit",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
@@ -36,6 +38,7 @@
     "date-fns": "^4.1.0",
     "dotenv": "^17.2.3",
     "expo": "~54.0.27",
+    "expo-dev-client": "~6.0.21",
     "expo-image-picker": "^55.0.19",
     "expo-location": "^55.1.8",
     "expo-print": "^55.0.13",

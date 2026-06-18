@@ -1,3 +1,4 @@
+//VoiceController.js
 import React, { useEffect, useCallback, useRef } from 'react';
 import { View, TouchableOpacity, Text, Alert, StyleSheet } from 'react-native';
 import useTripVoiceStore from '../store/useTripVoiceStore';
