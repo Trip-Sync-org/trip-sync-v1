@@ -1,4 +1,4 @@
-package com.meetsantinfo.reactexample
+package com.tripsync.app
 
 import android.os.Build
 import android.os.Bundle

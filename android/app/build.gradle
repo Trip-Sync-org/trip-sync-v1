@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.meetsantinfo.reactexample'
+    namespace 'com.tripsync.app'
     defaultConfig {
-        applicationId 'com.meetsantinfo.reactexample'
+        applicationId 'com.tripsync.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
