@@ -150,26 +150,46 @@ export function useConvoyVoice({
       }
 
       await room.connect(LIVEKIT_WS_URL, token, {
-        audio: true,
-        video: false,
-        adaptiveStream: false,
-
-        dynacast: false,
+        autoSubscribe: true,
       });
+      console.log("[voice] room.connect resolved. localParticipant:", !!room.localParticipant);
 
-      // Apply initial mic state from permission gate + manual mute preference
+      // Explicitly CREATE and PUBLISH a native microphone track.
+      //
+      // Why not just setMicrophoneEnabled(true)? On React Native, if the native
+      // WebRTC factory isn't wired into the track that livekit-client creates,
+      // setMicrophoneEnabled() can resolve without ever opening getUserMedia —
+      // the SFU then shows the participant connected with AddTrackRequests:[]
+      // (no audio transceiver), the OS mic never opens (no green dot), and no
+      // audio flows. Creating the track via @livekit/react-native's
+      // createLocalAudioTrack forces getUserMedia through the native module, so
+      // a missing mic / permission / factory problem throws here loudly instead
+      // of silently no-op'ing.
       const initialMicOn = canSpeakRef.current && !localMutedRef.current;
-      await room.localParticipant
-        ?.setMicrophoneEnabled(initialMicOn)
-        .then(() => {
-          console.log(
-            "[voice] join setMicrophoneEnabled",
-            initialMicOn,
-            "succeeded. isMicrophoneEnabled now:",
-            room.localParticipant?.isMicrophoneEnabled,
-          );
-        })
-        .catch((e: unknown) => console.error("[voice] join setMicrophoneEnabled FAILED:", e));
+      try {
+        // createLocalTracks comes from livekit-client but uses the globals that
+        // registerGlobals() wired up, i.e. the native getUserMedia.
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { createLocalAudioTrack } = require("livekit-client");
+        const micTrack = await createLocalAudioTrack({
+          echoCancellation: true,
+          noiseSuppression: true,
+        });
+        console.log("[voice] createLocalAudioTrack succeeded. track:", micTrack?.sid ?? "(no sid yet)");
+        await room.localParticipant.publishTrack(micTrack);
+        console.log("[voice] publishTrack(mic) succeeded — audio track is now on the SFU.");
+        // Honour mute/permission gate: if the user shouldn't be on, mute it
+        // immediately (track stays published so unmute is instant + green dot
+        // proves capture is wired).
+        if (!initialMicOn) {
+          await room.localParticipant.setMicrophoneEnabled(false);
+        }
+        console.log("[voice] initial mic publish done. isMicrophoneEnabled:", room.localParticipant?.isMicrophoneEnabled);
+      } catch (micErr: unknown) {
+        console.error("[voice] FAILED to create/publish mic track:", micErr);
+        throw micErr; // surface the real reason instead of a silent dead mic
+      }
+
 
       // Track remote participants
       const syncRiders = () => {
