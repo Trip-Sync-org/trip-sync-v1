@@ -124,18 +124,36 @@ export function useConvoyVoice({
       const room = new Room();
       roomRef.current = room;
 
-      // Start audio session before connecting
+      // Start the native audio session BEFORE connecting / publishing the mic.
+      // startAudioSession() is async (returns a Promise) — it MUST be awaited so the
+      // native Android AudioManager enters communication/recording mode before any
+      // track is published. If we don't await it, setMicrophoneEnabled() can "succeed"
+      // at the JS layer while the OS never actually opens the mic (no green-dot
+      // indicator, no audio). This ordering is required per the @livekit/react-native docs.
+      if (!AudioSession) {
+        throw new Error(
+          "AudioSession unavailable — @livekit/react-native native module not linked. Rebuild dev client: npx expo run:android",
+        );
+      }
       try {
-        AudioSession?.startAudioSession();
-        console.log("[voice] AudioSession.startAudioSession() succeeded");
+        // Configure Android for communication-mode audio (mic capture route).
+        if (Platform.OS === "android" && typeof AudioSession.configureAudio === "function") {
+          await AudioSession.configureAudio({
+            android: { audioTypeOptions: AudioSession.AndroidAudioTypePresets?.communication },
+          });
+        }
+        await AudioSession.startAudioSession();
+        console.log("[voice] AudioSession.startAudioSession() succeeded (awaited)");
       } catch (audioErr: unknown) {
         console.error("[voice] AudioSession.startAudioSession() FAILED:", audioErr);
+        throw audioErr; // without a live audio session the mic cannot open — fail the join
       }
 
       await room.connect(LIVEKIT_WS_URL, token, {
         audio: true,
         video: false,
         adaptiveStream: false,
+
         dynacast: false,
       });
 
