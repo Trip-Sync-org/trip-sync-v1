@@ -667,6 +667,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
     enabled: phase === "waiting",
     localMemberId,
     canModerateVoice,
+    userId: appUid,
   });
 
   const localAllowedInControlled =

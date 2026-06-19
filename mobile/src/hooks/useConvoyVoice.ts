@@ -125,7 +125,12 @@ export function useConvoyVoice({
       roomRef.current = room;
 
       // Start audio session before connecting
-      AudioSession?.startAudioSession();
+      try {
+        AudioSession?.startAudioSession();
+        console.log("[voice] AudioSession.startAudioSession() succeeded");
+      } catch (audioErr: unknown) {
+        console.error("[voice] AudioSession.startAudioSession() FAILED:", audioErr);
+      }
 
       await room.connect(LIVEKIT_WS_URL, token, {
         audio: true,
@@ -135,9 +140,18 @@ export function useConvoyVoice({
       });
 
       // Apply initial mic state from permission gate + manual mute preference
-      await room.localParticipant?.setMicrophoneEnabled(
-        canSpeakRef.current && !localMutedRef.current,
-      );
+      const initialMicOn = canSpeakRef.current && !localMutedRef.current;
+      await room.localParticipant
+        ?.setMicrophoneEnabled(initialMicOn)
+        .then(() => {
+          console.log(
+            "[voice] join setMicrophoneEnabled",
+            initialMicOn,
+            "succeeded. isMicrophoneEnabled now:",
+            room.localParticipant?.isMicrophoneEnabled,
+          );
+        })
+        .catch((e: unknown) => console.error("[voice] join setMicrophoneEnabled FAILED:", e));
 
       // Track remote participants
       const syncRiders = () => {
@@ -237,7 +251,15 @@ export function useConvoyVoice({
     const shouldBeOn = canSpeak && !isMuted;
     roomRef.current.localParticipant
       .setMicrophoneEnabled(shouldBeOn)
-      .catch((e: unknown) => console.warn("[voice] mic sync error:", e));
+      .then(() => {
+        console.log(
+          "[voice] setMicrophoneEnabled",
+          shouldBeOn,
+          "succeeded. isMicrophoneEnabled now:",
+          roomRef.current?.localParticipant?.isMicrophoneEnabled,
+        );
+      })
+      .catch((e: unknown) => console.error("[voice] setMicrophoneEnabled FAILED:", e));
   }, [canSpeak, isMuted, isInVoice]);
 
   // ── CLEANUP on unmount ────────────────────────────────────────────────────

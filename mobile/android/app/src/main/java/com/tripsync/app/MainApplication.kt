@@ -16,6 +16,9 @@ import com.facebook.react.defaults.DefaultReactNativeHost
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
 
+import com.livekit.reactnative.LiveKitReactNative
+import com.livekit.reactnative.audio.AudioType
+
 class MainApplication : Application(), ReactApplication {
 
   override val reactNativeHost: ReactNativeHost = ReactNativeHostWrapper(
@@ -40,6 +43,8 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    // Required for LiveKit native audio capture (mic indicator, WebRTC publish).
+    LiveKitReactNative.setup(this, AudioType.CommunicationAudioType())
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
     } catch (e: IllegalArgumentException) {

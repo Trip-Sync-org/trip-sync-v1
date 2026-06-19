@@ -3,12 +3,13 @@ import "react-native-gesture-handler";
 
 // LiveKit WebRTC globals — MUST be called before any LiveKit or WebRTC code runs.
 // Without this, @livekit/react-native throws "WebRTC isn't detected, have you called registerGlobals?"
+import { registerGlobals } from "@livekit/react-native";
 try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { registerGlobals } = require("@livekit/react-native") as typeof import("@livekit/react-native");
   registerGlobals();
-} catch (_) {
-  // Expo Go does not include native WebRTC — safe to ignore here
+  console.log("[livekit] registerGlobals() succeeded");
+} catch (e) {
+  console.error("[livekit] registerGlobals() FAILED:", e);
+  if (__DEV__) throw e;
 }
 
 import { registerRootComponent } from "expo";

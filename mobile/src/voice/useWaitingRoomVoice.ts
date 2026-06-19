@@ -5,10 +5,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import { apiFetch } from "../api/client";
 import { supabase } from "../lib/supabase";
 import { tripChannel, EVENTS } from "../../shared/voiceConstants.js";
+import { apiModeToVoiceMode, voiceModeToApiMode, type VoiceMode } from "./voiceModeApi";
 
-export type VoiceMode = "open" | "controlled";
+export type { VoiceMode };
 
 type UseWaitingRoomVoiceOpts = {
   tripId: string;
@@ -16,6 +18,8 @@ type UseWaitingRoomVoiceOpts = {
   enabled: boolean;
   localMemberId: string | null;
   canModerateVoice: boolean;
+  /** Numeric app user id — used to persist voice mode via API */
+  userId?: number | null;
 };
 
 export function useWaitingRoomVoice({
@@ -23,6 +27,7 @@ export function useWaitingRoomVoice({
   enabled,
   localMemberId,
   canModerateVoice,
+  userId,
 }: UseWaitingRoomVoiceOpts) {
   const [voiceMode, setVoiceModeState] = useState<VoiceMode>("controlled");
   const [videoCallActive, setVideoCallActive] = useState(false);
@@ -42,6 +47,26 @@ export function useWaitingRoomVoice({
     }
     await ch.send({ type: "broadcast", event, payload });
   }, []);
+
+  /** Fetch persisted mode so late joiners get current state (not stale default). */
+  useEffect(() => {
+    if (!enabled || !tripId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch(`/api/trips/${encodeURIComponent(tripId)}/voice-mode`);
+        if (!res.ok || cancelled) return;
+        const body = (await res.json()) as { mode?: string };
+        if (cancelled) return;
+        setVoiceModeState(apiModeToVoiceMode(body.mode));
+      } catch (e) {
+        if (__DEV__) console.warn("[voice] fetch voice-mode failed:", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, tripId]);
 
   useEffect(() => {
     if (!supabase || !enabled || !tripId) return;
@@ -128,8 +153,18 @@ export function useWaitingRoomVoice({
       if (!canModerateVoice) return;
       setVoiceModeState(mode);
       await broadcast(EVENTS.WAITING_VOICE_MODE, { mode });
+      if (userId != null && Number.isFinite(userId) && userId > 0) {
+        try {
+          await apiFetch(`/api/trips/${encodeURIComponent(tripId)}/voice-mode`, {
+            method: "PATCH",
+            body: JSON.stringify({ mode: voiceModeToApiMode(mode), user_id: userId }),
+          });
+        } catch (e) {
+          if (__DEV__) console.warn("[voice] persist voice-mode failed:", e);
+        }
+      }
     },
-    [broadcast, canModerateVoice],
+    [broadcast, canModerateVoice, tripId, userId],
   );
 
   const joinVoice = useCallback(async () => {
