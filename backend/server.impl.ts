@@ -851,6 +851,75 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     });
   });
 
+  /** Current waiting-room voice mode (persisted in trip_voice_state). */
+  app.get("/api/trips/:id/voice-mode", async (req, res) => {
+    const tripId = String(req.params.id);
+    if (!tripId) {
+      return res.status(400).json({ error: "Invalid trip id" });
+    }
+    const { data, error } = await supabase
+      .from("trip_voice_state")
+      .select("active_mode")
+      .eq("trip_id", tripId)
+      .maybeSingle();
+    if (error) {
+      console.error("Supabase get voice mode error:", error.message);
+      return res.status(500).json({ error: "Failed to fetch voice mode" });
+    }
+    // No row yet → mobile default is Staff Talk (controlled / staff).
+    const mode = data?.active_mode === "all" ? "all" : "staff";
+    res.json({ mode });
+  });
+
+  /** Organizer/staff sets waiting-room voice mode (Talk All vs Staff Talk). */
+  app.patch("/api/trips/:id/voice-mode", async (req, res) => {
+    const tripId = String(req.params.id);
+    const { mode, user_id } = req.body ?? {};
+    const userId = Number(user_id);
+    const apiMode = String(mode || "").toLowerCase();
+    if (apiMode !== "all" && apiMode !== "staff") {
+      return res.status(400).json({ error: "mode must be 'all' or 'staff'" });
+    }
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return res.status(400).json({ error: "user_id required" });
+    }
+
+    const actor = await getUserById(userId);
+    if (!actor) {
+      return res.status(403).json({ error: "User not found" });
+    }
+
+    const trip = await getTripById(Number(tripId));
+    if (!trip) {
+      return res.status(404).json({ error: "Trip not found" });
+    }
+
+    const actorRole = String(actor.role || "member").toLowerCase().replace(/-/g, "_");
+    const isOwner = Number(trip.organizer_id) === userId;
+    const isStaff =
+      isOwner ||
+      actorRole === "organizer" ||
+      actorRole === "admin" ||
+      actorRole === "co_admin" ||
+      actorRole === "moderator";
+    if (!isStaff) {
+      return res.status(403).json({ error: "Only trip staff can change voice mode" });
+    }
+
+    const { error } = await supabase
+      .from("trip_voice_state")
+      .upsert(
+        { trip_id: tripId, active_mode: apiMode, updated_by: String(userId) },
+        { onConflict: "trip_id" },
+      );
+    if (error) {
+      console.error("Supabase set voice mode error:", error.message);
+      return res.status(500).json({ error: "Failed to update voice mode" });
+    }
+
+    res.json({ success: true, mode: apiMode });
+  });
+
   /**
    * Turn-by-turn style driving polyline (meetup/start → end) via OSRM public demo.
    * For production, swap to a managed directions provider, Valhalla, or self-hosted OSRM.
