@@ -3619,6 +3619,199 @@ export function LiveTripScreen({ route, navigation }: Props) {
                 <Text style={styles.endTripChipText}>End trip</Text>
               </Pressable>
             </View>
+
+            {/* ── GROUP COMMS ── */}
+            <View style={styles.settingsCard}>
+              <View style={{ marginBottom: 8 }}>
+                <Text style={styles.cardTitle}>GROUP COMMS</Text>
+              </View>
+              <View style={styles.voiceRow}>
+                <Pressable
+                  disabled={!canModerateVoice}
+                  onPress={() => void setVoiceMode("open")}
+                  style={[styles.voicePill, voiceMode === "open" && styles.voicePillActive]}
+                >
+                  <Text style={[styles.voicePillText, voiceMode === "open" && styles.voicePillTextOn]}>
+                    🎙 Talk All
+                  </Text>
+                </Pressable>
+                <Pressable
+                  disabled={!canModerateVoice}
+                  onPress={() => void setVoiceMode("controlled")}
+                  style={[styles.voicePill, voiceMode === "controlled" && styles.voicePillActive]}
+                >
+                  <Text style={[styles.voicePillText, voiceMode === "controlled" && styles.voicePillTextOn]}>
+                    🔒 Staff Talk
+                  </Text>
+                </Pressable>
+              </View>
+              <Text style={[styles.mutedSmall, { marginTop: 6, lineHeight: 16 }]}>
+                {voiceMode === "open"
+                  ? "All members can talk. Staff can mute all riders anytime."
+                  : "Only organizer & staff can talk. Riders cannot hear this channel."}
+              </Text>
+              {isInVoice ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}>
+                  <View style={[styles.connBadge, styles.connBadgeOn, { flex: 1 }]}>
+                    <Text style={[styles.connBadgeText, { color: "#34d399" }]}>
+                      🎙 {voiceRiders.length + 1} in voice
+                    </Text>
+                  </View>
+                  {canModerateVoice && voiceMode === "open" ? (
+                    <Pressable
+                      onPress={() => {
+                        Alert.alert(
+                          "Mute All Members",
+                          "Mute all regular members so only staff can speak?",
+                          [
+                            { text: "Cancel", style: "cancel" },
+                            { text: "Mute All", style: "destructive", onPress: muteAllMembers },
+                          ],
+                        );
+                      }}
+                      style={styles.muteAllBtn}
+                    >
+                      <Ionicons name="mic-off" size={12} color="#fca5a5" />
+                      <Text style={styles.muteAllBtnText}>Mute All</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
+            </View>
+
+            {/* ── ATTENDANCE TABS + JOINER CARDS ── */}
+            <View style={styles.attendanceHeader}>
+              {(["all", "arrived", "pending"] as const).map((tab) => (
+                <Pressable
+                  key={tab}
+                  onPress={() => setAttendanceTab(tab)}
+                  style={[styles.attTab, attendanceTab === tab && styles.attTabOn]}
+                >
+                  <Text style={[styles.attTabText, attendanceTab === tab && styles.attTabTextOn]}>
+                    {tab}{" "}
+                    {tab === "arrived"
+                      ? `(${arrivedCount})`
+                      : tab === "pending"
+                        ? `(${members.filter((x) => x.status === "on-way").length})`
+                        : `(${totalCount})`}
+                  </Text>
+                </Pressable>
+              ))}
+              <View style={styles.liveMini}>
+                <View style={styles.liveMiniDot} />
+                <Text style={styles.liveMiniText}>{arrivedCount} LIVE</Text>
+              </View>
+            </View>
+
+            {members
+              .filter((m) =>
+                attendanceTab === "all"
+                  ? true
+                  : attendanceTab === "arrived"
+                    ? m.status === "arrived"
+                    : m.status !== "arrived",
+              )
+              .map((member) => {
+                const rs = roleBadgeStyle(member.role);
+                const roleLabel =
+                  member.role === "organizer" || member.role === "admin"
+                    ? "Admin"
+                    : member.role === "co-admin"
+                      ? "Co-Admin"
+                      : member.role === "moderator"
+                        ? "Moderator"
+                        : "Member";
+                return (
+                  <View
+                    key={`live-att-${member.id}`}
+                    style={[
+                      styles.attCard,
+                      member.status === "arrived" && styles.attCardOk,
+                      member.status === "on-way" && styles.attCardWay,
+                    ]}
+                  >
+                    <View style={styles.row}>
+                      <View>
+                        <Image
+                          source={{
+                            uri: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(member.avatar)}`,
+                          }}
+                          style={styles.avatarLg}
+                        />
+                        <View
+                          style={[
+                            styles.statusDot,
+                            member.status === "arrived"
+                              ? { backgroundColor: "#34d399" }
+                              : member.status === "on-way"
+                                ? { backgroundColor: "#fbbf24" }
+                                : { backgroundColor: "rgba(255,255,255,0.25)" },
+                          ]}
+                        />
+                      </View>
+                      <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={styles.memberName}>{member.name}</Text>
+                        <View style={styles.row}>
+                          <View style={[styles.rolePill, { borderColor: rs.borderColor, backgroundColor: rs.bg }]}>
+                            <Text style={[styles.rolePillText, { color: rs.color }]}>{roleLabel}</Text>
+                          </View>
+                          <Text style={styles.mutedSmall}>
+                            {member.status === "arrived"
+                              ? "✓ Arrived"
+                              : member.status === "on-way"
+                                ? "→ On Way"
+                                : "✗ Absent"}
+                          </Text>
+                        </View>
+                        {(canModerateVoice || (localMemberId && member.id === localMemberId)) && (
+                          <View style={styles.modRow}>
+                            <Pressable
+                              onPress={() => toggleMuteWithVoiceRules(member.id)}
+                              style={styles.modBtn}
+                            >
+                              <Text style={styles.modBtnText}>{member.muted ? "Unmute" : "Mute"}</Text>
+                            </Pressable>
+                            {canModerateVoice && (
+                              <>
+                                <Pressable onPress={() => toggleBlock(member.id)} style={styles.modBtn}>
+                                  <Text style={styles.modBtnText}>{member.blocked ? "Unblock" : "Block"}</Text>
+                                </Pressable>
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>
+                                  <View style={styles.row}>
+                                    {(["member", "moderator", "co-admin"] as const).map((r) => (
+                                      <Pressable
+                                        key={r}
+                                        onPress={() => assignRole(member.id, r)}
+                                        style={[
+                                          styles.rolePick,
+                                          member.role === r && styles.rolePickOn,
+                                        ]}
+                                      >
+                                        <Text
+                                          style={{
+                                            fontSize: 9,
+                                            fontWeight: "700",
+                                            color: member.role === r ? "#000" : "rgba(255,255,255,0.45)",
+                                            textTransform: "capitalize",
+                                          }}
+                                        >
+                                          {r}
+                                        </Text>
+                                      </Pressable>
+                                    ))}
+                                  </View>
+                                </ScrollView>
+                              </>
+                            )}
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+
+            {/* ── SETTINGS / NEXT CHECKPOINT ── */}
             <View style={styles.settingsCard}>
               <View style={styles.setRowTall}>
                 <View style={styles.setIconCol}>
