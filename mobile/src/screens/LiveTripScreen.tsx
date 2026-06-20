@@ -650,10 +650,16 @@ export function LiveTripScreen({ route, navigation }: Props) {
   }, [showMapPinRequestModal]);
   const isOrganizer =
     user?.role === "organizer" || localRole === "organizer" || localRole === "admin";
-  const localMuted = localMember?.muted ?? true;
+  const localIsStaff =
+    localRole === "organizer" ||
+    localRole === "admin" ||
+    localRole === "co-admin" ||
+    localRole === "moderator";
+
   const {
     voiceMode,
     setVoiceMode,
+
     videoCallActive,
     joinVoice: broadcastJoinVoice,
     leaveVoice: broadcastLeaveVoice,
@@ -674,6 +680,18 @@ export function LiveTripScreen({ route, navigation }: Props) {
     voiceMode !== "controlled" ||
     canModerateVoice ||
     (localMemberId != null && approvedSpeakers.includes(localMemberId));
+
+  // Default mute state per the channel-comms blueprint (used until the
+  // members effect populates an explicit `muted` flag, and as the safe
+  // fallback when this user's member row isn't present yet):
+  //   - Talk All  → everyone may talk → start UNMUTED
+  //   - Staff Talk → staff (or an approved speaker) may talk; everyone else listen-only (muted)
+  // If the row exists, honour its explicit `muted` value (manual mute/unmute
+  // and moderator actions still win).
+  const defaultMutedForMode =
+    voiceMode === "open" ? false : !(localIsStaff || localAllowedInControlled);
+  const localMuted = localMember?.muted ?? defaultMutedForMode;
+
 
   const blockedIds = useMemo(
     () =>
@@ -1255,19 +1273,32 @@ export function LiveTripScreen({ route, navigation }: Props) {
     return () => clearInterval(t);
   }, [accessDenied, fetchAndMergeLiveState, phase, user?.id]);
 
+  // Derive each member's initial/ongoing mute state from the channel mode + role,
+  // per the channel-comms blueprint:
+  //   - Talk All        → everyone (staff + riders) can talk → unmuted
+  //   - Staff Talk       → staff (org/admin/co-admin/moderator) unmuted; riders muted
+  // Approved speakers (riders the organiser allowed in controlled mode) stay unmuted.
+  // This runs on join (isInVoice flips true) AND on every live mode switch, so a
+  // joiner inherits the CURRENT mode and a mid-session switch re-applies talk rights.
   useEffect(() => {
     if (!isInVoice) return;
     setMembers((prev) =>
       prev.map((m) => {
         const isStaff =
-          m.role === "organizer" || m.role === "co-admin" || m.role === "moderator";
+          m.role === "organizer" ||
+          m.role === "admin" ||
+          m.role === "co-admin" ||
+          m.role === "moderator";
         if (voiceMode === "controlled") {
-          return isStaff ? { ...m, muted: false } : { ...m, muted: true };
+          const approved = approvedSpeakers.includes(m.id);
+          return isStaff || approved ? { ...m, muted: false } : { ...m, muted: true };
         }
+        // Talk All → everyone may talk
         return { ...m, muted: false };
       }),
     );
-  }, [voiceMode, isInVoice]);
+  }, [voiceMode, isInVoice, approvedSpeakers]);
+
 
   useEffect(() => {
     if (!user?.id || accessDenied) return;

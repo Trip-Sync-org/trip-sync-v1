@@ -19,12 +19,14 @@ import { SOCKET_URL } from "../config";
 let LiveKitRoom: any = null;
 let useRoomContext: (() => any) | null = null;
 let AudioSession: any = null;
+let AndroidAudioTypePresets: any = null;
 try {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const lk = require("@livekit/react-native");
   useRoomContext = lk.useRoomContext ?? lk.useRoom ?? null;
   AudioSession = lk.AudioSession ?? null;
   LiveKitRoom = lk.LiveKitRoom ?? null;
+  AndroidAudioTypePresets = lk.AndroidAudioTypePresets ?? null;
 } catch (_) {
   // Expo Go or package not installed — voice gracefully disabled
 }
@@ -137,9 +139,12 @@ export function useConvoyVoice({
       }
       try {
         // Configure Android for communication-mode audio (mic capture route).
+        // AndroidAudioTypePresets is a named export, not a property on AudioSession.
         if (Platform.OS === "android" && typeof AudioSession.configureAudio === "function") {
+          const audioTypeOptions = AndroidAudioTypePresets?.communication ?? undefined;
+          console.log("[voice] configureAudio with audioTypeOptions:", audioTypeOptions);
           await AudioSession.configureAudio({
-            android: { audioTypeOptions: AudioSession.AndroidAudioTypePresets?.communication },
+            android: { audioTypeOptions },
           });
         }
         await AudioSession.startAudioSession();

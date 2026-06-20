@@ -86,8 +86,13 @@ export class WaitingRoomP2P {
     }
 
     try {
+      // Optional legacy P2P dependency — resolved at runtime only when the
+      // native WebRTCModule is present (guarded above). Not a declared dep,
+      // so suppress the compile-time module-resolution error.
+      // @ts-expect-error optional runtime-only module (react-native-webrtc)
       const raw = await import("react-native-webrtc");
       this.wrtc = unwrapReactNativeWebrtc(raw);
+
       try {
         this.wrtc.registerGlobals?.();
       } catch {

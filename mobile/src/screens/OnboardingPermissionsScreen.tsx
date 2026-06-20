@@ -100,11 +100,12 @@ export function OnboardingPermissionsScreen({ navigation }: Props) {
     navigation.replace("Main");
   }, [navigation]);
 
-  const cards: PermissionCard[] = [
+  const cards: PermissionCard[] = ([
     {
       id: "location",
       icon: "location-outline",
       title: "Location",
+
       description: "Share your live position with the convoy, checkpoint distances, and map pins during trips.",
       status: locationStatus,
       actionLabel: "Allow Location",
@@ -140,7 +141,8 @@ export function OnboardingPermissionsScreen({ navigation }: Props) {
       actionLabel: "Allow",
       optional: true,
     },
-  ].filter((card) => card.id !== "battery" || Platform.OS === "android");
+  ] satisfies PermissionCard[]).filter((card) => card.id !== "battery" || Platform.OS === "android");
+
 
   const statusLabel = (card: PermissionCard): string => {
     if (card.status === "granted") return "Granted ✓";
