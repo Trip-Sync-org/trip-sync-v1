@@ -571,6 +571,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
     null,
   );
   const [checkpointsSectionOpen, setCheckpointsSectionOpen] = useState(false);
+  const [allRidersMuted, setAllRidersMuted] = useState(false);
   const [, setLiveSocket] = useState<Socket | null>(null);
   const socketRef = useRef<Socket | null>(null);
   /** Last socket location-updated time per peer — survives socket reconnects (not reset with new io() closure). */
@@ -772,15 +773,20 @@ export function LiveTripScreen({ route, navigation }: Props) {
     setMembers((prev) => prev.map((m) => (m.id === localMemberId ? { ...m, muted: true } : m)));
   };
 
-  /** Mute all regular members (non-staff) — used by organizer/staff in Talk All mode */
+  /** Track whether all riders are muted for the Mute All / Unmute All toggle */
+  const allMutedRef = useRef(allRidersMuted);
+  allMutedRef.current = allRidersMuted;
+
+  /** Mute all regular members (non-staff) — staff can still speak for announcements */
   const muteAllMembers = useCallback(() => {
     if (!canModerateVoice) return;
+    setAllRidersMuted(true);
     setMembers((prev) =>
       prev.map((m) => {
         const isStaff =
           m.role === "organizer" || m.role === "admin" || m.role === "co-admin" || m.role === "moderator";
         if (isStaff) return m;
-        // Mute locally
+        // Mute locally via LiveKit
         if (isInVoice && m.userId != null) {
           muteRemoteRider(m.userId, true);
         }
@@ -793,6 +799,31 @@ export function LiveTripScreen({ route, navigation }: Props) {
       toUserId: -1,
       fromUserId: appUid,
       signal: { type: "voice-mute-all", mutedBy: appUid },
+    });
+  }, [canModerateVoice, isInVoice, muteRemoteRider, tripIdNum, appUid]);
+
+  /** Unmute all riders — restores everyone's ability to speak in Talk All mode */
+  const unmuteAllMembers = useCallback(() => {
+    if (!canModerateVoice) return;
+    setAllRidersMuted(false);
+    setMembers((prev) =>
+      prev.map((m) => {
+        const isStaff =
+          m.role === "organizer" || m.role === "admin" || m.role === "co-admin" || m.role === "moderator";
+        if (isStaff) return m;
+        // Unmute locally via LiveKit
+        if (isInVoice && m.userId != null) {
+          muteRemoteRider(m.userId, false);
+        }
+        return { ...m, muted: false };
+      }),
+    );
+    // Broadcast unmute-all signal via socket
+    socketRef.current?.emit("voice-signal", {
+      tripId: tripIdNum,
+      toUserId: -1,
+      fromUserId: appUid,
+      signal: { type: "voice-unmute-all", mutedBy: appUid },
     });
   }, [canModerateVoice, isInVoice, muteRemoteRider, tripIdNum, appUid]);
 
@@ -2923,14 +2954,14 @@ export function LiveTripScreen({ route, navigation }: Props) {
                       🎙 {voiceRiders.length + 1} in voice
                     </Text>
                   </View>
-                  {/* Mute All — visible to staff in Talk All mode; no popup, mutes instantly */}
+                  {/* Mute All / Unmute All — visible to staff in Talk All mode; no popup, toggles instantly */}
                   {canModerateVoice && voiceMode === "open" ? (
                     <Pressable
-                      onPress={() => muteAllMembers()}
+                      onPress={() => (allRidersMuted ? unmuteAllMembers() : muteAllMembers())}
                       style={styles.muteAllBtn}
                     >
-                      <Ionicons name="mic-off" size={12} color="#fca5a5" />
-                      <Text style={styles.muteAllBtnText}>Mute All</Text>
+                      <Ionicons name={allRidersMuted ? "mic" : "mic-off"} size={12} color="#fca5a5" />
+                      <Text style={styles.muteAllBtnText}>{allRidersMuted ? "Unmute All" : "Mute All"}</Text>
                     </Pressable>
                   ) : null}
                 </View>
@@ -3650,11 +3681,11 @@ export function LiveTripScreen({ route, navigation }: Props) {
                   </View>
                   {canModerateVoice && voiceMode === "open" ? (
                     <Pressable
-                      onPress={() => muteAllMembers()}
+                      onPress={() => (allRidersMuted ? unmuteAllMembers() : muteAllMembers())}
                       style={styles.muteAllBtn}
                     >
-                      <Ionicons name="mic-off" size={12} color="#fca5a5" />
-                      <Text style={styles.muteAllBtnText}>Mute All</Text>
+                      <Ionicons name={allRidersMuted ? "mic" : "mic-off"} size={12} color="#fca5a5" />
+                      <Text style={styles.muteAllBtnText}>{allRidersMuted ? "Unmute All" : "Mute All"}</Text>
                     </Pressable>
                   ) : null}
                 </View>
