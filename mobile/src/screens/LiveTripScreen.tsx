@@ -31,7 +31,6 @@ import { useAuth } from "../context/AuthContext";
 import { normalizeTripFromApi, type Trip } from "../lib/tripNormalize";
 import { fetchWeatherNow, type WeatherNow } from "../lib/weather";
 import { useAppTheme } from "../context/ThemeContext";
-import { colors } from "../theme";
 import { LiveMapView, type LiveMapViewRef, type MapMember, type MapPoint, type UserGeo } from "../components/LiveMapView";
 import {
   formatDistance,
@@ -654,7 +653,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
     localRole === "organizer" ||
     localRole === "admin" ||
     localRole === "co-admin" ||
-    localRole === "moderator";
+    localRole === "moderator" ||
+    user?.role === "organizer";
 
   const {
     voiceMode,
@@ -701,13 +701,20 @@ export function LiveTripScreen({ route, navigation }: Props) {
     [members],
   );
 
+  // ── canSpeak: controls local microphone (setMicrophoneEnabled) ────────────
+  //   Talk All   → everyone may speak
+  //   Staff Talk → only staff (organiser, co-admin, moderator) + approved speakers
   const canSpeakConvoy =
     voiceMode === "open" ||
-    localRole === "organizer" ||
-    localRole === "admin" ||
-    localRole === "co-admin" ||
-    localRole === "moderator" ||
+    localIsStaff ||
     (localMemberId != null && approvedSpeakers.includes(localMemberId));
+
+  // ── canHear: controls remote audio output (track.setVolume) ──────────────
+  //   MUST be independent of canSpeak so staff (especially organiser) keeps
+  //   hearing in Staff Talk while their mic is correctly gated.
+  //   Talk All   → everyone hears
+  //   Staff Talk → only staff hears (riders = full audio blackout)
+  const canHearConvoy = voiceMode === "open" || localIsStaff;
 
   const onVoiceMemberMuteChange = useCallback((userId: number, muted: boolean) => {
     setMembers((prev) =>
@@ -731,6 +738,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
     myUserId: Number(user?.id ?? 0),
     voiceMode,
     canSpeak: canSpeakConvoy,
+    canHear: canHearConvoy,
     isMuted: localMuted,
     blockedIds,
     onMemberMuteChange: onVoiceMemberMuteChange,
@@ -2747,7 +2755,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
   if (accessChecking) {
     return (
       <View style={[styles.centered, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={colors.text} />
+        <ActivityIndicator size="large" color="#fff" />
         <Text style={styles.muted}>Checking trip permissions...</Text>
       </View>
     );
@@ -2756,7 +2764,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
   if (tripLoading || !trip) {
     return (
       <View style={[styles.centered, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={colors.text} />
+        <ActivityIndicator size="large" color="#fff" />
         <Text style={styles.muted}>{tripLoading ? "Loading trip..." : "Trip not found"}</Text>
       </View>
     );
@@ -2898,25 +2906,14 @@ export function LiveTripScreen({ route, navigation }: Props) {
                   </Text>
                 </Pressable>
               ) : (
-                <View style={styles.row}>
-                  <Pressable
-                    style={[styles.joinVoice, { flex: 1, backgroundColor: "rgba(255,255,255,0.06)" }]}
-                    onPress={() => leaveVoiceChannel()}
-                  >
-                    <Text style={[styles.joinVoiceText, { color: "rgba(255,255,255,0.75)" }]}>
-                      Disconnect
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    disabled={localMuted && !localAllowedInControlled}
-                    onPress={() => localMemberId && toggleMuteWithVoiceRules(localMemberId)}
-                    style={[styles.muteBtn, !localMuted && styles.muteBtnHot]}
-                  >
-                    <Text style={{ color: localMuted ? "rgba(255,255,255,0.75)" : "#fca5a5", fontWeight: "700", fontSize: 12 }}>
-                      {localMuted ? "Unmute" : "Mute"}
-                    </Text>
-                  </Pressable>
-                </View>
+                <Pressable
+                  style={[styles.joinVoice, { backgroundColor: "rgba(255,255,255,0.06)" }]}
+                  onPress={() => leaveVoiceChannel()}
+                >
+                  <Text style={[styles.joinVoiceText, { color: "rgba(255,255,255,0.75)" }]}>
+                    Disconnect
+                  </Text>
+                </Pressable>
               )}
 
               {isInVoice ? (

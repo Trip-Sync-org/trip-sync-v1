@@ -41,6 +41,7 @@ type UseConvoyVoiceProps = {
   myUserId: number;
   voiceMode: VoiceMode;
   canSpeak: boolean;
+  canHear: boolean;
   isMuted: boolean;
   blockedIds: number[];
   onMemberMuteChange?: (userId: number, muted: boolean) => void;
@@ -64,6 +65,7 @@ export function useConvoyVoice({
   myUserId,
   voiceMode: _voiceMode,
   canSpeak,
+  canHear,
   isMuted,
   blockedIds: _blockedIds,
   onMemberMuteChange,
@@ -79,6 +81,8 @@ export function useConvoyVoice({
   localMutedRef.current = isMuted;
   const canSpeakRef = useRef(canSpeak);
   canSpeakRef.current = canSpeak;
+  const canHearRef = useRef(canHear);
+  canHearRef.current = canHear;
 
   // ── JOIN ──────────────────────────────────────────────────────────────────
   const joinVoice = useCallback(async (): Promise<boolean> => {
@@ -206,7 +210,13 @@ export function useConvoyVoice({
         setVoiceRiders(ids);
       };
 
-      room.on("participantConnected", syncRiders);
+      // When a new participant connects, respect the current canHear gate
+      room.on("participantConnected", (p: any) => {
+        syncRiders();
+        if (!canHearRef.current) {
+          muteRemoteAudio(p);
+        }
+      });
       room.on("participantDisconnected", syncRiders);
       room.on("disconnected", () => {
         setIsInVoice(false);
@@ -287,6 +297,38 @@ export function useConvoyVoice({
     // For now this is a no-op — full implementation can subscribe/unsubscribe tracks
     // using room.remoteParticipants.get(identity)?.audioTrackPublications
   }, []);
+
+  /** Mute or unmute all remote audio tracks when canHear changes.
+   *
+   * Uses track.setVolume(0) instead of setEnabled(false) because
+   * on React Native, setEnabled(false) may not prevent audio output
+   * (decoded frames can still play). Setting volume to 0 ensures
+   * the rider hears nothing, and setting it back to 1 restores audio.
+   */
+  useEffect(() => {
+    if (!isInVoice || !roomRef.current) return;
+    const room = roomRef.current;
+    room.remoteParticipants.forEach((p: any) => {
+      p.audioTrackPublications.forEach((pub: any) => {
+        const track = pub.track;
+        if (track && typeof track.setVolume === "function") {
+          track.setVolume(canHear ? 1.0 : 0);
+        }
+      });
+    });
+    console.log("[voice] canHear changed to", canHear, "— remote audio tracks volume", canHear ? "1.0" : "0");
+  }, [canHear, isInVoice]);
+
+  /** Helper: mute all audio output for a single remote participant. */
+  function muteRemoteAudio(p: any) {
+    if (!p?.audioTrackPublications) return;
+    p.audioTrackPublications.forEach((pub: any) => {
+      const track = pub.track;
+      if (track && typeof track.setVolume === "function") {
+        track.setVolume(0);
+      }
+    });
+  }
 
   // ── Single source of truth: LiveKit mic = canSpeak AND NOT manual mute ────
   useEffect(() => {

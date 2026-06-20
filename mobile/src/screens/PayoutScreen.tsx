@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -17,7 +17,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { apiFetch, readApiErrorMessage } from "../api/client";
 import { useAuth } from "../context/AuthContext";
-import { colors, typography } from "../theme";
+import { typography, useThemeColors } from "../theme";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { navigateToRootStack } from "../navigation/navigateRoot";
 import { useOrganizerPaymentsSocket } from "../hooks/useOrganizerPaymentsSocket";
@@ -59,8 +59,11 @@ export function PayoutScreen() {
   const { user } = useAuth();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const insets = useSafeAreaInsets();
+  const c = useThemeColors();
   const scrollRef = useRef<ScrollView>(null);
   const historySectionY = useRef(0);
+
+  const s = useMemo(() => makeStyles(c), [c]);
 
   const [balance, setBalance] = useState<Balance>({
     eligibleForPayout: 0,
@@ -274,7 +277,7 @@ export function PayoutScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: colors.bg }}
+      style={{ flex: 1, backgroundColor: c.bg }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
@@ -289,60 +292,60 @@ export function PayoutScreen() {
         ) : null}
 
         {success ? (
-          <View style={styles.successBanner}>
-            <Text style={styles.successText}>{success}</Text>
+          <View style={s.successBanner}>
+            <Text style={s.successText}>{success}</Text>
           </View>
         ) : null}
 
         {/* Section A — Balance */}
-        <View style={styles.balanceCard}>
+        <View style={s.balanceCard}>
           <Text style={typography.label}>AVAILABLE BALANCE</Text>
-          <Text style={styles.balanceAmt}>₹ {avail.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</Text>
-          <Text style={styles.balanceSub}>
+          <Text style={s.balanceAmt}>₹ {avail.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</Text>
+          <Text style={s.balanceSub}>
             Eligible: ₹{balance.eligibleForPayout.toLocaleString("en-IN")} · Paid: ₹
             {balance.totalPaidOut.toLocaleString("en-IN")}
           </Text>
-          <Text style={styles.balanceSub}>Pending: ₹{pendingAmt.toLocaleString("en-IN")}</Text>
+          <Text style={s.balanceSub}>Pending: ₹{pendingAmt.toLocaleString("en-IN")}</Text>
         </View>
 
         {/* Section B — Request */}
         <Text style={[typography.label, { marginTop: 24, marginBottom: 8 }]}>REQUEST PAYOUT</Text>
-        <View style={styles.amountRow}>
-          <Text style={styles.rupee}>₹</Text>
+        <View style={s.amountRow}>
+          <Text style={s.rupee}>₹</Text>
           <TextInput
-            style={styles.amountInput}
+            style={s.amountInput}
             placeholder="0"
-            placeholderTextColor={colors.muted2}
+            placeholderTextColor={c.muted}
             keyboardType="decimal-pad"
             value={amountStr}
             onChangeText={setAmountStr}
           />
-          <Pressable style={styles.maxBtn} onPress={setMax}>
-            <Text style={styles.maxBtnText}>MAX</Text>
+          <Pressable style={s.maxBtn} onPress={setMax}>
+            <Text style={s.maxBtnText}>MAX</Text>
           </Pressable>
         </View>
 
         {Number.isFinite(amount) && amount < 100 && amountStr.length > 0 ? (
-          <Text style={styles.err}>Minimum payout is ₹100</Text>
+          <Text style={s.err}>Minimum payout is ₹100</Text>
         ) : null}
         {Number.isFinite(amount) && amount > avail + 0.01 ? (
-          <Text style={styles.err}>Exceeds available balance</Text>
+          <Text style={s.err}>Exceeds available balance</Text>
         ) : null}
-        {hasPending ? <Text style={styles.warn}>You have a pending payout request</Text> : null}
+        {hasPending ? <Text style={s.warn}>You have a pending payout request</Text> : null}
         {Number.isFinite(amount) && validAmount ? (
-          <Text style={styles.ok}>✓ Ready to request</Text>
+          <Text style={s.ok}>✓ Ready to request</Text>
         ) : null}
-        {error ? <Text style={styles.err}>{error}</Text> : null}
+        {error ? <Text style={s.err}>{error}</Text> : null}
 
-        <View style={styles.methodBox}>
-          <Text style={styles.methodLabel}>{hasMethod ? `Via: ${methodSummary}` : "No payout method saved"}</Text>
+        <View style={s.methodBox}>
+          <Text style={s.methodLabel}>{hasMethod ? `Via: ${methodSummary}` : "No payout method saved"}</Text>
           <Pressable onPress={goProfile}>
-            <Text style={styles.changeLink}>Change →</Text>
+            <Text style={s.changeLink}>Change →</Text>
           </Pressable>
         </View>
 
         <Pressable
-          style={[styles.primaryBtn, (!validAmount || !hasMethod || hasPending || requesting) && styles.primaryBtnDis]}
+          style={[s.primaryBtn, (!validAmount || !hasMethod || hasPending || requesting) && s.primaryBtnDis]}
           disabled={!validAmount || !hasMethod || hasPending || requesting}
           onPress={() => {
             setError(null);
@@ -353,28 +356,28 @@ export function PayoutScreen() {
           {requesting ? (
             <ActivityIndicator color="#000" />
           ) : (
-            <Text style={styles.primaryBtnText}>{primaryLabel}</Text>
+            <Text style={s.primaryBtnText}>{primaryLabel}</Text>
           )}
         </Pressable>
 
         {/* Section C — Revenue mini */}
         <Text style={[typography.label, { marginTop: 28, marginBottom: 10 }]}>REVENUE (SUMMARY)</Text>
-        <View style={styles.miniGrid}>
-          <View style={styles.miniCell}>
-            <Text style={styles.miniVal}>₹{mini.totalGrossRevenue.toLocaleString("en-IN")}</Text>
-            <Text style={styles.miniLbl}>Gross</Text>
+        <View style={s.miniGrid}>
+          <View style={s.miniCell}>
+            <Text style={s.miniVal}>₹{mini.totalGrossRevenue.toLocaleString("en-IN")}</Text>
+            <Text style={s.miniLbl}>Gross</Text>
           </View>
-          <View style={styles.miniCell}>
-            <Text style={styles.miniVal}>₹{mini.platformFee.toLocaleString("en-IN")}</Text>
-            <Text style={styles.miniLbl}>Platform fee (10%)</Text>
+          <View style={s.miniCell}>
+            <Text style={s.miniVal}>₹{mini.platformFee.toLocaleString("en-IN")}</Text>
+            <Text style={s.miniLbl}>Platform fee (10%)</Text>
           </View>
-          <View style={styles.miniCell}>
-            <Text style={[styles.miniVal, { color: TEAL }]}>₹{mini.eligibleForPayout.toLocaleString("en-IN")}</Text>
-            <Text style={styles.miniLbl}>Eligible for you</Text>
+          <View style={s.miniCell}>
+            <Text style={[s.miniVal, { color: TEAL }]}>₹{mini.eligibleForPayout.toLocaleString("en-IN")}</Text>
+            <Text style={s.miniLbl}>Eligible for you</Text>
           </View>
         </View>
         <Pressable onPress={goRevenue} style={{ marginBottom: 8 }}>
-          <Text style={styles.link}>See full breakdown →</Text>
+          <Text style={s.link}>See full breakdown →</Text>
         </Pressable>
 
         {/* Section D — History */}
@@ -384,31 +387,31 @@ export function PayoutScreen() {
           }}
           style={{ marginTop: 16 }}
         >
-          <View style={styles.historyHeader}>
+          <View style={s.historyHeader}>
             <Text style={typography.label}>PAYOUT HISTORY</Text>
             <Pressable onPress={() => void exportHistoryPdf()} hitSlop={8}>
-              <Text style={styles.exportLink}>↑ Export PDF</Text>
+              <Text style={s.exportLink}>↑ Export PDF</Text>
             </Pressable>
           </View>
 
           {history.length === 0 ? (
-            <Text style={styles.empty}>
+            <Text style={s.empty}>
               No payout requests yet.{"\n"}Request your first payout above.
             </Text>
           ) : (
             history.map((p) => {
               const b = badgeForStatus(String(p.status ?? ""));
               return (
-                <View key={p.id} style={styles.histRow}>
+                <View key={p.id} style={s.histRow}>
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                      <Text style={styles.histAmt}>₹{Number(p.amount ?? 0).toLocaleString("en-IN")}</Text>
-                      <View style={[styles.badge, { backgroundColor: b.bg }]}>
-                        <Text style={[styles.badgeTxt, { color: b.fg }]}>{b.label}</Text>
+                      <Text style={s.histAmt}>₹{Number(p.amount ?? 0).toLocaleString("en-IN")}</Text>
+                      <View style={[s.badge, { backgroundColor: b.bg }]}>
+                        <Text style={[s.badgeTxt, { color: b.fg }]}>{b.label}</Text>
                       </View>
                     </View>
-                    <Text style={styles.histMeta}>{p.payout_method_snapshot ?? "—"}</Text>
-                    <Text style={styles.histMeta}>
+                    <Text style={s.histMeta}>{p.payout_method_snapshot ?? "—"}</Text>
+                    <Text style={s.histMeta}>
                       Requested:{" "}
                       {p.requested_at
                         ? new Date(p.requested_at).toLocaleDateString("en-IN", {
@@ -419,7 +422,7 @@ export function PayoutScreen() {
                         : "—"}
                     </Text>
                     {p.processed_at ? (
-                      <Text style={styles.histMeta}>
+                      <Text style={s.histMeta}>
                         Processed:{" "}
                         {new Date(p.processed_at).toLocaleDateString("en-IN", {
                           day: "numeric",
@@ -429,7 +432,7 @@ export function PayoutScreen() {
                       </Text>
                     ) : null}
                     {String(p.status ?? "").toLowerCase() === "failed" && p.failure_reason ? (
-                      <Text style={styles.errSmall}>{p.failure_reason}</Text>
+                      <Text style={s.errSmall}>{p.failure_reason}</Text>
                     ) : null}
                   </View>
                 </View>
@@ -440,29 +443,29 @@ export function PayoutScreen() {
       </ScrollView>
 
       <Modal visible={confirmOpen} transparent animationType="slide">
-        <View style={styles.sheetOverlay}>
+        <View style={s.sheetOverlay}>
           <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setConfirmOpen(false)} />
-          <View style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}>
-            <Text style={styles.sheetTitle}>Confirm Payout Request</Text>
-            <Text style={styles.sheetRow}>
-              Amount: <Text style={styles.sheetEm}>₹ {Number.isFinite(amount) ? amount.toLocaleString("en-IN") : "—"}</Text>
+          <View style={[s.sheet, { paddingBottom: insets.bottom + 16 }]}>
+            <Text style={s.sheetTitle}>Confirm Payout Request</Text>
+            <Text style={s.sheetRow}>
+              Amount: <Text style={s.sheetEm}>₹ {Number.isFinite(amount) ? amount.toLocaleString("en-IN") : "—"}</Text>
             </Text>
-            <Text style={styles.sheetMuted}>Platform fee already deducted</Text>
-            <Text style={styles.sheetRow}>Via: {methodSummary}</Text>
-            <Text style={styles.sheetMuted}>Timeline: 2–3 business days</Text>
+            <Text style={s.sheetMuted}>Platform fee already deducted</Text>
+            <Text style={s.sheetRow}>Via: {methodSummary}</Text>
+            <Text style={s.sheetMuted}>Timeline: 2–3 business days</Text>
             <View style={{ flexDirection: "row", gap: 12, marginTop: 20 }}>
-              <Pressable style={styles.btnWhite} onPress={() => setConfirmOpen(false)}>
-                <Text style={styles.btnWhiteText}>Cancel</Text>
+              <Pressable style={s.btnWhite} onPress={() => setConfirmOpen(false)}>
+                <Text style={s.btnWhiteText}>Cancel</Text>
               </Pressable>
               <Pressable
-                style={styles.btnTeal}
+                style={s.btnTeal}
                 onPress={() => void submitRequest()}
                 disabled={requesting}
               >
                 {requesting ? (
                   <ActivityIndicator color="#000" />
                 ) : (
-                  <Text style={styles.btnTealText}>Confirm & Request</Text>
+                  <Text style={s.btnTealText}>Confirm & Request</Text>
                 )}
               </Pressable>
             </View>
@@ -473,117 +476,118 @@ export function PayoutScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  balanceCard: {
-    backgroundColor: "#111111",
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: "rgba(0,229,176,0.35)",
-  },
-  balanceAmt: { fontSize: 32, fontWeight: "800", color: TEAL, marginTop: 8 },
-  balanceSub: { color: colors.muted, marginTop: 6, fontSize: 14 },
-  amountRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#1a1a1a",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  rupee: { color: colors.text, fontSize: 20, fontWeight: "700", marginRight: 4 },
-  amountInput: { flex: 1, color: colors.text, fontSize: 22, fontWeight: "700", paddingVertical: 14 },
-  maxBtn: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "rgba(0,229,176,0.15)", borderRadius: 8 },
-  maxBtnText: { color: TEAL, fontWeight: "800", fontSize: 13 },
-  methodBox: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 16,
-    marginBottom: 12,
-  },
-  methodLabel: { color: colors.text, flex: 1, fontSize: 14 },
-  changeLink: { color: TEAL, fontWeight: "700" },
-  primaryBtn: {
-    backgroundColor: TEAL,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: "center",
-  },
-  primaryBtnDis: { backgroundColor: "#333" },
-  primaryBtnText: { color: "#000", fontWeight: "800", fontSize: 16 },
-  miniGrid: { flexDirection: "row", gap: 8 },
-  miniCell: {
-    flex: 1,
-    backgroundColor: "#1a1a1a",
-    borderRadius: 12,
-    padding: 12,
-    alignItems: "center",
-  },
-  miniVal: { color: colors.text, fontWeight: "800", fontSize: 15 },
-  miniLbl: { color: colors.muted, fontSize: 10, marginTop: 4, textAlign: "center" },
-  link: { color: TEAL, fontWeight: "700", marginTop: 10 },
-  historyHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  exportLink: { color: TEAL, fontWeight: "700", fontSize: 13 },
-  empty: { color: colors.muted, lineHeight: 22, marginBottom: 16 },
-  histRow: {
-    backgroundColor: "#111",
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  histAmt: { color: colors.text, fontSize: 18, fontWeight: "800" },
-  histMeta: { color: colors.muted, fontSize: 12, marginTop: 4 },
-  badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  badgeTxt: { fontSize: 10, fontWeight: "800" },
-  err: { color: colors.danger, marginTop: 6, fontSize: 13 },
-  errSmall: { color: colors.danger, marginTop: 4, fontSize: 12 },
-  warn: { color: colors.warn, marginTop: 6, fontSize: 13 },
-  ok: { color: colors.success, marginTop: 6, fontSize: 13 },
-  successBanner: {
-    backgroundColor: "rgba(16,185,129,0.15)",
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 16,
-  },
-  successText: { color: colors.success, fontWeight: "600" },
-  sheetOverlay: {
-    flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(0,0,0,0.7)",
-  },
-  sheet: {
-    backgroundColor: "#111",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-  },
-  sheetTitle: { color: colors.text, fontSize: 18, fontWeight: "800", marginBottom: 12 },
-  sheetRow: { color: colors.text, marginTop: 6, fontSize: 15 },
-  sheetEm: { fontWeight: "800", color: TEAL },
-  sheetMuted: { color: colors.muted, marginTop: 4, fontSize: 13 },
-  btnWhite: {
-    flex: 1,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  btnWhiteText: { color: "#000", fontWeight: "800" },
-  btnTeal: {
-    flex: 1,
-    backgroundColor: TEAL,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  btnTealText: { color: "#000", fontWeight: "800" },
-});
+const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
+  StyleSheet.create({
+    balanceCard: {
+      backgroundColor: c.surface,
+      borderRadius: 16,
+      padding: 20,
+      borderWidth: 1,
+      borderColor: "rgba(0,229,176,0.35)",
+    },
+    balanceAmt: { fontSize: 32, fontWeight: "800", color: TEAL, marginTop: 8 },
+    balanceSub: { color: c.muted, marginTop: 6, fontSize: 14 },
+    amountRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: c.surface,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    rupee: { color: c.text, fontSize: 20, fontWeight: "700", marginRight: 4 },
+    amountInput: { flex: 1, color: c.text, fontSize: 22, fontWeight: "700", paddingVertical: 14 },
+    maxBtn: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "rgba(0,229,176,0.15)", borderRadius: 8 },
+    maxBtnText: { color: TEAL, fontWeight: "800", fontSize: 13 },
+    methodBox: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginTop: 16,
+      marginBottom: 12,
+    },
+    methodLabel: { color: c.text, flex: 1, fontSize: 14 },
+    changeLink: { color: TEAL, fontWeight: "700" },
+    primaryBtn: {
+      backgroundColor: TEAL,
+      borderRadius: 14,
+      paddingVertical: 16,
+      alignItems: "center",
+    },
+    primaryBtnDis: { backgroundColor: "#333" },
+    primaryBtnText: { color: "#000", fontWeight: "800", fontSize: 16 },
+    miniGrid: { flexDirection: "row", gap: 8 },
+    miniCell: {
+      flex: 1,
+      backgroundColor: c.surface,
+      borderRadius: 12,
+      padding: 12,
+      alignItems: "center",
+    },
+    miniVal: { color: c.text, fontWeight: "800", fontSize: 15 },
+    miniLbl: { color: c.muted, fontSize: 10, marginTop: 4, textAlign: "center" },
+    link: { color: TEAL, fontWeight: "700", marginTop: 10 },
+    historyHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 12,
+    },
+    exportLink: { color: TEAL, fontWeight: "700", fontSize: 13 },
+    empty: { color: c.muted, lineHeight: 22, marginBottom: 16 },
+    histRow: {
+      backgroundColor: c.surface,
+      borderRadius: 14,
+      padding: 14,
+      marginBottom: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    histAmt: { color: c.text, fontSize: 18, fontWeight: "800" },
+    histMeta: { color: c.muted, fontSize: 12, marginTop: 4 },
+    badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+    badgeTxt: { fontSize: 10, fontWeight: "800" },
+    err: { color: c.danger, marginTop: 6, fontSize: 13 },
+    errSmall: { color: c.danger, marginTop: 4, fontSize: 12 },
+    warn: { color: c.warn, marginTop: 6, fontSize: 13 },
+    ok: { color: c.success, marginTop: 6, fontSize: 13 },
+    successBanner: {
+      backgroundColor: "rgba(16,185,129,0.15)",
+      padding: 12,
+      borderRadius: 12,
+      marginBottom: 16,
+    },
+    successText: { color: c.success, fontWeight: "600" },
+    sheetOverlay: {
+      flex: 1,
+      justifyContent: "flex-end",
+      backgroundColor: "rgba(0,0,0,0.7)",
+    },
+    sheet: {
+      backgroundColor: c.surface,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      padding: 20,
+    },
+    sheetTitle: { color: c.text, fontSize: 18, fontWeight: "800", marginBottom: 12 },
+    sheetRow: { color: c.text, marginTop: 6, fontSize: 15 },
+    sheetEm: { fontWeight: "800", color: TEAL },
+    sheetMuted: { color: c.muted, marginTop: 4, fontSize: 13 },
+    btnWhite: {
+      flex: 1,
+      backgroundColor: "#FFFFFF",
+      borderRadius: 12,
+      paddingVertical: 14,
+      alignItems: "center",
+    },
+    btnWhiteText: { color: "#000", fontWeight: "800" },
+    btnTeal: {
+      flex: 1,
+      backgroundColor: TEAL,
+      borderRadius: 12,
+      paddingVertical: 14,
+      alignItems: "center",
+    },
+    btnTealText: { color: "#000", fontWeight: "800" },
+  });

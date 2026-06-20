@@ -28,7 +28,7 @@ import {
 import { useOrganizerPaymentsSocket } from "../hooks/useOrganizerPaymentsSocket";
 import { buildRevenueSummaryHtml, shareRevenuePdf } from "../lib/revenuePdf";
 import { useAuth } from "../context/AuthContext";
-import { colors, typography } from "../theme";
+import { typography, useThemeColors } from "../theme";
 import { Card, Badge, PrimaryButton, OutlineButton } from "../components/ui";
 import { MonthlyRevenueChart } from "../components/MonthlyRevenueChart";
 import { parseDateOnlyLocal } from "../lib/tripNormalize";
@@ -85,6 +85,7 @@ export function OrganizerScreen() {
   const { user } = useAuth();
   const navigation = useNavigation();
   const route = useRoute<RouteProp<MainTabParamList, "MyTripsTab">>();
+  const c = useThemeColors();
   const goStack = (routeName: keyof RootStackParamList, params?: RootStackParamList[keyof RootStackParamList]) => {
     navigateToRootStack(navigation, routeName as string, params as Record<string, unknown> | undefined);
   };
@@ -453,18 +454,20 @@ export function OrganizerScreen() {
     }
   };
 
+  const s = useMemo(() => makeStyles(c), [c]);
+
   const renderTab = () => {
     if (activeTab === "Today's Events" || activeTab === "Upcoming Events") {
       const list = events.filter((t) =>
         activeTab === "Today's Events" ? t.scope === "today" : t.scope === "upcoming",
       );
       return (
-        <View style={styles.tabBody}>
+        <View style={s.tabBody}>
           {eventsLoading ? (
-            <Text style={styles.muted}>Loading events…</Text>
+            <Text style={s.muted}>Loading events…</Text>
           ) : list.length === 0 ? (
             <Card style={{ padding: 24 }}>
-              <Text style={[styles.muted, { textAlign: "center", marginBottom: 16 }]}>
+              <Text style={[s.muted, { textAlign: "center", marginBottom: 16 }]}>
                 No events for this period
               </Text>
               <PrimaryButton title="+ Create an Event" onPress={openCreate} />
@@ -475,11 +478,11 @@ export function OrganizerScreen() {
                 <View style={{ flexDirection: "row", gap: 12 }}>
                   <Image
                     source={{ uri: `https://picsum.photos/seed/${trip.banner}/200/200` }}
-                    style={styles.thumb}
+                    style={s.thumb}
                   />
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.cardTitle}>{trip.name}</Text>
-                    <Text style={styles.mutedSmall}>
+                    <Text style={s.cardTitle}>{trip.name}</Text>
+                    <Text style={s.mutedSmall}>
                       {trip.date} · {trip.theme}
                     </Text>
                     <View style={{ flexDirection: "row", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
@@ -490,21 +493,21 @@ export function OrganizerScreen() {
                         {trip.privacy === "public" ? "Public" : "Private"}
                       </Badge>
                     </View>
-                    <Text style={styles.mutedSmall}>
+                    <Text style={s.mutedSmall}>
                       {trip.joined}/{trip.max} joined · ₹{trip.revenue.toLocaleString()} earned
                     </Text>
-                    <View style={styles.rowBtns}>
+                    <View style={s.rowBtns}>
                       <Pressable
-                        style={styles.btnOutlineSm}
+                        style={s.btnOutlineSm}
                         onPress={() => goStack("LiveTrip", { id: String(trip.id) })}
                       >
-                        <Text style={styles.btnOutlineSmText}>Go Live</Text>
+                        <Text style={s.btnOutlineSmText}>Go Live</Text>
                       </Pressable>
                       <Pressable
-                        style={styles.btnPrimarySm}
+                        style={s.btnPrimarySm}
                         onPress={() => goStack("TripDetail", { id: String(trip.id) })}
                       >
-                        <Text style={styles.btnPrimarySmText}>Details</Text>
+                        <Text style={s.btnPrimarySmText}>Details</Text>
                       </Pressable>
                     </View>
                   </View>
@@ -518,11 +521,11 @@ export function OrganizerScreen() {
 
     if (activeTab === "Manage Events") {
       return (
-        <View style={styles.tabBody}>
+        <View style={s.tabBody}>
           <TextInput
-            style={styles.search}
+            style={s.search}
             placeholder="Search events…"
-            placeholderTextColor={colors.muted2}
+            placeholderTextColor={c.muted}
             value={manageSearch}
             onChangeText={setManageSearch}
           />
@@ -531,17 +534,17 @@ export function OrganizerScreen() {
               <View style={{ flexDirection: "row", gap: 12 }}>
                 <Image
                   source={{ uri: `https://picsum.photos/seed/${trip.banner}/200/200` }}
-                  style={styles.thumbSm}
+                  style={s.thumbSm}
                 />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.cardTitle}>{trip.name}</Text>
-                  <Text style={styles.mutedSmall}>
+                  <Text style={s.cardTitle}>{trip.name}</Text>
+                  <Text style={s.mutedSmall}>
                     {trip.date} · {trip.joined}/{trip.max} participants
                   </Text>
-                  <View style={styles.progressBg}>
+                  <View style={s.progressBg}>
                     <View
                       style={[
-                        styles.progressFg,
+                        s.progressFg,
                         {
                           width: `${trip.max > 0 ? Math.min(100, (trip.joined / trip.max) * 100) : 0}%`,
                         },
@@ -560,20 +563,20 @@ export function OrganizerScreen() {
     if (activeTab === "Marketplace Listings") {
       const pub = events.filter((t) => t.privacy === "public" && t.scope !== "past");
       return (
-        <View style={styles.tabBody}>
+        <View style={s.tabBody}>
           {pub.length === 0 ? (
-            <Text style={styles.muted}>No public listings yet.</Text>
+            <Text style={s.muted}>No public listings yet.</Text>
           ) : (
             pub.map((trip) => (
               <Card key={trip.id} style={{ padding: 14, marginBottom: 12 }}>
                 <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
                   <Image
                     source={{ uri: `https://picsum.photos/seed/${trip.banner}/200/200` }}
-                    style={styles.thumbSm}
+                    style={s.thumbSm}
                   />
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.cardTitle}>{trip.name}</Text>
-                    <Text style={styles.mutedSmall}>
+                    <Text style={s.cardTitle}>{trip.name}</Text>
+                    <Text style={s.mutedSmall}>
                       {trip.joined} booked
                       {trip.max > 0 ? ` · ${Math.max(0, trip.max - trip.joined)} slots left` : ""}
                     </Text>
@@ -622,7 +625,7 @@ export function OrganizerScreen() {
       };
 
       return (
-        <View style={styles.tabBody}>
+        <View style={s.tabBody}>
           <View
             style={{
               flexDirection: "row",
@@ -631,13 +634,13 @@ export function OrganizerScreen() {
               marginBottom: 8,
             }}
           >
-            <Text style={styles.sectionTitleCaps}>Revenue</Text>
+            <Text style={s.sectionTitleCaps}>Revenue</Text>
             <Pressable onPress={() => void exportRevenuePdf()} disabled={pdfBusy || !r}>
               <Text style={{ color: TEAL, fontWeight: "700" }}>{pdfBusy ? "…" : "↑ Export PDF"}</Text>
             </Pressable>
           </View>
 
-          <Text style={[styles.mutedSmall, { marginBottom: 8 }]}>
+          <Text style={[s.mutedSmall, { marginBottom: 8 }]}>
             {formatRangeLabel(periodPreset, activeRange)}
           </Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
@@ -650,9 +653,9 @@ export function OrganizerScreen() {
                     if (p === "custom") setCustomModalOpen(true);
                     else setPeriodPreset(p);
                   }}
-                  style={[styles.periodChip, on && styles.periodChipOn]}
+                  style={[s.periodChip, on && s.periodChipOn]}
                 >
-                  <Text style={[styles.periodChipText, on && styles.periodChipTextOn]}>
+                  <Text style={[s.periodChipText, on && s.periodChipTextOn]}>
                     {p === "all"
                       ? "All"
                       : p === "week"
@@ -671,17 +674,17 @@ export function OrganizerScreen() {
           {revenueLoading ? (
             <Card style={{ padding: 24, alignItems: "center" }}>
               <ActivityIndicator color={TEAL} />
-              <Text style={[styles.mutedSmall, { marginTop: 12 }]}>Loading revenue…</Text>
+              <Text style={[s.mutedSmall, { marginTop: 12 }]}>Loading revenue…</Text>
             </Card>
           ) : r ? (
             <>
-              <Text style={[styles.sectionTitle, { marginTop: 0 }]}>Dashboard summary</Text>
+              <Text style={[s.sectionTitle, { marginTop: 0 }]}>Dashboard summary</Text>
               {periodFiltered ? (
-                <Text style={[styles.mutedSmall, { marginBottom: 8 }]}>
+                <Text style={[s.mutedSmall, { marginBottom: 8 }]}>
                   Figures below match the selected date range.
                 </Text>
               ) : null}
-              <View style={styles.statGrid}>
+              <View style={s.statGrid}>
                 {[
                   {
                     label: "Total Revenue",
@@ -706,38 +709,38 @@ export function OrganizerScreen() {
                     value: totalBookings.toLocaleString(),
                     sub: "bookings",
                   },
-                ].map((s) => (
-                  <Card key={s.label} style={{ padding: 14, width: "48%" }}>
-                    <Text style={styles.statVal}>{s.value}</Text>
-                    <Text style={styles.mutedSmall}>{s.label}</Text>
-                    <Text style={[styles.mutedSmall, { color: colors.emerald }]}>{s.sub}</Text>
+                ].map((stat) => (
+                  <Card key={stat.label} style={{ padding: 14, width: "48%" }}>
+                    <Text style={s.statVal}>{stat.value}</Text>
+                    <Text style={s.mutedSmall}>{stat.label}</Text>
+                    <Text style={[s.mutedSmall, { color: c.emerald }]}>{stat.sub}</Text>
                   </Card>
                 ))}
               </View>
 
               <MonthlyRevenueChart data={monthlyData} year={selectedYear} onYearChange={setSelectedYear} />
 
-              <Text style={[styles.sectionTitleCaps, { marginTop: 8 }]}>REVENUE BREAKDOWN</Text>
-              <View style={styles.splitBar}>
-                <View style={[styles.splitReal, { flex: Math.max(1, realPct) }]} />
-                <View style={[styles.splitCoupon, { flex: Math.max(1, couponPct) }]} />
+              <Text style={[s.sectionTitleCaps, { marginTop: 8 }]}>REVENUE BREAKDOWN</Text>
+              <View style={s.splitBar}>
+                <View style={[s.splitReal, { flex: Math.max(1, realPct) }]} />
+                <View style={[s.splitCoupon, { flex: Math.max(1, couponPct) }]} />
               </View>
-              <Text style={styles.mutedSmall}>
+              <Text style={s.mutedSmall}>
                 Real payments: ₹{r.realRevenue.toLocaleString()} ({realPct.toFixed(0)}%)
               </Text>
-              <Text style={[styles.mutedSmall, { marginBottom: 8 }]}>
+              <Text style={[s.mutedSmall, { marginBottom: 8 }]}>
                 Coupon-assisted: ₹{r.couponRevenue.toLocaleString()} ({couponPct.toFixed(0)}%)
               </Text>
 
               <Card style={{ padding: 12, marginBottom: 12 }}>
-                <Text style={styles.cardTitle}>
+                <Text style={s.cardTitle}>
                   💰 Real payments — ₹{r.realRevenue.toLocaleString()} · {r.realBookingCount} bookings
                 </Text>
-                <Text style={[styles.cardTitle, { marginTop: 8 }]}>
+                <Text style={[s.cardTitle, { marginTop: 8 }]}>
                   🎟️ Coupon payments — ₹{r.couponRevenue.toLocaleString()} · {r.couponBookingCount}{" "}
                   bookings
                 </Text>
-                <Text style={[styles.cardTitle, { marginTop: 8 }]}>
+                <Text style={[s.cardTitle, { marginTop: 8 }]}>
                   🆓 Free coupons — {r.freeCouponCount} bookings (₹{r.freeCouponValue.toLocaleString()}{" "}
                   face value, not paid)
                 </Text>
@@ -757,7 +760,7 @@ export function OrganizerScreen() {
                   >
                     <Text
                       style={{
-                        color: txnFilter === f ? "#000" : colors.text,
+                        color: txnFilter === f ? "#000" : c.text,
                         fontWeight: "700",
                         textTransform: "capitalize",
                       }}
@@ -768,10 +771,10 @@ export function OrganizerScreen() {
                 ))}
               </View>
 
-              <Text style={styles.sectionTitleCaps}>Transactions</Text>
+              <Text style={s.sectionTitleCaps}>Transactions</Text>
               <Card style={{ padding: 12, marginBottom: 12 }}>
                 {filtered.length === 0 ? (
-                  <Text style={styles.mutedSmall}>No transactions in this filter.</Text>
+                  <Text style={s.mutedSmall}>No transactions in this filter.</Text>
                 ) : (
                   filtered.map((t) => {
                     const b = txnBadge(t);
@@ -784,17 +787,17 @@ export function OrganizerScreen() {
                           marginBottom: 10,
                           paddingBottom: 10,
                           borderBottomWidth: 1,
-                          borderBottomColor: colors.border,
+                          borderBottomColor: c.border,
                         }}
                       >
                         <View style={{ flex: 1, paddingRight: 8 }}>
-                          <Text style={styles.cardTitle}>
+                          <Text style={s.cardTitle}>
                             {t.memberName} · {t.tripTitle}
                           </Text>
-                          <Text style={{ color: colors.emerald, fontWeight: "800" }}>
+                          <Text style={{ color: c.emerald, fontWeight: "800" }}>
                             ₹{Number(t.amountPaid ?? 0).toLocaleString()}
                           </Text>
-                          <Text style={styles.mutedSmall}>
+                          <Text style={s.mutedSmall}>
                             {t.paidAt ? String(t.paidAt).slice(0, 10) : "—"}
                           </Text>
                         </View>
@@ -806,20 +809,20 @@ export function OrganizerScreen() {
               </Card>
 
               <Card style={{ padding: 16, marginBottom: 12 }}>
-                <Text style={styles.sectionTitle}>Revenue by event</Text>
+                <Text style={s.sectionTitle}>Revenue by event</Text>
                 {trips.length === 0 ? (
-                  <Text style={styles.mutedSmall}>No paid events in this range.</Text>
+                  <Text style={s.mutedSmall}>No paid events in this range.</Text>
                 ) : (
                   trips.map((row) => (
                     <View key={row.tripId} style={{ marginBottom: 12 }}>
                       <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                        <Text style={styles.cardTitle}>{row.tripTitle}</Text>
-                        <Text style={styles.cardTitle}>₹{row.grossAmount.toLocaleString()}</Text>
+                        <Text style={s.cardTitle}>{row.tripTitle}</Text>
+                        <Text style={s.cardTitle}>₹{row.grossAmount.toLocaleString()}</Text>
                       </View>
-                      <View style={styles.progressBg}>
+                      <View style={s.progressBg}>
                         <View
                           style={[
-                            styles.progressFg,
+                            s.progressFg,
                             {
                               width: `${Math.min(
                                 100,
@@ -829,19 +832,19 @@ export function OrganizerScreen() {
                           ]}
                         />
                       </View>
-                      <Text style={styles.mutedSmall}>{row.totalBookings} bookings</Text>
+                      <Text style={s.mutedSmall}>{row.totalBookings} bookings</Text>
                     </View>
                   ))
                 )}
               </Card>
 
-              <Card style={{ padding: 14, marginBottom: 8, borderColor: colors.border }}>
-                <Text style={styles.mutedSmall}>Platform fee (10%)</Text>
-                <Text style={styles.statVal}>₹{r.platformFee.toLocaleString()}</Text>
+              <Card style={{ padding: 14, marginBottom: 8, borderColor: c.border }}>
+                <Text style={s.mutedSmall}>Platform fee (10%)</Text>
+                <Text style={s.statVal}>₹{r.platformFee.toLocaleString()}</Text>
               </Card>
             </>
           ) : (
-            <Text style={styles.muted}>Could not load revenue for this range.</Text>
+            <Text style={s.muted}>Could not load revenue for this range.</Text>
           )}
         </View>
       );
@@ -849,27 +852,27 @@ export function OrganizerScreen() {
 
     if (activeTab === "Coupons") {
       return (
-        <View style={styles.tabBody}>
+        <View style={s.tabBody}>
           {couponsFetchError ? (
             <Card style={{ padding: 12, marginBottom: 12, borderColor: "rgba(248,113,113,0.4)" }}>
-              <Text style={{ color: colors.danger }}>{couponsFetchError}</Text>
+              <Text style={{ color: c.danger }}>{couponsFetchError}</Text>
             </Card>
           ) : null}
           <Card style={{ padding: 16, marginBottom: 16 }}>
-            <Text style={styles.sectionTitle}>Generate New Coupon</Text>
-            <View style={styles.fieldGrid}>
-              <View style={styles.field}>
+            <Text style={s.sectionTitle}>Generate New Coupon</Text>
+            <View style={s.fieldGrid}>
+              <View style={s.field}>
                 <Text style={typography.label}>Code Prefix</Text>
                 <TextInput
-                  style={styles.input}
+                  style={s.input}
                   value={newCoupon.prefix}
                   onChangeText={(t) => setNewCoupon((p) => ({ ...p, prefix: t.toUpperCase() }))}
                 />
               </View>
-              <View style={styles.field}>
+              <View style={s.field}>
                 <Text style={typography.label}>Discount %</Text>
                 <TextInput
-                  style={styles.input}
+                  style={s.input}
                   keyboardType="number-pad"
                   value={String(newCoupon.discount)}
                   onChangeText={(t) =>
@@ -877,10 +880,10 @@ export function OrganizerScreen() {
                   }
                 />
               </View>
-              <View style={styles.field}>
+              <View style={s.field}>
                 <Text style={typography.label}>Usage Limit</Text>
                 <TextInput
-                  style={styles.input}
+                  style={s.input}
                   keyboardType="number-pad"
                   value={String(newCoupon.limit)}
                   onChangeText={(t) =>
@@ -888,12 +891,12 @@ export function OrganizerScreen() {
                   }
                 />
               </View>
-              <View style={styles.field}>
+              <View style={s.field}>
                 <Text style={typography.label}>Expires</Text>
                 <TextInput
-                  style={styles.input}
+                  style={s.input}
                   placeholder="YYYY-MM-DD"
-                  placeholderTextColor={colors.muted2}
+                  placeholderTextColor={c.muted}
                   value={newCoupon.expiry}
                   onChangeText={(t) => setNewCoupon((p) => ({ ...p, expiry: t }))}
                 />
@@ -902,10 +905,10 @@ export function OrganizerScreen() {
             {genCode ? (
               <Pressable
                 onPress={() => Share.share({ message: genCode })}
-                style={styles.codeBox}
+                style={s.codeBox}
               >
-                <Text style={styles.codeText}>{genCode}</Text>
-                <Text style={styles.mutedSmall}>Tap to share</Text>
+                <Text style={s.codeText}>{genCode}</Text>
+                <Text style={s.mutedSmall}>Tap to share</Text>
               </Pressable>
             ) : null}
             <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
@@ -920,10 +923,10 @@ export function OrganizerScreen() {
           {coupons.map((c) => (
             <Card key={c.id} style={{ padding: 14, marginBottom: 8 }}>
               <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                <Text style={styles.codeSmall}>{c.code}</Text>
+                <Text style={s.codeSmall}>{c.code}</Text>
                 <Badge variant={c.active ? "success" : "default"}>{c.active ? "Active" : "Paused"}</Badge>
               </View>
-              <Text style={styles.mutedSmall}>
+              <Text style={s.mutedSmall}>
                 {c.discount}% off · {c.used}/{c.limit} used · {c.expiry}
               </Text>
             </Card>
@@ -938,45 +941,45 @@ export function OrganizerScreen() {
   const showStats = activeTab !== "Revenue Analytics";
 
   return (
-    <View style={styles.root}>
+    <View style={s.root}>
       <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#fff" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.text} />}
         contentContainerStyle={{ paddingBottom: 48 }}
       >
-        <Pressable style={styles.tabSwitcher} onPress={() => setTabMenuOpen(true)}>
-          <Text style={styles.tabSwitcherText}>≡  {activeTab}</Text>
-          <Text style={styles.mutedSmall}>Change section</Text>
+        <Pressable style={s.tabSwitcher} onPress={() => setTabMenuOpen(true)}>
+          <Text style={s.tabSwitcherText}>≡  {activeTab}</Text>
+          <Text style={s.mutedSmall}>Change section</Text>
         </Pressable>
 
         {showStats ? (
-          <View style={styles.statGrid}>
+          <View style={s.statGrid}>
             {[
               { k: "Total Revenue", v: `₹${summary.totalRevenue.toLocaleString()}`, t: "live" },
               { k: "Participants", v: summary.participants.toLocaleString(), t: "live" },
               { k: "Events Hosted", v: String(summary.eventsHosted), t: `${summary.successRate}% success` },
               { k: "Active Coupons", v: String(summary.activeCoupons), t: `${summary.expiringCoupons} expiring` },
-            ].map((s) => (
-              <Card key={s.k} style={{ padding: 12, width: "48%" }}>
-                <Text style={styles.mutedSmall}>{s.t}</Text>
-                <Text style={styles.statVal}>{s.v}</Text>
-                <Text style={typography.label}>{s.k}</Text>
+            ].map((stat) => (
+              <Card key={stat.k} style={{ padding: 12, width: "48%" }}>
+                <Text style={s.mutedSmall}>{stat.t}</Text>
+                <Text style={s.statVal}>{stat.v}</Text>
+                <Text style={typography.label}>{stat.k}</Text>
               </Card>
             ))}
           </View>
         ) : null}
 
-        <View style={styles.headerRow}>
+        <View style={s.headerRow}>
           <View>
-            <Text style={styles.h1}>{activeTab}</Text>
-            <Text style={styles.muted}>Manage your {activeTab.toLowerCase()}</Text>
+            <Text style={s.h1}>{activeTab}</Text>
+            <Text style={s.muted}>Manage your {activeTab.toLowerCase()}</Text>
           </View>
           {activeTab === "Revenue Analytics" ? (
             <Pressable
               onPress={() => goStack("Payout")}
-              style={styles.payoutBtn}
+              style={s.payoutBtn}
               hitSlop={8}
             >
-              <Text style={styles.payoutBtnText}>Payout</Text>
+              <Text style={s.payoutBtnText}>Payout</Text>
             </Pressable>
           ) : (
             <OutlineButton title="+ New Event" onPress={openCreate} />
@@ -987,10 +990,10 @@ export function OrganizerScreen() {
       </ScrollView>
 
       <Modal visible={customModalOpen} animationType="slide" transparent>
-        <View style={styles.modalWrap}>
-          <Pressable style={styles.modalOverlay} onPress={() => setCustomModalOpen(false)} />
-          <View style={[styles.modalSheet, { paddingBottom: 28 }]}>
-            <Text style={styles.sectionTitle}>Custom date range</Text>
+        <View style={s.modalWrap}>
+          <Pressable style={s.modalOverlay} onPress={() => setCustomModalOpen(false)} />
+          <View style={[s.modalSheet, { paddingBottom: 28 }]}>
+            <Text style={s.sectionTitle}>Custom date range</Text>
             {Platform.OS === "ios" ? (
               <>
                 <Text style={typography.label}>From</Text>
@@ -1016,13 +1019,13 @@ export function OrganizerScreen() {
               </>
             ) : (
               <>
-                <Pressable style={styles.datePickRow} onPress={() => setAndroidPicker("from")}>
-                  <Text style={styles.mutedSmall}>From</Text>
-                  <Text style={styles.cardTitle}>{toLocalYmd(customFrom)}</Text>
+                <Pressable style={s.datePickRow} onPress={() => setAndroidPicker("from")}>
+                  <Text style={s.mutedSmall}>From</Text>
+                  <Text style={s.cardTitle}>{toLocalYmd(customFrom)}</Text>
                 </Pressable>
-                <Pressable style={styles.datePickRow} onPress={() => setAndroidPicker("to")}>
-                  <Text style={styles.mutedSmall}>To</Text>
-                  <Text style={styles.cardTitle}>{toLocalYmd(customTo)}</Text>
+                <Pressable style={s.datePickRow} onPress={() => setAndroidPicker("to")}>
+                  <Text style={s.mutedSmall}>To</Text>
+                  <Text style={s.cardTitle}>{toLocalYmd(customTo)}</Text>
                 </Pressable>
               </>
             )}
@@ -1060,39 +1063,39 @@ export function OrganizerScreen() {
       ) : null}
 
       <Modal visible={tabMenuOpen} animationType="slide" transparent>
-        <View style={styles.modalWrap}>
-          <Pressable style={styles.modalOverlay} onPress={() => setTabMenuOpen(false)} />
-          <View style={styles.modalSheet}>
-            <Text style={styles.sectionTitle}>Organizer menu</Text>
+        <View style={s.modalWrap}>
+          <Pressable style={s.modalOverlay} onPress={() => setTabMenuOpen(false)} />
+          <View style={s.modalSheet}>
+            <Text style={s.sectionTitle}>Organizer menu</Text>
             {TABS.map((id) => (
               <Pressable
                 key={id}
-                style={[styles.tabRow, activeTab === id && styles.tabRowOn]}
+                style={[s.tabRow, activeTab === id && s.tabRowOn]}
                 onPress={() => {
                   setTabMenuOpen(false);
                   setActiveTab(id);
                 }}
               >
-                <Text style={[styles.tabRowText, activeTab === id && styles.tabRowTextOn]}>{id}</Text>
+                <Text style={[s.tabRowText, activeTab === id && s.tabRowTextOn]}>{id}</Text>
               </Pressable>
             ))}
             <Pressable
-              style={styles.tabRow}
+              style={s.tabRow}
               onPress={() => {
                 setTabMenuOpen(false);
                 openCreate();
               }}
             >
-              <Text style={styles.tabRowText}>Create Event</Text>
+              <Text style={s.tabRowText}>Create Event</Text>
             </Pressable>
             <Pressable
-              style={styles.tabRow}
+              style={s.tabRow}
               onPress={() => {
                 setTabMenuOpen(false);
                 goStack("Payout");
               }}
             >
-              <Text style={styles.tabRowText}>Payout</Text>
+              <Text style={s.tabRowText}>Payout</Text>
             </Pressable>
           </View>
         </View>
@@ -1101,188 +1104,174 @@ export function OrganizerScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  tabSwitcher: {
-    margin: 16,
-    padding: 14,
-    borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  tabSwitcherText: { color: colors.text, fontWeight: "800", fontSize: 15 },
-  statGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    paddingHorizontal: 16,
-    marginBottom: 8,
-    justifyContent: "space-between",
-  },
-  statVal: { color: colors.text, fontSize: 20, fontWeight: "800" },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    marginBottom: 12,
-    gap: 8,
-  },
-  payoutBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 999,
-    backgroundColor: "rgba(0,229,176,0.15)",
-    borderWidth: 1,
-    borderColor: TEAL,
-  },
-  payoutBtnText: { color: TEAL, fontWeight: "800", fontSize: 15 },
-  h1: { ...typography.h1, color: colors.text },
-  sectionTitle: { ...typography.h2, color: colors.text, marginBottom: 12 },
-  muted: { color: colors.muted, fontSize: 14 },
-  mutedSmall: { color: colors.muted, fontSize: 12, marginTop: 4 },
-  tabBody: { paddingHorizontal: 16 },
-  cardTitle: { color: colors.text, fontWeight: "700", fontSize: 16 },
-  thumb: { width: 80, height: 80, borderRadius: 12 },
-  thumbSm: { width: 56, height: 56, borderRadius: 10 },
-  progressBg: {
-    height: 4,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderRadius: 4,
-    marginTop: 8,
-    overflow: "hidden",
-  },
-  progressFg: { height: "100%", backgroundColor: "rgba(255,255,255,0.5)" },
-  chartRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    height: 120,
-    gap: 4,
-    marginTop: 12,
-  },
-  chartCol: { flex: 1, alignItems: "center" },
-  chartBar: {
-    width: "100%",
-    backgroundColor: "rgba(255,255,255,0.25)",
-    borderRadius: 4,
-    minHeight: 8,
-  },
-  chartLbl: { fontSize: 8, color: colors.muted2, marginTop: 4 },
-  splitBar: {
-    flexDirection: "row",
-    height: 12,
-    borderRadius: 6,
-    overflow: "hidden",
-    marginBottom: 8,
-    backgroundColor: "rgba(255,255,255,0.06)",
-  },
-  splitReal: { backgroundColor: TEAL },
-  splitCoupon: { backgroundColor: "rgba(0,229,176,0.35)" },
-  search: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 12,
-    color: colors.text,
-    marginBottom: 12,
-  },
-  fieldGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  field: { width: "48%", marginBottom: 8 },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 10,
-    color: colors.text,
-    marginTop: 6,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-  },
-  codeBox: {
-    padding: 14,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginTop: 8,
-  },
-  codeText: {
-    fontSize: 20,
-    fontWeight: "800",
-    letterSpacing: 2,
-    color: colors.text,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-  },
-  codeSmall: { fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", color: colors.text, fontWeight: "700" },
-  modalWrap: { flex: 1, justifyContent: "flex-end" },
-  modalOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.7)",
-  },
-  modalSheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    paddingBottom: Platform.OS === "ios" ? 36 : 20,
-    borderTopWidth: 1,
-    borderColor: colors.border,
-  },
-  tabRow: {
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    marginBottom: 6,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  tabRowOn: { backgroundColor: colors.text, borderColor: colors.text },
-  tabRowText: { color: colors.muted, fontWeight: "700" },
-  tabRowTextOn: { color: colors.bg },
-  rowBtns: { flexDirection: "row", gap: 8, marginTop: 10, flexWrap: "wrap" },
-  btnOutlineSm: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  btnOutlineSmText: { color: colors.text, fontWeight: "700", fontSize: 13 },
-  btnPrimarySm: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    backgroundColor: colors.text,
-  },
-  btnPrimarySmText: { color: colors.bg, fontWeight: "800", fontSize: 13 },
-  sectionTitleCaps: {
-    marginTop: 8,
-    marginBottom: 8,
-    color: colors.muted2,
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-  },
-  periodChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  periodChipOn: {
-    backgroundColor: "rgba(0,229,176,0.15)",
-    borderColor: TEAL,
-  },
-  periodChipText: { color: colors.text, fontWeight: "700", fontSize: 13 },
-  periodChipTextOn: { color: TEAL },
-  datePickRow: {
-    padding: 14,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: 10,
-  },
-});
+const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
+  StyleSheet.create({
+    root: { flex: 1, backgroundColor: c.bg },
+    tabSwitcher: {
+      margin: 16,
+      padding: 14,
+      borderRadius: 16,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    tabSwitcherText: { color: c.text, fontWeight: "800", fontSize: 15 },
+    statGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 10,
+      paddingHorizontal: 16,
+      marginBottom: 8,
+      justifyContent: "space-between",
+    },
+    statVal: { color: c.text, fontSize: 20, fontWeight: "800" },
+    headerRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      paddingHorizontal: 16,
+      marginBottom: 12,
+      gap: 8,
+    },
+    payoutBtn: {
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      borderRadius: 999,
+      backgroundColor: "rgba(0,229,176,0.15)",
+      borderWidth: 1,
+      borderColor: TEAL,
+    },
+    payoutBtnText: { color: TEAL, fontWeight: "800", fontSize: 15 },
+    h1: { ...typography.h1, color: c.text },
+    sectionTitle: { ...typography.h2, color: c.text, marginBottom: 12 },
+    muted: { color: c.muted, fontSize: 14 },
+    mutedSmall: { color: c.muted, fontSize: 12, marginTop: 4 },
+    tabBody: { paddingHorizontal: 16 },
+    cardTitle: { color: c.text, fontWeight: "700", fontSize: 16 },
+    thumb: { width: 80, height: 80, borderRadius: 12 },
+    thumbSm: { width: 56, height: 56, borderRadius: 10 },
+    progressBg: {
+      height: 4,
+      backgroundColor: "rgba(255,255,255,0.06)",
+      borderRadius: 4,
+      marginTop: 8,
+      overflow: "hidden",
+    },
+    progressFg: { height: "100%", backgroundColor: "rgba(255,255,255,0.5)" },
+    search: {
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 12,
+      padding: 12,
+      color: c.text,
+      marginBottom: 12,
+    },
+    fieldGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+    field: { width: "48%", marginBottom: 8 },
+    input: {
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 12,
+      padding: 10,
+      color: c.text,
+      marginTop: 6,
+      fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+    },
+    codeBox: {
+      padding: 14,
+      backgroundColor: c.surface,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      marginTop: 8,
+    },
+    codeText: {
+      fontSize: 20,
+      fontWeight: "800",
+      letterSpacing: 2,
+      color: c.text,
+      fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+    },
+    codeSmall: { fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", color: c.text, fontWeight: "700" },
+    modalWrap: { flex: 1, justifyContent: "flex-end" },
+    modalOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: "rgba(0,0,0,0.7)",
+    },
+    modalSheet: {
+      backgroundColor: c.surface,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      padding: 20,
+      paddingBottom: Platform.OS === "ios" ? 36 : 20,
+      borderTopWidth: 1,
+      borderColor: c.border,
+    },
+    tabRow: {
+      paddingVertical: 14,
+      paddingHorizontal: 12,
+      borderRadius: 14,
+      marginBottom: 6,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    tabRowOn: { backgroundColor: c.text, borderColor: c.text },
+    tabRowText: { color: c.muted, fontWeight: "700" },
+    tabRowTextOn: { color: c.bg },
+    rowBtns: { flexDirection: "row", gap: 8, marginTop: 10, flexWrap: "wrap" },
+    btnOutlineSm: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    btnOutlineSmText: { color: c.text, fontWeight: "700", fontSize: 13 },
+    btnPrimarySm: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 999,
+      backgroundColor: c.text,
+    },
+    btnPrimarySmText: { color: c.bg, fontWeight: "800", fontSize: 13 },
+    sectionTitleCaps: {
+      marginTop: 8,
+      marginBottom: 8,
+      color: c.muted,
+      fontSize: 11,
+      fontWeight: "800",
+      letterSpacing: 1.2,
+    },
+    splitBar: {
+      flexDirection: "row",
+      height: 12,
+      borderRadius: 6,
+      overflow: "hidden",
+      marginBottom: 8,
+      backgroundColor: c.surface,
+    },
+    splitReal: { backgroundColor: TEAL },
+    splitCoupon: { backgroundColor: "rgba(0,229,176,0.35)" },
+    periodChip: {
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 10,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    periodChipOn: {
+      backgroundColor: "rgba(0,229,176,0.15)",
+      borderColor: TEAL,
+    },
+    periodChipText: { color: c.text, fontWeight: "700", fontSize: 13 },
+    periodChipTextOn: { color: TEAL },
+    datePickRow: {
+      padding: 14,
+      borderRadius: 12,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.border,
+      marginBottom: 10,
+    },
+  });

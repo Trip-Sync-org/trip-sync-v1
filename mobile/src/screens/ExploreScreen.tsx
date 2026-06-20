@@ -10,13 +10,15 @@ import {
   TextInput,
   ScrollView,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { apiFetch } from "../api/client";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import type { TripListItem } from "../types";
-import { colors, typography } from "../theme";
+import { typography } from "../theme";
 import { Badge } from "../components/ui";
+import { useAppTheme } from "../context/ThemeContext";
 
 const THEMES = ["All", "Adventure", "Trekking", "Bike Ride", "Cultural", "Food Trail", "Night Ride", "Nature Escape", "Beach Trip"];
 const SORTS = [
@@ -25,8 +27,12 @@ const SORTS = [
   { id: "price-desc", label: "Price ↓" },
 ] as const;
 
+const CHIP_HEIGHT = 36;
+
 export function ExploreScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { colors } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const [trips, setTrips] = useState<TripListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -74,84 +80,97 @@ export function ExploreScreen() {
     if (parent) parent.navigate("TripDetail", { id: String(id) });
   };
 
-  return (
-    <View style={styles.root}>
-      <View style={styles.hero}>
-        <Text style={styles.heroTitle}>Explore Expeditions</Text>
-        <Text style={styles.heroSub}>Find your next adventure from our curated marketplace</Text>
-      </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.sortRow}
-      >
-        {SORTS.map((s) => (
-          <Pressable
-            key={s.id}
-            style={[styles.sortChip, sortBy === s.id && styles.sortChipOn]}
-            onPress={() => setSortBy(s.id)}
-          >
-            <Text style={[styles.sortChipText, sortBy === s.id && styles.sortChipTextOn]}>{s.label}</Text>
-          </Pressable>
-        ))}
-      </ScrollView>
+  const s = useMemo(() => makeStyles(colors, insets.top), [colors, insets.top]);
 
-      <View style={styles.searchWrap}>
+  return (
+    <View style={s.root}>
+      <View style={s.hero}>
+        <Text style={s.heroTitle}>Explore Expeditions</Text>
+        <Text style={s.heroSub}>Find your next adventure from our curated marketplace</Text>
+      </View>
+
+      <View style={s.sortRowOuter}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={s.sortRowInner}
+          style={s.chipScroll}
+        >
+          {SORTS.map((sort) => (
+            <Pressable
+              key={sort.id}
+              style={[s.sortChip, sortBy === sort.id && s.sortChipOn]}
+              onPress={() => setSortBy(sort.id)}
+            >
+              <Text style={[s.sortChipText, sortBy === sort.id && s.sortChipTextOn]}>{sort.label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
+
+      <View style={s.searchWrap}>
         <TextInput
-          style={styles.search}
+          style={s.search}
           placeholder="Search trips, locations…"
-          placeholderTextColor={colors.muted2}
+          placeholderTextColor={colors.muted}
           value={search}
           onChangeText={setSearch}
         />
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillRow}>
-        {THEMES.map((t) => (
-          <Pressable
-            key={t}
-            style={[styles.pill, (t === "All" ? theme === "" : theme === t) && styles.pillOn]}
-            onPress={() => setTheme(t === "All" ? "" : t)}
-          >
-            <Text style={[styles.pillText, (t === "All" ? theme === "" : theme === t) && styles.pillTextOn]}>
-              {t}
-            </Text>
-          </Pressable>
-        ))}
-      </ScrollView>
+      <View style={s.pillRowOuter}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={s.pillRowInner}
+          style={s.chipScroll}
+        >
+          {THEMES.map((t) => (
+            <Pressable
+              key={t}
+              style={[s.pill, (t === "All" ? theme === "" : theme === t) && s.pillOn]}
+              onPress={() => setTheme(t === "All" ? "" : t)}
+            >
+              <Text style={[s.pillText, (t === "All" ? theme === "" : theme === t) && s.pillTextOn]}>
+                {t}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
 
-      <Text style={styles.count}>{filtered.length} expeditions found</Text>
+      <Text style={s.count}>{filtered.length} expeditions found</Text>
 
       <FlatList
         data={filtered}
         keyExtractor={(item) => String(item.id)}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor="#fff" />}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.text} />}
         contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
         ListEmptyComponent={
           !loading ? (
-            <Text style={styles.empty}>No trips found. Try adjusting search or theme.</Text>
+            <Text style={s.empty}>No trips found. Try adjusting search or theme.</Text>
           ) : null
         }
         renderItem={({ item }) => (
-          <Pressable style={styles.card} onPress={() => openTrip(item.id)}>
+          <Pressable style={s.card} onPress={() => openTrip(item.id)}>
             <Image
               source={{
                 uri: `https://picsum.photos/seed/trip-${item.id}/800/500`,
               }}
-              style={styles.banner}
+              style={s.banner}
             />
-            <View style={styles.cardBody}>
-              <View style={styles.badgeRow}>
+            <View style={s.cardBody}>
+              <View style={s.badgeRow}>
                 {item.price != null && Number(item.price) <= 0 ? (
                   <Badge variant="success">FREE</Badge>
                 ) : null}
                 {item.theme ? <Badge variant="default">{item.theme}</Badge> : null}
               </View>
-              <Text style={styles.title}>{item.name ?? "Trip"}</Text>
-              <Text style={styles.meta}>
+              <Text style={s.title}>{item.name ?? "Trip"}</Text>
+              <Text style={s.meta}>
                 {item.theme ?? "Adventure"} · {item.date ?? "TBA"}
               </Text>
-              <Text style={styles.price}>
+              <Text style={s.price}>
                 {item.price != null && Number(item.price) > 0
                   ? `₹${Number(item.price).toLocaleString()}`
                   : "Free"}{" "}
@@ -165,59 +184,69 @@ export function ExploreScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  hero: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
-  heroTitle: { ...typography.hero, color: colors.text, fontSize: 28, lineHeight: 34 },
-  heroSub: { color: colors.muted, fontSize: 14, marginTop: 6 },
-  searchWrap: { paddingHorizontal: 16, marginBottom: 8 },
-  search: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 16,
-    padding: 14,
-    color: colors.text,
-    fontSize: 15,
-    backgroundColor: "rgba(255,255,255,0.04)",
-  },
-  sortRow: { paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
-  sortChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginRight: 8,
-  },
-  sortChipOn: { backgroundColor: colors.text, borderColor: colors.text },
-  sortChipText: { color: colors.muted, fontWeight: "700", fontSize: 12 },
-  sortChipTextOn: { color: colors.bg },
-  pillRow: { paddingHorizontal: 16, paddingBottom: 8, gap: 8 },
-  pill: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginRight: 8,
-  },
-  pillOn: { backgroundColor: colors.text, borderColor: colors.text },
-  pillText: { color: colors.muted, fontWeight: "600", fontSize: 13 },
-  pillTextOn: { color: colors.bg },
-  count: { ...typography.label, paddingHorizontal: 16, marginBottom: 4 },
-  empty: { color: colors.muted, textAlign: "center", marginTop: 40 },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    marginBottom: 14,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  banner: { width: "100%", height: 160, opacity: 0.88 },
-  cardBody: { padding: 14 },
-  badgeRow: { flexDirection: "row", gap: 6, marginBottom: 8, flexWrap: "wrap" },
-  title: { color: colors.text, fontSize: 18, fontWeight: "800" },
-  meta: { color: colors.muted, marginTop: 4, fontSize: 13 },
-  price: { color: colors.muted, marginTop: 8, fontSize: 13 },
-});
+const makeStyles = (colors: ReturnType<typeof useAppTheme>["colors"], topInset: number) =>
+  StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.bg, paddingTop: topInset },
+    hero: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
+    heroTitle: { ...typography.hero, color: colors.text, fontSize: 28, lineHeight: 34 },
+    heroSub: { color: colors.muted, fontSize: 14, marginTop: 6 },
+    chipScroll: { height: CHIP_HEIGHT },
+    sortRowOuter: { paddingHorizontal: 16, paddingVertical: 4 },
+    sortRowInner: { gap: 8, flexDirection: "row", alignItems: "center", height: CHIP_HEIGHT },
+    sortChip: {
+      paddingHorizontal: 16,
+      paddingVertical: 0,
+      height: CHIP_HEIGHT,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.border,
+      marginRight: 8,
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    sortChipOn: { backgroundColor: colors.text, borderColor: colors.text },
+    sortChipText: { color: colors.muted, fontWeight: "700", fontSize: 12 },
+    sortChipTextOn: { color: colors.bg },
+    searchWrap: { paddingHorizontal: 16, marginBottom: 8 },
+    search: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 16,
+      padding: 14,
+      color: colors.text,
+      fontSize: 15,
+      backgroundColor: colors.surface,
+    },
+    pillRowOuter: { paddingHorizontal: 16, paddingBottom: 4 },
+    pillRowInner: { gap: 8, flexDirection: "row", alignItems: "center", height: CHIP_HEIGHT },
+    pill: {
+      paddingHorizontal: 16,
+      paddingVertical: 0,
+      height: CHIP_HEIGHT,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.border,
+      marginRight: 8,
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    pillOn: { backgroundColor: colors.text, borderColor: colors.text },
+    pillText: { color: colors.muted, fontWeight: "600", fontSize: 13 },
+    pillTextOn: { color: colors.bg },
+    count: { ...typography.label, paddingHorizontal: 16, marginBottom: 4, color: colors.muted },
+    empty: { color: colors.muted, textAlign: "center", marginTop: 40 },
+    card: {
+      backgroundColor: colors.surface,
+      borderRadius: 16,
+      marginBottom: 14,
+      overflow: "hidden",
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    banner: { width: "100%", height: 160, opacity: 0.88 },
+    cardBody: { padding: 14 },
+    badgeRow: { flexDirection: "row", gap: 6, marginBottom: 8, flexWrap: "wrap" },
+    title: { color: colors.text, fontSize: 18, fontWeight: "800" },
+    meta: { color: colors.muted, marginTop: 4, fontSize: 13 },
+    price: { color: colors.muted, marginTop: 8, fontSize: 13 },
+  });

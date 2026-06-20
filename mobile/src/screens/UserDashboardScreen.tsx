@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import { apiFetch } from "../api/client";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { navigateToRootStack } from "../navigation/navigateRoot";
 import { useAuth } from "../context/AuthContext";
-import { colors, typography } from "../theme";
+import { typography, useThemeColors } from "../theme";
 import { Card, Badge, PrimaryButton, OutlineButton } from "../components/ui";
 import {
   normalizeTripFromApi,
@@ -35,6 +35,7 @@ const TABS = [
 export function UserDashboardScreen() {
   const { user, logout } = useAuth();
   const navigation = useNavigation<NavigationProp<Record<string, object | undefined>>>();
+  const c = useThemeColors();
   const goStack = (route: keyof RootStackParamList, params?: RootStackParamList[keyof RootStackParamList]) => {
     navigateToRootStack(navigation, route as string, params as Record<string, unknown> | undefined);
   };
@@ -108,16 +109,18 @@ export function UserDashboardScreen() {
 
   const xpPct = ((user?.xp || 0) % 1000) / 10;
 
+  const s = useMemo(() => makeStyles(c), [c]);
+
   const renderContent = () => {
     if (activeTab === "upcoming") {
       return (
-        <View style={styles.section}>
+        <View style={s.section}>
           {bookingsLoading ? (
-            <Text style={styles.muted}>Loading your booked trips…</Text>
+            <Text style={s.muted}>Loading your booked trips…</Text>
           ) : upcomingList.length === 0 ? (
             <Card style={{ padding: 32, alignItems: "center" }}>
               <Text style={{ fontSize: 40, marginBottom: 8 }}>📅</Text>
-              <Text style={[styles.muted, { marginBottom: 16 }]}>No upcoming trips</Text>
+              <Text style={[s.muted, { marginBottom: 16 }]}>No upcoming trips</Text>
               <PrimaryButton title="Explore Trips" onPress={goExploreTab} />
             </Card>
           ) : (
@@ -129,19 +132,19 @@ export function UserDashboardScreen() {
                 />
                 <View style={{ padding: 16 }}>
                   <Badge variant="success">Upcoming</Badge>
-                  <Text style={styles.cardTitle}>{trip.name}</Text>
-                  <Text style={styles.mutedSmall}>
+                  <Text style={s.cardTitle}>{trip.name}</Text>
+                  <Text style={s.mutedSmall}>
                     {trip.date} · {trip.meetupPoint || "Meetup TBA"}
                   </Text>
-                  <Text style={styles.mutedSmall}>
+                  <Text style={s.mutedSmall}>
                     {trip.joinedCount}/{trip.maxParticipants ?? "—"} joined
                   </Text>
-                  <View style={styles.rowBtns}>
-                    <Pressable style={styles.btnPrimarySm} onPress={() => goStack("LiveTrip", { id: trip.id })}>
-                      <Text style={styles.btnPrimarySmText}>Go Live</Text>
+                  <View style={s.rowBtns}>
+                    <Pressable style={s.btnPrimarySm} onPress={() => goStack("LiveTrip", { id: trip.id })}>
+                      <Text style={s.btnPrimarySmText}>Go Live</Text>
                     </Pressable>
-                    <Pressable style={styles.btnOutlineSm} onPress={() => goStack("TripDetail", { id: trip.id })}>
-                      <Text style={styles.btnOutlineSmText}>View Details</Text>
+                    <Pressable style={s.btnOutlineSm} onPress={() => goStack("TripDetail", { id: trip.id })}>
+                      <Text style={s.btnOutlineSmText}>View Details</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -153,12 +156,12 @@ export function UserDashboardScreen() {
     }
     if (activeTab === "past") {
       return (
-        <View style={styles.section}>
+        <View style={s.section}>
           {bookingsLoading ? (
-            <Text style={styles.muted}>Loading…</Text>
+            <Text style={s.muted}>Loading…</Text>
           ) : pastList.length === 0 ? (
             <Card style={{ padding: 32, alignItems: "center" }}>
-              <Text style={styles.muted}>No past trips yet</Text>
+              <Text style={s.muted}>No past trips yet</Text>
             </Card>
           ) : (
             pastList.map((trip) => (
@@ -168,8 +171,8 @@ export function UserDashboardScreen() {
                   style={{ width: 72, height: 72, borderRadius: 12 }}
                 />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.cardTitle}>{trip.name}</Text>
-                  <Text style={styles.mutedSmall}>{trip.date}</Text>
+                  <Text style={s.cardTitle}>{trip.name}</Text>
+                  <Text style={s.mutedSmall}>{trip.date}</Text>
                   <Badge variant="default">Completed</Badge>
                 </View>
                 <OutlineButton title="Details" onPress={() => goStack("TripDetail", { id: trip.id })} />
@@ -181,8 +184,8 @@ export function UserDashboardScreen() {
     }
     if (activeTab === "explore") {
       return (
-        <View style={styles.section}>
-          <Text style={styles.mutedSmall}>Suggested for you</Text>
+        <View style={s.section}>
+          <Text style={s.mutedSmall}>Suggested for you</Text>
           {exploreTrips.slice(0, 6).map((trip) => (
             <Card key={trip.id} style={{ marginBottom: 12, overflow: "hidden" }}>
               <Pressable onPress={() => goStack("TripDetail", { id: trip.id })}>
@@ -191,8 +194,8 @@ export function UserDashboardScreen() {
                   style={{ width: "100%", height: 120 }}
                 />
                 <View style={{ padding: 12 }}>
-                  <Text style={styles.cardTitle}>{trip.name}</Text>
-                  <Text style={styles.mutedSmall}>{trip.theme} · {trip.date}</Text>
+                  <Text style={s.cardTitle}>{trip.name}</Text>
+                  <Text style={s.mutedSmall}>{trip.theme} · {trip.date}</Text>
                 </View>
               </Pressable>
             </Card>
@@ -203,17 +206,17 @@ export function UserDashboardScreen() {
     }
     if (activeTab === "invites") {
       return (
-        <View style={styles.section}>
+        <View style={s.section}>
           {invitesList.length === 0 ? (
             <Card style={{ padding: 32, alignItems: "center" }}>
-              <Text style={styles.muted}>No private invites yet</Text>
+              <Text style={s.muted}>No private invites yet</Text>
             </Card>
           ) : (
             invitesList.map((trip) => (
               <Card key={trip.id} style={{ padding: 14, marginBottom: 12 }}>
                 <Badge variant="warning">Private</Badge>
-                <Text style={styles.cardTitle}>{trip.name}</Text>
-                <View style={styles.rowBtns}>
+                <Text style={s.cardTitle}>{trip.name}</Text>
+                <View style={s.rowBtns}>
                   <PrimaryButton title="View trip" onPress={() => goStack("TripDetail", { id: trip.id })} />
                   <OutlineButton title="Go Live" onPress={() => goStack("LiveTrip", { id: trip.id })} />
                 </View>
@@ -225,28 +228,28 @@ export function UserDashboardScreen() {
     }
     if (activeTab === "rewards") {
       return (
-        <View style={styles.section}>
+        <View style={s.section}>
           <Card style={{ padding: 20 }}>
-            <Text style={styles.cardTitle}>Level {user?.level ?? 1}</Text>
-            <Text style={styles.mutedSmall}>Explorer</Text>
-            <Text style={styles.mutedSmall}>
+            <Text style={s.cardTitle}>Level {user?.level ?? 1}</Text>
+            <Text style={s.mutedSmall}>Explorer</Text>
+            <Text style={s.mutedSmall}>
               {user?.xp ?? 0} XP → next level
             </Text>
-            <View style={styles.xpBar}>
-              <View style={[styles.xpFill, { width: `${xpPct}%` }]} />
+            <View style={s.xpBar}>
+              <View style={[s.xpFill, { width: `${xpPct}%` }]} />
             </View>
           </Card>
           <Card style={{ padding: 20, marginTop: 12 }}>
-            <Text style={styles.cardTitle}>Rewards Wallet</Text>
-            <Text style={{ fontSize: 28, fontWeight: "800", color: colors.text }}>₹420</Text>
-            <Text style={styles.mutedSmall}>Available cashback (demo)</Text>
+            <Text style={s.cardTitle}>Rewards Wallet</Text>
+            <Text style={[s.statVal, { color: c.text }]}>₹420</Text>
+            <Text style={s.mutedSmall}>Available cashback (demo)</Text>
           </Card>
         </View>
       );
     }
     if (activeTab === "profile") {
       return (
-        <View style={styles.section}>
+        <View style={s.section}>
           <Card style={{ padding: 20 }}>
             <View style={{ flexDirection: "row", gap: 14 }}>
               <Image
@@ -256,8 +259,8 @@ export function UserDashboardScreen() {
                 style={{ width: 72, height: 72, borderRadius: 16 }}
               />
               <View>
-                <Text style={styles.cardTitle}>{user?.name}</Text>
-                <Text style={styles.mutedSmall}>{user?.email}</Text>
+                <Text style={s.cardTitle}>{user?.name}</Text>
+                <Text style={s.mutedSmall}>{user?.email}</Text>
                 <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
                   <Badge variant="success">Level {user?.level ?? 1}</Badge>
                   <Badge variant="default">{user?.xp ?? 0} XP</Badge>
@@ -265,8 +268,8 @@ export function UserDashboardScreen() {
               </View>
             </View>
           </Card>
-          <Pressable style={styles.signOut} onPress={() => void logout()}>
-            <Text style={styles.signOutText}>Sign out</Text>
+          <Pressable style={s.signOut} onPress={() => void logout()}>
+            <Text style={s.signOutText}>Sign out</Text>
           </Pressable>
         </View>
       );
@@ -276,23 +279,23 @@ export function UserDashboardScreen() {
 
   return (
     <ScrollView
-      style={styles.root}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#fff" />}
+      style={s.root}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.text} />}
       contentContainerStyle={{ paddingBottom: 40 }}
     >
       <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
-        <Text style={styles.welcome}>Welcome back,</Text>
-        <Text style={styles.heroName}>{user?.name} 👋</Text>
-        <View style={styles.quickStats}>
+        <Text style={s.welcome}>Welcome back,</Text>
+        <Text style={s.heroName}>{user?.name} 👋</Text>
+        <View style={s.quickStats}>
           {[
             { l: "Trips", v: "—" },
             { l: "XP", v: String(user?.xp ?? 0) },
             { l: "Wallet", v: "₹420" },
             { l: "Invites", v: String(invitesList.length) },
-          ].map((s) => (
-            <Card key={s.l} style={{ padding: 12, width: "47%" }}>
-              <Text style={styles.statVal}>{s.v}</Text>
-              <Text style={typography.label}>{s.l}</Text>
+          ].map((stat) => (
+            <Card key={stat.l} style={{ padding: 12, width: "47%" }}>
+              <Text style={s.statVal}>{stat.v}</Text>
+              <Text style={typography.label}>{stat.l}</Text>
             </Card>
           ))}
         </View>
@@ -301,15 +304,15 @@ export function UserDashboardScreen() {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.tabStrip}
+        contentContainerStyle={s.tabStrip}
       >
         {TABS.map((t) => (
           <Pressable
             key={t.id}
-            style={[styles.tabChip, activeTab === t.id && styles.tabChipOn]}
+            style={[s.tabChip, activeTab === t.id && s.tabChipOn]}
             onPress={() => setActiveTab(t.id)}
           >
-            <Text style={[styles.tabChipText, activeTab === t.id && styles.tabChipTextOn]}>{t.label}</Text>
+            <Text style={[s.tabChipText, activeTab === t.id && s.tabChipTextOn]}>{t.label}</Text>
           </Pressable>
         ))}
       </ScrollView>
@@ -319,60 +322,61 @@ export function UserDashboardScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  welcome: { color: colors.muted, fontSize: 14 },
-  heroName: { ...typography.hero, color: colors.text, marginBottom: 16 },
-  quickStats: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between", marginBottom: 8 },
-  statVal: { fontSize: 20, fontWeight: "800", color: colors.text },
-  tabStrip: { paddingHorizontal: 16, paddingVertical: 12, gap: 8 },
-  tabChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginRight: 8,
-  },
-  tabChipOn: { backgroundColor: colors.text, borderColor: colors.text },
-  tabChipText: { color: colors.muted, fontWeight: "700", fontSize: 13 },
-  tabChipTextOn: { color: colors.bg },
-  section: { paddingTop: 8 },
-  cardTitle: { color: colors.text, fontWeight: "800", fontSize: 17, marginTop: 8 },
-  muted: { color: colors.muted },
-  mutedSmall: { color: colors.muted, fontSize: 12, marginTop: 4 },
-  rowBtns: { flexDirection: "row", gap: 8, marginTop: 12, flexWrap: "wrap" },
-  btnPrimarySm: {
-    backgroundColor: colors.text,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-  },
-  btnPrimarySmText: { color: colors.bg, fontWeight: "800", fontSize: 13 },
-  btnOutlineSm: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-  },
-  btnOutlineSmText: { color: colors.text, fontWeight: "700", fontSize: 13 },
-  xpBar: {
-    height: 8,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderRadius: 4,
-    marginTop: 12,
-    overflow: "hidden",
-  },
-  xpFill: { height: "100%", backgroundColor: "#fbbf24" },
-  signOut: {
-    marginTop: 20,
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(248,113,113,0.35)",
-    alignItems: "center",
-  },
-  signOutText: { color: colors.danger, fontWeight: "800" },
-});
+const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
+  StyleSheet.create({
+    root: { flex: 1, backgroundColor: c.bg },
+    welcome: { color: c.muted, fontSize: 14 },
+    heroName: { ...typography.hero, color: c.text, marginBottom: 16 },
+    quickStats: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between", marginBottom: 8 },
+    statVal: { fontSize: 20, fontWeight: "800", color: c.text },
+    tabStrip: { paddingHorizontal: 16, paddingVertical: 12, gap: 8, flexDirection: "row" },
+    tabChip: {
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 999,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.border,
+      marginRight: 8,
+    },
+    tabChipOn: { backgroundColor: c.text, borderColor: c.text },
+    tabChipText: { color: c.muted, fontWeight: "700", fontSize: 13 },
+    tabChipTextOn: { color: c.bg },
+    section: { paddingTop: 8 },
+    cardTitle: { color: c.text, fontWeight: "800", fontSize: 17, marginTop: 8 },
+    muted: { color: c.muted },
+    mutedSmall: { color: c.muted, fontSize: 12, marginTop: 4 },
+    rowBtns: { flexDirection: "row", gap: 8, marginTop: 12, flexWrap: "wrap" },
+    btnPrimarySm: {
+      backgroundColor: c.text,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 999,
+    },
+    btnPrimarySmText: { color: c.bg, fontWeight: "800", fontSize: 13 },
+    btnOutlineSm: {
+      borderWidth: 1,
+      borderColor: c.border,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 999,
+    },
+    btnOutlineSmText: { color: c.text, fontWeight: "700", fontSize: 13 },
+    xpBar: {
+      height: 8,
+      backgroundColor: "rgba(255,255,255,0.08)",
+      borderRadius: 4,
+      marginTop: 12,
+      overflow: "hidden",
+    },
+    xpFill: { height: "100%", backgroundColor: "#fbbf24" },
+    signOut: {
+      marginTop: 20,
+      padding: 16,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: "rgba(248,113,113,0.35)",
+      alignItems: "center",
+    },
+    signOutText: { color: c.danger, fontWeight: "800" },
+  });

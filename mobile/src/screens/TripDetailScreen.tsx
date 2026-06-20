@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -16,7 +16,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { apiFetch, readApiErrorMessage } from "../api/client";
 import { useAuth } from "../context/AuthContext";
-import { colors } from "../theme";
+import { useThemeColors } from "../theme";
 
 type Props = NativeStackScreenProps<RootStackParamList, "TripDetail">;
 
@@ -27,6 +27,7 @@ function sleep(ms: number): Promise<void> {
 export function TripDetailScreen({ route, navigation }: Props) {
   const { id } = route.params;
   const { user } = useAuth();
+  const c = useThemeColors();
   const [trip, setTrip] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
   const [coupon, setCoupon] = useState("");
@@ -194,10 +195,12 @@ export function TripDetailScreen({ route, navigation }: Props) {
     }
   };
 
+  const s = useMemo(() => makeStyles(c), [c]);
+
   if (loading || !trip) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.muted}>{loading ? "Loading…" : "Trip not found"}</Text>
+      <View style={s.center}>
+        <Text style={s.muted}>{loading ? "Loading…" : "Trip not found"}</Text>
       </View>
     );
   }
@@ -211,63 +214,63 @@ export function TripDetailScreen({ route, navigation }: Props) {
 
   return (
     <>
-      <ScrollView style={styles.root} contentContainerStyle={{ paddingBottom: 40 }}>
+      <ScrollView style={s.root} contentContainerStyle={{ paddingBottom: 40 }}>
         <Image
           source={{ uri: `https://picsum.photos/seed/${id}/800/400` }}
-          style={styles.hero}
+          style={s.hero}
         />
-        <View style={styles.pad}>
-          <Text style={styles.title}>{name}</Text>
-          <Text style={styles.muted}>{String(trip.description ?? "").slice(0, 280)}</Text>
-          <Text style={styles.row}>
+        <View style={s.pad}>
+          <Text style={s.title}>{name}</Text>
+          <Text style={s.muted}>{String(trip.description ?? "").slice(0, 280)}</Text>
+          <Text style={s.row}>
             {free ? "FREE" : `₹${price.toLocaleString()}`} · {joined}/{max || "—"} joined
           </Text>
 
           {!free && (
-            <View style={styles.couponBox}>
-              <Text style={styles.label}>Coupon</Text>
-              <View style={styles.couponRow}>
+            <View style={s.couponBox}>
+              <Text style={s.label}>Coupon</Text>
+              <View style={s.couponRow}>
                 <TextInput
-                  style={styles.input}
+                  style={s.input}
                   placeholder="CODE"
-                  placeholderTextColor={colors.muted}
+                  placeholderTextColor={c.muted}
                   autoCapitalize="characters"
                   value={coupon}
                   onChangeText={setCoupon}
                 />
-                <Pressable style={styles.smallBtn} onPress={applyCoupon}>
-                  <Text style={styles.smallBtnText}>Apply</Text>
+                <Pressable style={s.smallBtn} onPress={applyCoupon}>
+                  <Text style={s.smallBtnText}>Apply</Text>
                 </Pressable>
               </View>
               {appliedPct != null && (
                 <>
-                  <Text style={styles.ok}>{appliedPct}% discount applied</Text>
-                  <Text style={styles.ok}>Payable now: ₹{payablePreview.toLocaleString("en-IN")}</Text>
+                  <Text style={s.ok}>{appliedPct}% discount applied</Text>
+                  <Text style={s.ok}>Payable now: ₹{payablePreview.toLocaleString("en-IN")}</Text>
                 </>
               )}
-              <View style={styles.breakdownBox}>
-                <View style={styles.breakdownRow}>
-                  <Text style={styles.breakdownLabel}>Base</Text>
-                  <Text style={styles.breakdownValue}>₹{price.toLocaleString("en-IN")}</Text>
+              <View style={s.breakdownBox}>
+                <View style={s.breakdownRow}>
+                  <Text style={s.breakdownLabel}>Base</Text>
+                  <Text style={s.breakdownValue}>₹{price.toLocaleString("en-IN")}</Text>
                 </View>
-                <View style={styles.breakdownRow}>
-                  <Text style={styles.breakdownLabel}>Discount</Text>
-                  <Text style={styles.breakdownValue}>-₹{appliedDiscountAmount.toLocaleString("en-IN")}</Text>
+                <View style={s.breakdownRow}>
+                  <Text style={s.breakdownLabel}>Discount</Text>
+                  <Text style={s.breakdownValue}>-₹{appliedDiscountAmount.toLocaleString("en-IN")}</Text>
                 </View>
-                <View style={[styles.breakdownRow, { marginTop: 4 }]}>
-                  <Text style={styles.breakdownPayable}>Payable</Text>
-                  <Text style={styles.breakdownPayable}>₹{payablePreview.toLocaleString("en-IN")}</Text>
+                <View style={[s.breakdownRow, { marginTop: 4 }]}>
+                  <Text style={s.breakdownPayable}>Payable</Text>
+                  <Text style={s.breakdownPayable}>₹{payablePreview.toLocaleString("en-IN")}</Text>
                 </View>
               </View>
             </View>
           )}
 
           <Pressable
-            style={[styles.bookBtn, (booking || isPaymentLoading) && { opacity: 0.6 }]}
+            style={[s.bookBtn, (booking || isPaymentLoading) && { opacity: 0.6 }]}
             onPress={book}
             disabled={booking || isPaymentLoading}
           >
-            <Text style={styles.bookText}>
+            <Text style={s.bookText}>
               {booking || isPaymentLoading
                 ? "…"
                 : free || payablePreview <= 0
@@ -277,26 +280,26 @@ export function TripDetailScreen({ route, navigation }: Props) {
           </Pressable>
 
           <Pressable
-            style={styles.linkBtn}
+            style={s.linkBtn}
             onPress={() => navigation.navigate("LiveTrip", { id })}
           >
-            <Text style={styles.linkText}>Open live trip (beta)</Text>
+            <Text style={s.linkText}>Open live trip (beta)</Text>
           </Pressable>
         </View>
       </ScrollView>
 
       <Modal visible={showPaymentWebView} animationType="slide" onRequestClose={() => setShowPaymentWebView(false)}>
-        <View style={{ flex: 1, backgroundColor: colors.bg }}>
-          <View style={styles.payHeader}>
+        <View style={{ flex: 1, backgroundColor: c.bg }}>
+          <View style={s.payHeader}>
             <Pressable
               onPress={() => {
                 setShowPaymentWebView(false);
                 if (cashfreeOrderId) void pollPaymentStatus(cashfreeOrderId);
               }}
             >
-              <Text style={styles.payClose}>Cancel</Text>
+              <Text style={s.payClose}>Cancel</Text>
             </Pressable>
-            <Text style={styles.payTitle}>Secure checkout</Text>
+            <Text style={s.payTitle}>Secure checkout</Text>
             <View style={{ width: 56 }} />
           </View>
           {paymentHtml ? (
@@ -330,8 +333,8 @@ export function TripDetailScreen({ route, navigation }: Props) {
               }}
               startInLoadingState
               renderLoading={() => (
-                <View style={styles.wvLoading}>
-                  <ActivityIndicator color={colors.text} size="large" />
+                <View style={s.wvLoading}>
+                  <ActivityIndicator color={c.text} size="large" />
                 </View>
               )}
             />
@@ -342,77 +345,78 @@ export function TripDetailScreen({ route, navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  center: { flex: 1, backgroundColor: colors.bg, justifyContent: "center", alignItems: "center" },
-  hero: { width: "100%", height: 200 },
-  pad: { padding: 16 },
-  title: { color: colors.text, fontSize: 24, fontWeight: "800" },
-  muted: { color: colors.muted, marginTop: 10, lineHeight: 22 },
-  row: { color: colors.text, marginTop: 16, fontWeight: "600" },
-  couponBox: { marginTop: 20 },
-  label: { color: colors.muted, fontSize: 12, marginBottom: 6 },
-  couponRow: { flexDirection: "row", gap: 8 },
-  input: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 12,
-    color: colors.text,
-  },
-  smallBtn: {
-    backgroundColor: colors.surface,
-    paddingHorizontal: 16,
-    justifyContent: "center",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  smallBtnText: { color: colors.text, fontWeight: "700" },
-  ok: { color: colors.success, marginTop: 8, fontSize: 13 },
-  breakdownBox: {
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 10,
-    backgroundColor: "rgba(255,255,255,0.02)",
-    gap: 6,
-  },
-  breakdownRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  breakdownLabel: { color: colors.muted, fontSize: 13 },
-  breakdownValue: { color: colors.text, fontSize: 13, fontWeight: "600" },
-  breakdownPayable: { color: colors.success, fontSize: 14, fontWeight: "800" },
-  bookBtn: {
-    marginTop: 24,
-    backgroundColor: colors.text,
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: "center",
-  },
-  bookText: { color: colors.bg, fontWeight: "800", fontSize: 16 },
-  linkBtn: { marginTop: 16, alignItems: "center" },
-  linkText: { color: colors.muted, textDecorationLine: "underline" },
-  payHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 12,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  payClose: { color: colors.muted, fontSize: 16 },
-  payTitle: { color: colors.text, fontWeight: "700", fontSize: 16 },
-  wvLoading: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: colors.bg,
-  },
-});
+const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
+  StyleSheet.create({
+    root: { flex: 1, backgroundColor: c.bg },
+    center: { flex: 1, backgroundColor: c.bg, justifyContent: "center", alignItems: "center" },
+    hero: { width: "100%", height: 200 },
+    pad: { padding: 16 },
+    title: { color: c.text, fontSize: 24, fontWeight: "800" },
+    muted: { color: c.muted, marginTop: 10, lineHeight: 22 },
+    row: { color: c.text, marginTop: 16, fontWeight: "600" },
+    couponBox: { marginTop: 20 },
+    label: { color: c.muted, fontSize: 12, marginBottom: 6 },
+    couponRow: { flexDirection: "row", gap: 8 },
+    input: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 12,
+      padding: 12,
+      color: c.text,
+    },
+    smallBtn: {
+      backgroundColor: c.surface,
+      paddingHorizontal: 16,
+      justifyContent: "center",
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    smallBtnText: { color: c.text, fontWeight: "700" },
+    ok: { color: c.success, marginTop: 8, fontSize: 13 },
+    breakdownBox: {
+      marginTop: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 12,
+      padding: 10,
+      backgroundColor: c.surface,
+      gap: 6,
+    },
+    breakdownRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+    },
+    breakdownLabel: { color: c.muted, fontSize: 13 },
+    breakdownValue: { color: c.text, fontSize: 13, fontWeight: "600" },
+    breakdownPayable: { color: c.success, fontSize: 14, fontWeight: "800" },
+    bookBtn: {
+      marginTop: 24,
+      backgroundColor: c.text,
+      paddingVertical: 16,
+      borderRadius: 14,
+      alignItems: "center",
+    },
+    bookText: { color: c.bg, fontWeight: "800", fontSize: 16 },
+    linkBtn: { marginTop: 16, alignItems: "center" },
+    linkText: { color: c.muted, textDecorationLine: "underline" },
+    payHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: 12,
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
+    },
+    payClose: { color: c.muted, fontSize: 16 },
+    payTitle: { color: c.text, fontWeight: "700", fontSize: 16 },
+    wvLoading: {
+      ...StyleSheet.absoluteFillObject,
+      justifyContent: "center",
+      alignItems: "center",
+      backgroundColor: c.bg,
+    },
+  });

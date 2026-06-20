@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, Pressable, StyleSheet, type ViewStyle, type TextStyle } from "react-native";
-import { colors, typography } from "../theme";
+import { typography } from "../theme";
+import { useAppTheme } from "../context/ThemeContext";
 
 export function Card({
   children,
@@ -9,7 +10,8 @@ export function Card({
   children: React.ReactNode;
   style?: ViewStyle;
 }) {
-  return <View style={[styles.card, style]}>{children}</View>;
+  const { colors } = useAppTheme();
+  return <View style={[{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 16 }, style]}>{children}</View>;
 }
 
 export function Badge({
@@ -19,15 +21,17 @@ export function Badge({
   children: React.ReactNode;
   variant?: "default" | "success" | "warning" | "danger" | "info";
 }) {
+  const { mode } = useAppTheme();
+  const isLight = mode === "light";
   const bg: Record<typeof variant, string> = {
-    default: "rgba(255,255,255,0.1)",
-    success: "rgba(16,185,129,0.2)",
-    warning: "rgba(245,158,11,0.2)",
-    danger: "rgba(248,113,113,0.2)",
-    info: "rgba(59,130,246,0.2)",
+    default: isLight ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.1)",
+    success: isLight ? "rgba(16,185,129,0.12)" : "rgba(16,185,129,0.2)",
+    warning: isLight ? "rgba(245,158,11,0.12)" : "rgba(245,158,11,0.2)",
+    danger: isLight ? "rgba(248,113,113,0.12)" : "rgba(248,113,113,0.2)",
+    info: isLight ? "rgba(59,130,246,0.12)" : "rgba(59,130,246,0.2)",
   };
   const fg: Record<typeof variant, string> = {
-    default: "rgba(255,255,255,0.85)",
+    default: isLight ? "rgba(0,0,0,0.65)" : "rgba(255,255,255,0.85)",
     success: "#34d399",
     warning: "#fbbf24",
     danger: "#f87171",
@@ -41,10 +45,11 @@ export function Badge({
 }
 
 export function ScreenTitle({ title, subtitle }: { title: string; subtitle?: string }) {
+  const { colors } = useAppTheme();
   return (
     <View style={{ marginBottom: 16 }}>
-      <Text style={styles.h1}>{title}</Text>
-      {subtitle ? <Text style={styles.sub}>{subtitle}</Text> : null}
+      <Text style={[styles.h1, { color: colors.text }]}>{title}</Text>
+      {subtitle ? <Text style={[styles.sub, { color: colors.muted }]}>{subtitle}</Text> : null}
     </View>
   );
 }
@@ -58,13 +63,14 @@ export function PrimaryButton({
   onPress: () => void;
   disabled?: boolean;
 }) {
+  const { colors } = useAppTheme();
   return (
     <Pressable
-      style={[styles.primaryBtn, disabled && { opacity: 0.5 }]}
+      style={[{ backgroundColor: colors.text, paddingVertical: 14, paddingHorizontal: 20, borderRadius: 999, alignItems: "center" }, disabled && { opacity: 0.5 }]}
       onPress={onPress}
       disabled={disabled}
     >
-      <Text style={styles.primaryBtnText}>{title}</Text>
+      <Text style={[{ color: colors.bg, fontWeight: "700", fontSize: 15 }]}>{title}</Text>
     </Pressable>
   );
 }
@@ -76,20 +82,18 @@ export function OutlineButton({
   title: string;
   onPress: () => void;
 }) {
+  const { colors } = useAppTheme();
   return (
-    <Pressable style={styles.outlineBtn} onPress={onPress}>
-      <Text style={styles.outlineBtnText}>{title}</Text>
+    <Pressable
+      style={{ borderWidth: 1, borderColor: colors.border, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 999, alignItems: "center" }}
+      onPress={onPress}
+    >
+      <Text style={[{ color: colors.text, fontWeight: "600", fontSize: 14 }]}>{title}</Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 16,
-  },
   badge: {
     alignSelf: "flex-start",
     paddingHorizontal: 8,
@@ -99,36 +103,9 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 10, fontWeight: "700" },
   h1: {
     ...typography.h1,
-    color: colors.text,
   },
   sub: {
-    color: colors.muted,
     fontSize: 14,
     marginTop: 4,
-  },
-  primaryBtn: {
-    backgroundColor: colors.text,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 999,
-    alignItems: "center",
-  },
-  primaryBtnText: {
-    color: colors.bg,
-    fontWeight: "700",
-    fontSize: 15,
-  },
-  outlineBtn: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 999,
-    alignItems: "center",
-  },
-  outlineBtnText: {
-    color: colors.text,
-    fontWeight: "600",
-    fontSize: 14,
   },
 });

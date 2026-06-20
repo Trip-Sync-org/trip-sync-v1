@@ -164,7 +164,7 @@ function MainTabs() {
       <Tab.Screen
         name="ExploreTab"
         component={ExploreScreen}
-        options={{ title: "Explore", tabBarLabel: "Explore" }}
+        options={{ title: "Explore", tabBarLabel: "Explore", headerShown: false }}
       />
       <Tab.Screen
         name="MyTripsTab"

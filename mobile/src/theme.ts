@@ -1,7 +1,10 @@
 //theme.ts
 import { Platform, TextStyle } from "react-native";
+import { useAppTheme } from "./context/ThemeContext";
 
 /** Aligns with web `index.css`: Inter + Space Grotesk feel (system fonts on device). */
+
+// Static dark-mode colors (kept for backward compatibility with module-level StyleSheet.create)
 export const colors = {
   bg: "#000000",
   surface: "#0d0d0d",
@@ -15,6 +18,21 @@ export const colors = {
   warn: "#fbbf24",
   emerald: "#34d399",
 };
+
+/** Hook that returns the current theme colors from ThemeContext (light or dark based on system). */
+export function useThemeColors() {
+  const { colors: themeColors } = useAppTheme();
+  return {
+    ...themeColors,
+    // Add any extra tokens that ThemeContext doesn't provide but theme.ts consumers expect
+    muted2: themeColors.muted, // approximate mapping
+    accent: themeColors.text,
+    success: "#34d399",
+    danger: "#f87171",
+    warn: "#fbbf24",
+    emerald: "#34d399",
+  };
+}
 
 const display = Platform.select({
   ios: "System",
