@@ -2923,19 +2923,10 @@ export function LiveTripScreen({ route, navigation }: Props) {
                       🎙 {voiceRiders.length + 1} in voice
                     </Text>
                   </View>
-                  {/* Mute All — visible to staff in Talk All mode */}
+                  {/* Mute All — visible to staff in Talk All mode; no popup, mutes instantly */}
                   {canModerateVoice && voiceMode === "open" ? (
                     <Pressable
-                      onPress={() => {
-                        Alert.alert(
-                          "Mute All Members",
-                          "Mute all regular members so only staff can speak?",
-                          [
-                            { text: "Cancel", style: "cancel" },
-                            { text: "Mute All", style: "destructive", onPress: muteAllMembers },
-                          ],
-                        );
-                      }}
+                      onPress={() => muteAllMembers()}
                       style={styles.muteAllBtn}
                     >
                       <Ionicons name="mic-off" size={12} color="#fca5a5" />
@@ -3659,16 +3650,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
                   </View>
                   {canModerateVoice && voiceMode === "open" ? (
                     <Pressable
-                      onPress={() => {
-                        Alert.alert(
-                          "Mute All Members",
-                          "Mute all regular members so only staff can speak?",
-                          [
-                            { text: "Cancel", style: "cancel" },
-                            { text: "Mute All", style: "destructive", onPress: muteAllMembers },
-                          ],
-                        );
-                      }}
+                      onPress={() => muteAllMembers()}
                       style={styles.muteAllBtn}
                     >
                       <Ionicons name="mic-off" size={12} color="#fca5a5" />
