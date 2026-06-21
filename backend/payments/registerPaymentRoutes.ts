@@ -72,7 +72,15 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
     const xfProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
     const xfHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
     const host = xfHost || String(req.headers.host || "").trim();
-    const isLocal = host.includes("localhost") || host.startsWith("127.");
+    // Detect local/LAN hosts: localhost, 127.x, 10.x, 192.168.x, or any private IP range
+    const isLanOrLocal =
+      host.includes("localhost") ||
+      host.startsWith("127.") ||
+      host.startsWith("10.") ||
+      host.startsWith("192.168.") ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+      host.startsWith("[::1]");
+    const isLocal = isLanOrLocal || host.endsWith(".local") || host.startsWith("0.0.0.0");
     const proto = isLocal ? "http" : (xfProto || "https");
     if (host && !host.includes("localhost") && !host.startsWith("127.")) {
       return `${proto}://${host}`.replace(/\/$/, "");

@@ -207,11 +207,14 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
     const tripStatus = String(trip.status || "").toLowerCase();
     const tripStarted = ["active", "live", "started", "ongoing"].includes(tripStatus);
 
-    if (actor.role === "organizer" && Number(trip.organizer_id) === userId) {
+    // Organizer always has access to their own trip — no booking needed.
+    const userRoles = (actor as any)?.roles ?? [actor.role];
+    const isOrganizer = (actor.role === "organizer" || userRoles.includes("organizer")) && Number(trip.organizer_id) === userId;
+    if (isOrganizer) {
       return res.json({ allowed: true, reason: "organizer", trip_started: tripStarted, can_start: true });
     }
 
-    if (actor.role !== "user") {
+    if (!userRoles.includes("user")) {
       return res.status(403).json({ allowed: false, error: "Invalid role for trip access" });
     }
 
