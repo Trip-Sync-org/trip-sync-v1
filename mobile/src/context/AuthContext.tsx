@@ -425,6 +425,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const currentRoles = (clerkUser.unsafeMetadata?.roles as string[]) ?? [];
       if (!currentRoles.includes(mapped)) throw new Error(`User doesn't have the ${mapped} role`);
       await clerkUser.update({ unsafeMetadata: { ...clerkUser.unsafeMetadata, activeRole: mapped } });
+      // Sync active role to Supabase so backend checks (e.g. trip creation) use the correct role
+      try {
+        await apiFetch("/api/auth/sync", {
+          method: "POST",
+          body: JSON.stringify({
+            email: clerkUser.primaryEmailAddress?.emailAddress,
+            name: clerkUser.fullName,
+            role: mapped,
+            roles: currentRoles,
+            auth_user_id: clerkUser.id,
+          }),
+        });
+      } catch {
+        console.warn("[Auth] Supabase sync failed after role switch");
+      }
       if (appUser) {
         // Also update the legacy role field so CreateEventScreen / role checks see the active role immediately
         const typedRole = mapped === "organizer" ? "organizer" as const : "user" as const;
