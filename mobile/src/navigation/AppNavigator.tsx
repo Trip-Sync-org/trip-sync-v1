@@ -10,6 +10,7 @@ import { colors } from "../theme";
 import { SplashScreen } from "../screens/SplashScreen";
 import { LoginScreen } from "../screens/LoginScreen";
 import { SignupScreen } from "../screens/SignupScreen";
+import { OtpEntryScreen } from "../screens/OtpEntryScreen";
 import { ForgotPasswordScreen } from "../screens/ForgotPasswordScreen";
 import { ResetEmailSentScreen } from "../screens/ResetEmailSentScreen";
 import { SetNewPasswordScreen } from "../screens/SetNewPasswordScreen";
@@ -119,6 +120,7 @@ export type RootStackParamList = {
   OnboardingPermissions: undefined;
   Login: undefined;
   Signup: undefined;
+  OtpEntry: undefined;
   ForgotPassword: undefined;
   ResetEmailSent: undefined;
   SetNewPassword: { token?: string } | undefined;
@@ -225,6 +227,7 @@ export function AppNavigator() {
             <Stack.Screen name="Onboarding" component={OnboardingScreen} />
             <Stack.Screen name="Login" component={LoginScreen} />
             <Stack.Screen name="Signup" component={SignupScreen} />
+            <Stack.Screen name="OtpEntry" component={OtpEntryScreen} />
             <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
             <Stack.Screen name="ResetEmailSent" component={ResetEmailSentScreen} />
             <Stack.Screen name="SetNewPassword" component={SetNewPasswordScreen} />

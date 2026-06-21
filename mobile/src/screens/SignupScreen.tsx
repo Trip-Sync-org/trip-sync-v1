@@ -4,13 +4,15 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { useAuth } from "../context/AuthContext";
 import { useAuthPalette } from "../theme/authTheme";
-import { AuthScreenShell, CheckboxRow, InputField, PrimaryButton, RoleSwitch } from "../components/auth/AuthUI";
+import { AuthScreenShell, CheckboxRow, DividerOr, GoogleButton, InputField, PrimaryButton, RoleSwitch } from "../components/auth/AuthUI";
+import { useSSO } from "@clerk/clerk-expo";
 import { safeGoBack } from "../utils/navigation";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Signup">;
 
 export function SignupScreen({ navigation }: Props) {
-  const { signup } = useAuth();
+  const { signup, setPendingGoogleRole } = useAuth();
+  const { startSSOFlow } = useSSO();
   const c = useAuthPalette();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -44,7 +46,13 @@ export function SignupScreen({ navigation }: Props) {
     setFormError("");
     setFieldErrors({});
     try {
-      await signup(email.trim(), password, name.trim() || email.split("@")[0] || "User", userType);
+      const result = await signup(email.trim(), password, name.trim() || email.split("@")[0] || "User", userType);
+      if (result.step === "complete") {
+        navigation.reset({ index: 0, routes: [{ name: "AuthBootstrap" }] });
+      } else {
+        // needs_email_otp — navigate to the OTP entry screen
+        navigation.navigate("OtpEntry");
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Try again";
       if (/email/i.test(msg)) {
@@ -101,6 +109,32 @@ export function SignupScreen({ navigation }: Props) {
       <PrimaryButton title={busy ? "Please wait..." : "Continue"} onPress={onSubmit} disabled={!canContinue} />
       {busy ? <ActivityIndicator color={c.accentOrange} style={{ marginTop: 8 }} /> : null}
       {formError ? <Text style={{ color: c.borderError, marginTop: 8, fontSize: 12 }}>{formError}</Text> : null}
+      <DividerOr />
+      <GoogleButton onPress={async () => {
+        if (busy) return;
+        const roleAtTap = userType;
+        console.log("[GoogleSignup] Starting OAuth, roleAtTap:", roleAtTap);
+        setPendingGoogleRole(roleAtTap);
+        setBusy(true);
+        setFormError("");
+        try {
+          const result = await startSSOFlow({ strategy: "oauth_google" });
+          console.log("[GoogleSignup] FULL result:", JSON.stringify(result, null, 2));
+          const { createdSessionId, setActive } = result;
+          console.log("[GoogleSignup] sessionId:", createdSessionId, "| has setActive:", !!setActive);
+          if (createdSessionId && setActive) {
+            await setActive({ session: createdSessionId });
+            console.log("[GoogleSignup] setActive done");
+          }
+        } catch (e: unknown) {
+          console.error("[GoogleSignup] FAILED:", e);
+          setPendingGoogleRole(null);
+          const msg = e instanceof Error ? e.message : "Google sign-in failed";
+          setFormError(msg);
+        } finally {
+          setBusy(false);
+        }
+      }} />
       <Pressable onPress={() => navigation.navigate("Login")} style={{ marginTop: 14 }}>
         <Text style={{ textAlign: "center", color: c.textSecondary, fontSize: 13 }}>
           Already have an account ? <Text style={{ color: c.accentOrange, fontWeight: "600" }}>Login</Text>

@@ -11,7 +11,7 @@ type Props = NativeStackScreenProps<RootStackParamList, "SetNewPassword">;
 
 export function SetNewPasswordScreen({ navigation, route }: Props) {
   const c = useAuthPalette();
-  const { resetPassword } = useAuth();
+  const { confirmPasswordReset } = useAuth();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -30,7 +30,11 @@ export function SetNewPasswordScreen({ navigation, route }: Props) {
     setBusy(true);
     setError("");
     try {
-      await resetPassword(token, password);
+      // Old token-based reset — now part of ForgotPasswordScreen flow.
+      // This screen is kept for backward compatibility but isn't reached
+      // by the new Clerk-based flow (ForgotPassword handles everything
+      // in one screen: email → code + new password → auto-login).
+      await confirmPasswordReset(token, password);
       navigation.navigate("Login");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Reset failed";
