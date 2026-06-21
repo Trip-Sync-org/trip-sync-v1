@@ -14,7 +14,6 @@ import {
   PrimaryButton,
 } from "../components/auth/AuthUI";
 import { safeGoBack } from "../utils/navigation";
-import { polyfillBrowserApis } from "../utils/polyfillBrowserApis";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Login">;
 
@@ -86,8 +85,6 @@ export function LoginScreen({ navigation }: Props) {
     try {
       const result = await requestLoginOtp(codeEmail.trim());
       if (result.step === "complete") {
-        // Edge case: somehow already signed in — nothing further to do,
-        // the auth-state listener elsewhere in the app will navigate.
         return;
       }
       if (result.step === "needs_second_factor") {
@@ -115,8 +112,6 @@ export function LoginScreen({ navigation }: Props) {
       } else if (result.step === "needs_code") {
         setErrorText("Incorrect code. Please try again.");
       }
-      // step === "complete": session is active, the app's root auth-state
-      // listener takes over navigation from here — nothing more to do.
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Verification failed";
       setErrorText(/incorrect|invalid/i.test(msg) ? "Incorrect code. Please try again." : msg);
@@ -145,11 +140,7 @@ export function LoginScreen({ navigation }: Props) {
     setBusy(true);
     setErrorText("");
     try {
-      polyfillBrowserApis();
-      const { createdSessionId, setActive } = await startSSOFlow({
-        strategy: "oauth_google",
-        redirectUrl: "tripsync://oauth/clerk-callback",
-      });
+      const { createdSessionId, setActive } = await startSSOFlow({ strategy: "oauth_google" });
       if (createdSessionId && setActive) {
         await setActive({ session: createdSessionId });
       }
@@ -167,7 +158,6 @@ export function LoginScreen({ navigation }: Props) {
       subtitle="Welcome back, you've been missed!"
       onBack={() => safeGoBack(navigation, "Onboarding")}
     >
-      {/* Mode tabs */}
       <View style={{ flexDirection: "row", marginBottom: 18, borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: c.borderDefault }}>
         <Pressable
           onPress={() => switchMode("password")}
