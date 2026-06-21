@@ -242,6 +242,7 @@ export function CreateEventScreen({ navigation }: Props) {
   const [tzSearch, setTzSearch] = useState("");
 
   const [locLoading, setLocLoading] = useState<null | "start" | "end">(null);
+  const [locError, setLocError] = useState<"start" | "end" | null>(null);
 
   const [sections, setSections] = useState({
     basic: true,
@@ -592,16 +593,18 @@ export function CreateEventScreen({ navigation }: Props) {
 
   const useCurrentLocation = async (which: "start" | "end") => {
     setLocLoading(which);
+    setLocError(null);
     try {
-      const perm = await Location.requestForegroundPermissionsAsync();
+      const perm = await Location.requestForegroundPermissionsAsync().catch(() => ({ status: "denied" as const }));
       if (perm.status !== "granted") {
-        Alert.alert("Location", "Permission is required to use your current position.");
+        setLocError(which);
         return;
       }
       const pos = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
-      });
+      }).catch(() => { throw new Error("Location unavailable"); });
       const { latitude, longitude } = pos.coords;
+      setLocError(null);
       const res = await apiFetch(
         `/api/maps/reverse?lat=${encodeURIComponent(String(latitude))}&lng=${encodeURIComponent(String(longitude))}`,
       );
@@ -629,10 +632,15 @@ export function CreateEventScreen({ navigation }: Props) {
       }
     } catch (e) {
       console.error(e);
-      Alert.alert("Location", "Could not get your position. Check API URL and location services.");
+      setLocError(which);
     } finally {
       setLocLoading(null);
     }
+  };
+
+  /** Safe wrapper for GPS button press — catches any unhandled rejection that could crash the screen */
+  const handleLocPress = (which: "start" | "end") => {
+    useCurrentLocation(which).catch(() => {});
   };
 
   const toggleTheme = (t: string) => {
@@ -1129,11 +1137,14 @@ export function CreateEventScreen({ navigation }: Props) {
             <Pressable
               style={[styles.locGpsBtn, locLoading === "start" && { opacity: 0.6 }]}
               disabled={locLoading !== null}
-              onPress={() => void useCurrentLocation("start")}
+              onPress={() => handleLocPress("start")}
             >
               <Text style={styles.locGpsBtnTxt}>{locLoading === "start" ? "…" : "📍"}</Text>
             </Pressable>
           </View>
+          {locError === "start" ? (
+            <Text style={styles.locErrorText}>Couldn't detect your location — search or type an address below.</Text>
+          ) : null}
           {startSuggestions.length > 0 ? (
             <View style={styles.suggestBox}>
               {startSuggestions.map((item) => (
@@ -1168,11 +1179,14 @@ export function CreateEventScreen({ navigation }: Props) {
             <Pressable
               style={[styles.locGpsBtn, locLoading === "end" && { opacity: 0.6 }]}
               disabled={locLoading !== null}
-              onPress={() => void useCurrentLocation("end")}
+              onPress={() => handleLocPress("end")}
             >
               <Text style={styles.locGpsBtnTxt}>{locLoading === "end" ? "…" : "📍"}</Text>
             </Pressable>
           </View>
+          {locError === "end" ? (
+            <Text style={styles.locErrorText}>Couldn't detect your location — search or type an address below.</Text>
+          ) : null}
           {endSuggestions.length > 0 ? (
             <View style={styles.suggestBox}>
               {endSuggestions.map((item) => (
@@ -2347,6 +2361,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  locErrorText: { fontSize: 11, color: colors.warn, marginTop: 4, lineHeight: 16 },
   locGpsBtnTxt: { fontSize: 18 },
   suggestRow: { paddingHorizontal: 12, paddingVertical: 10 },
   suggestText: { fontSize: 12, color: "rgba(255,255,255,0.75)" },
