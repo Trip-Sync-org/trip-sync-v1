@@ -1,46 +1,25 @@
 //index.ts
 import "react-native-gesture-handler";
 
-/** Polyfills required by Clerk's OAuth internals. Needs to run before Clerk init. */
-function polyfillBrowserApis() {
-  try {
-    if (typeof window === "undefined") return;
-    (window as any).location = (window as any).location || {
-      href: "tripsync://",
-      origin: "tripsync://",
-      protocol: "tripsync:",
-      host: "",
-      hostname: "",
-      pathname: "/",
-      search: "",
-      hash: "",
-    };
+// Browser API polyfills for Clerk OAuth internals
+try {
+  if (typeof window !== "undefined") {
+    if (!(window as any).location) (window as any).location = { href: "", origin: "", protocol: "", host: "", hostname: "", pathname: "/", search: "", hash: "" };
     if (typeof (window as any).CustomEvent === "undefined") {
-      (window as any).CustomEvent = class CustomEvent {
+      (window as any).CustomEvent = class {
         type: string; detail: any; bubbles = false; cancelable = false; defaultPrevented = false;
-        constructor(type: string, opts?: any) {
-          this.type = type; this.detail = opts?.detail ?? null;
-          this.bubbles = opts?.bubbles ?? false; this.cancelable = opts?.cancelable ?? false;
-        }
-        preventDefault() { this.defaultPrevented = true; }
-        stopPropagation() {}
-        stopImmediatePropagation() {}
+        constructor(type: string, opts?: any) { this.type = type; this.detail = opts?.detail ?? null; this.bubbles = opts?.bubbles ?? false; this.cancelable = opts?.cancelable ?? false; }
+        preventDefault() { this.defaultPrevented = true; } stopPropagation() {} stopImmediatePropagation() {}
       };
     }
     if (typeof (window as any).dispatchEvent === "undefined") {
-      const _listeners = new Map();
-      (window as any).addEventListener = (t: string, l: Function) => {
-        if (!_listeners.has(t)) _listeners.set(t, new Set());
-        _listeners.get(t)!.add(l);
-      };
-      (window as any).removeEventListener = (t: string, l: Function) => _listeners.get(t)?.delete(l);
-      (window as any).dispatchEvent = (e: any) => { _listeners.get(e.type)?.forEach((l: Function) => l(e)); return true; };
+      const _ls = new Map();
+      (window as any).addEventListener = (t: string, l: Function) => { if (!_ls.has(t)) _ls.set(t, new Set()); _ls.get(t)!.add(l); };
+      (window as any).removeEventListener = (t: string, l: Function) => _ls.get(t)?.delete(l);
+      (window as any).dispatchEvent = (e: any) => { _ls.get(e.type)?.forEach((l: Function) => l(e)); return true; };
     }
-  } catch (_) { /* ignore polyfill errors */ }
-}
-polyfillBrowserApis();
-// LiveKit WebRTC globals — MUST be called before any LiveKit or WebRTC code runs.
-// Without this, @livekit/react-native throws "WebRTC isn't detected, have you called registerGlobals?"
+  }
+} catch (_) {}
 import { registerGlobals } from "@livekit/react-native";
 try {
   registerGlobals();
