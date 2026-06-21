@@ -426,7 +426,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!currentRoles.includes(mapped)) throw new Error(`User doesn't have the ${mapped} role`);
       await clerkUser.update({ unsafeMetadata: { ...clerkUser.unsafeMetadata, activeRole: mapped } });
       if (appUser) {
-        const updated = { ...appUser, activeRole: mapped };
+        // Also update the legacy role field so CreateEventScreen / role checks see the active role immediately
+        const typedRole = mapped === "organizer" ? "organizer" as const : "user" as const;
+        const updated = { ...appUser, role: typedRole, activeRole: mapped };
         setAppUser(updated);
         await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
       }
