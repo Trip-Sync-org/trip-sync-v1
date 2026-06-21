@@ -1312,6 +1312,12 @@ export function LiveTripScreen({ route, navigation }: Props) {
     return () => clearInterval(t);
   }, [accessDenied, fetchAndMergeLiveState, phase, user?.id]);
 
+  // Reset allRidersMuted when voiceMode changes — Staff Talk handles its own
+  // audio gating via canHear/canSpeak, and Talk All should start clean.
+  useEffect(() => {
+    setAllRidersMuted(false);
+  }, [voiceMode]);
+
   // Derive each member's initial/ongoing mute state from the channel mode + role,
   // per the channel-comms blueprint:
   //   - Talk All        → everyone (staff + riders) can talk → unmuted

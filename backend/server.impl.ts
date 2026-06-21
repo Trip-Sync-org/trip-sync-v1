@@ -209,7 +209,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     if (!Number.isFinite(userId)) return null;
     const { data } = await supabase
       .from("users")
-      .select("id, role")
+      .select("id, role, roles")
       .eq("id", userId)
       .single();
     return data ?? null;
@@ -225,17 +225,32 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     const raw = String(input).trim();
     if (!raw) return null;
 
-    const { data: byAuthUser } = await supabase
+    // Try clerk_id first (TEXT column, works with Clerk user IDs like "user_xxxxx")
+    const { data: byClerkId } = await supabase
       .from("users")
       .select("id, role")
-      .eq("auth_user_id", raw)
+      .eq("clerk_id", raw)
       .limit(2);
-    if (byAuthUser?.length) {
+    if (byClerkId?.length) {
       if (roleHint) {
-        const m = byAuthUser.find((r: { role?: string }) => r.role === roleHint);
+        const m = byClerkId.find((r: { role?: string }) => r.role === roleHint);
         if (m?.id != null) return Number(m.id);
       }
-      return Number(byAuthUser[0].id);
+      return Number(byClerkId[0].id);
+    }
+
+    // Fallback: try auth_user_id with explicit TEXT cast (works if migration hasn't been run yet)
+    const { data: byAuthUserId } = await supabase
+      .from("users")
+      .select("id, role")
+      .eq("auth_user_id::text", raw)
+      .limit(2);
+    if (byAuthUserId?.length) {
+      if (roleHint) {
+        const m = byAuthUserId.find((r: { role?: string }) => r.role === roleHint);
+        if (m?.id != null) return Number(m.id);
+      }
+      return Number(byAuthUserId[0].id);
     }
 
     const { data: byEmailRows, error: emailErr } = await supabase
@@ -407,7 +422,8 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
   async function assertOrganizerAccess(organizerId: number) {
     const actor = await getUserById(organizerId);
     if (!actor) return { ok: false as const, status: 404, error: "User not found" };
-    if (actor.role !== "organizer") {
+    const userRoles = (actor as any).roles ?? [actor.role];
+    if (!userRoles.includes("organizer")) {
       return { ok: false as const, status: 403, error: "Only organizers are allowed" };
     }
     return { ok: true as const };
@@ -600,7 +616,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
 
   // Sync authenticated Supabase user into public.users (for OAuth like Google)
   app.post("/api/auth/sync", async (req, res) => {
-    const { email, name, role, auth_user_id } = req.body;
+    const { email, name, role, roles, auth_user_id } = req.body;
 
     const emailTrim =
       typeof email === "string" ? email.trim() : String(email ?? "").trim();
@@ -617,22 +633,26 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
 
     try {
       if (auth_user_id) {
+        // Use clerk_id column (TEXT) instead of auth_user_id (UUID) — Clerk IDs are not valid UUIDs
         const authLookup = await supabase
         .from("users")
           .select("*")
-          .eq("auth_user_id", auth_user_id)
+          .eq("clerk_id", auth_user_id)
           .maybeSingle();
         if (authLookup.error) {
-          console.warn("auth sync: auth_user_id lookup skipped:", authLookup.error.message);
+          console.error("auth sync: clerk_id lookup failed:", authLookup.error.message);
         } else if (authLookup.data) {
           const byAuth = authLookup.data;
-          if (safeName && safeName !== byAuth.name) {
+          const patch: Record<string, unknown> = {};
+          if (safeName && safeName !== byAuth.name) patch.name = safeName;
+          if (roles && Array.isArray(roles)) patch.roles = roles;
+          if (Object.keys(patch).length > 0) {
             const { data: updated } = await supabase
               .from("users")
-              .update({ name: safeName })
+              .update(patch)
               .eq("id", byAuth.id)
-        .select()
-        .single();
+              .select()
+              .single();
             return res.json(updated ?? byAuth);
           }
           return res.json(byAuth);
@@ -646,10 +666,13 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
         .eq("role", desiredRole)
         .maybeSingle();
       if (exact) {
-        if (safeName && safeName !== exact.name) {
+        const patch: Record<string, unknown> = {};
+        if (safeName && safeName !== exact.name) patch.name = safeName;
+        if (roles && Array.isArray(roles)) patch.roles = roles;
+        if (Object.keys(patch).length > 0) {
           const { data: updated } = await supabase
             .from("users")
-            .update({ name: safeName })
+            .update(patch)
             .eq("id", exact.id)
             .select()
             .single();
@@ -664,10 +687,13 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
         .eq("email", emailTrim);
       if (emailRows && emailRows.length === 1) {
         const row = emailRows[0];
-        if (safeName && safeName !== row.name) {
+        const patch: Record<string, unknown> = {};
+        if (safeName && safeName !== row.name) patch.name = safeName;
+        if (roles && Array.isArray(roles)) patch.roles = roles;
+        if (Object.keys(patch).length > 0) {
           const { data: updated } = await supabase
             .from("users")
-            .update({ name: safeName })
+            .update(patch)
             .eq("id", row.id)
             .select()
             .single();
@@ -695,7 +721,13 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
         name: safeName,
         role: desiredRole,
       };
-      if (auth_user_id) insertPayload.auth_user_id = auth_user_id;
+      if (roles && Array.isArray(roles)) {
+        insertPayload.roles = roles;
+      }
+      if (auth_user_id) {
+        insertPayload.auth_user_id = auth_user_id;
+        insertPayload.clerk_id = auth_user_id;
+      }
 
       const { data: inserted, error: insErr } = await supabase
         .from("users")
@@ -712,8 +744,11 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
         if (existingByEmail) {
           const patch: Record<string, unknown> = {};
           if (safeName && safeName !== existingByEmail.name) patch.name = safeName;
-          if (auth_user_id && existingByEmail.auth_user_id !== auth_user_id)
+          if (roles && Array.isArray(roles)) patch.roles = roles;
+          if (auth_user_id) {
             patch.auth_user_id = auth_user_id;
+            patch.clerk_id = auth_user_id;
+          }
           if (Object.keys(patch).length > 0) {
             const { data: merged } = await supabase
               .from("users")
@@ -1157,7 +1192,8 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     }
 
     const actor = await getUserById(Number(userId));
-    if (!actor || actor.role !== "user") {
+    const userRoles = (actor as any)?.roles ?? [actor?.role];
+    if (!actor || !userRoles.includes("user")) {
       return res.status(403).json({ error: "Only explorer accounts can join trips" });
     }
 

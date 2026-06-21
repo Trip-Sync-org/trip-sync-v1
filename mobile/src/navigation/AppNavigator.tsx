@@ -149,7 +149,7 @@ const Tab = createBottomTabNavigator();
 function MainTabs() {
   const { user } = useAuth();
   const { colors: tc } = useAppTheme();
-  const isOrg = user?.role === "organizer";
+  const isOrg = (user?.activeRole ?? user?.role) === "organizer";
 
   return (
     <Tab.Navigator

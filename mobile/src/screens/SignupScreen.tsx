@@ -31,6 +31,7 @@ export function SignupScreen({ navigation }: Props) {
     !!name.trim() &&
     !!email.trim() &&
     !!password &&
+    password.length >= 8 &&
     passwordStatus === "success" &&
     agreeTerms &&
     !busy;
@@ -44,7 +45,6 @@ export function SignupScreen({ navigation }: Props) {
     setFieldErrors({});
     try {
       await signup(email.trim(), password, name.trim() || email.split("@")[0] || "User", userType);
-      navigation.navigate("Login");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Try again";
       if (/email/i.test(msg)) {

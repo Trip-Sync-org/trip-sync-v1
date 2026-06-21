@@ -152,15 +152,6 @@ android {
     }
 }
 
-// ─── Exclude duplicate WebRTC implementations ─────────────────────────────────────
-// react-native-incall-manager pulls in react-native-webrtc as a transitive dep.
-// @livekit/react-native-webrtc already provides the full WebRTC implementation.
-// Exclude both the Jitsi Maven AAR and the react-native-webrtc project module.
-configurations.all {
-    exclude group: "org.jitsi", module: "webrtc"
-    exclude group: "com.oney", module: "react-native-webrtc"
-}
-
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")

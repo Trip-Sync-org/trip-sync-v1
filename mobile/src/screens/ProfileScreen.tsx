@@ -8,16 +8,19 @@ import { useNavigation } from "@react-navigation/native";
 
 export function ProfileScreen() {
   const c = useAuthPalette();
-  const { user, logout } = useAuth();
+  const { user, logout, addRole, switchRole } = useAuth();
   const navigation = useNavigation();
   const [pushNotifs, setPushNotifs] = useState(true);
   const [promoNotifs, setPromoNotifs] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
   const avatarUri = `https://api.dicebear.com/7.x/avataaars/png?seed=${encodeURIComponent(user?.name || "User")}`;
 
   const onLogout = () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
     Alert.alert("Sign out?", undefined, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Sign out", style: "destructive", onPress: () => void logout() },
+      { text: "Cancel", style: "cancel", onPress: () => setLoggingOut(false) },
+      { text: "Sign out", style: "destructive", onPress: () => { logout().finally(() => setLoggingOut(false)); } },
     ]);
   };
 
@@ -64,6 +67,51 @@ export function ProfileScreen() {
           c={c}
           last
         />
+      </View>
+
+      <Text style={[styles.sectionLabel, { color: c.accentOrange }]}>ROLES</Text>
+      <View style={[styles.card, { backgroundColor: c.bgCard, borderColor: c.borderDefault }]}>
+        {user?.roles && (user.roles as string[]).length > 1 ? (
+          <>
+            <Pressable
+              style={[styles.menuRow, { borderBottomColor: c.borderDefault, borderBottomWidth: 1 }]}
+              onPress={() => {
+                const newRole = user.activeRole === "organizer" ? "explorer" : "organisor";
+                switchRole(newRole).catch(() => {});
+              }}
+            >
+              <Text style={styles.rowIcon}>🔄</Text>
+              <View style={styles.menuText}>
+                <Text style={[styles.menuTitle, { color: c.textPrimary }]}>Switch Role</Text>
+                <Text style={[styles.menuSubtitle, { color: c.textSecondary }]}>
+                  Currently: {user.activeRole === "organizer" ? "Organisor" : "Explorer"}
+                </Text>
+              </View>
+            </Pressable>
+          </>
+        ) : (user?.roles as string[] | undefined)?.length === 1 ? (
+          <Pressable
+            style={styles.menuRow}
+            onPress={() => {
+              const u = user!;
+              const r = (u.roles as string[])[0];
+              const missingRole = r === "organizer" ? "explorer" : "organisor";
+              addRole(missingRole).catch((e) => {
+                Alert.alert("Error", e instanceof Error ? e.message : "Failed to add role");
+              });
+            }}
+          >
+            <Text style={styles.rowIcon}>➕</Text>
+            <View style={styles.menuText}>
+              <Text style={[styles.menuTitle, { color: c.textPrimary }]}>
+                Also act as {(user!.roles as string[])[0] === "organizer" ? "Explorer" : "Organisor"}
+              </Text>
+              <Text style={[styles.menuSubtitle, { color: c.textSecondary }]}>
+                Browse and join trips too
+              </Text>
+            </View>
+          </Pressable>
+        ) : null}
       </View>
 
       <Text style={[styles.sectionLabel, { color: c.accentOrange }]}>MORE</Text>

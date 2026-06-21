@@ -14,6 +14,7 @@ module.exports = {
       backgroundColor: "#ffffff",
     },
     ios: {
+      bundleIdentifier: "com.tripsync.app",
       supportsTablet: true,
       infoPlist: {
         NSMicrophoneUsageDescription: "Trip-Sync needs microphone for convoy voice chat",

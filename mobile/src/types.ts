@@ -1,9 +1,12 @@
 //types.ts
 export type User = {
   id: string;
+  authUserId?: string;
   name: string;
   email: string;
   role: "user" | "organizer";
+  roles?: string[];
+  activeRole?: string;
   level?: number;
   xp?: number;
 };

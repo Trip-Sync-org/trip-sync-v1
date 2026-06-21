@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { useAuth } from "../context/AuthContext";
+import { useSSO } from "@clerk/clerk-expo";
 import { useAuthPalette } from "../theme/authTheme";
 import {
   AuthScreenShell,
@@ -11,7 +12,6 @@ import {
   GoogleButton,
   InputField,
   PrimaryButton,
-  RoleSwitch,
 } from "../components/auth/AuthUI";
 import { safeGoBack } from "../utils/navigation";
 
@@ -20,9 +20,9 @@ type Props = NativeStackScreenProps<RootStackParamList, "Login">;
 export function LoginScreen({ navigation }: Props) {
   const c = useAuthPalette();
   const { login } = useAuth();
+  const { startSSOFlow } = useSSO();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [userType, setUserType] = useState<"explorer" | "organisor">("explorer");
   const [rememberMe, setRememberMe] = useState(true);
   const [busy, setBusy] = useState(false);
   const [wrongPassword, setWrongPassword] = useState(false);
@@ -33,7 +33,7 @@ export function LoginScreen({ navigation }: Props) {
     setBusy(true);
     setErrorText("");
     try {
-      await login(email.trim(), password, userType, rememberMe);
+      await login(email.trim(), password, rememberMe);
       setWrongPassword(false);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Try again";
@@ -79,7 +79,6 @@ export function LoginScreen({ navigation }: Props) {
       {errorText ? (
         <Text style={{ color: c.borderError, marginTop: 6, fontSize: 12 }}>{errorText}</Text>
       ) : null}
-      <RoleSwitch value={userType} onChange={setUserType} />
 
       <View style={{ flexDirection: "row", alignItems: "center", marginTop: 14 }}>
         <View style={{ flex: 1 }}>
@@ -101,7 +100,22 @@ export function LoginScreen({ navigation }: Props) {
       />
       {busy ? <ActivityIndicator color={c.accentOrange} style={{ marginTop: 8 }} /> : null}
       <DividerOr />
-      <GoogleButton onPress={() => {}} />
+      <GoogleButton onPress={async () => {
+        if (busy) return;
+        setBusy(true);
+        setErrorText("");
+        try {
+          const { createdSessionId, setActive } = await startSSOFlow({ strategy: "oauth_google" });
+          if (createdSessionId && setActive) {
+            await setActive({ session: createdSessionId });
+          }
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : "Google sign-in failed";
+          setErrorText(msg);
+        } finally {
+          setBusy(false);
+        }
+      }} />
 
       <Pressable onPress={() => navigation.navigate("Signup")} style={{ marginTop: 14 }}>
         <Text style={{ textAlign: "center", color: c.textSecondary, fontSize: 13 }}>

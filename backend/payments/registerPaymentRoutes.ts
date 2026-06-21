@@ -72,7 +72,8 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
     const xfProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
     const xfHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
     const host = xfHost || String(req.headers.host || "").trim();
-    const proto = xfProto || (host.includes("localhost") || host.startsWith("127.") ? "http" : "https");
+    const isLocal = host.includes("localhost") || host.startsWith("127.");
+    const proto = isLocal ? "http" : (xfProto || "https");
     if (host && !host.includes("localhost") && !host.startsWith("127.")) {
       return `${proto}://${host}`.replace(/\/$/, "");
     }
