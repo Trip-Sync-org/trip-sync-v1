@@ -46,8 +46,8 @@
     "expo-status-bar": "~3.0.9",
     "expo-web-browser": "~14.2.0",
     "livekit-client": "^2.18.7",
-    "react": "19.1.4",
-    "react-dom": "19.1.4",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
     "react-native": "0.81.5",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-incall-manager": "^4.2.1",
@@ -77,5 +77,9 @@
       }
     }
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  }
 }
