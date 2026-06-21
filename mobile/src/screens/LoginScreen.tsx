@@ -14,6 +14,7 @@ import {
   PrimaryButton,
 } from "../components/auth/AuthUI";
 import { safeGoBack } from "../utils/navigation";
+import { polyfillBrowserApis } from "../utils/polyfillBrowserApis";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Login">;
 
@@ -144,6 +145,7 @@ export function LoginScreen({ navigation }: Props) {
     setBusy(true);
     setErrorText("");
     try {
+      polyfillBrowserApis();
       const { createdSessionId, setActive } = await startSSOFlow({ strategy: "oauth_google" });
       if (createdSessionId && setActive) {
         await setActive({ session: createdSessionId });

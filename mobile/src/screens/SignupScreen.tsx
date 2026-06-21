@@ -7,6 +7,7 @@ import { useAuthPalette } from "../theme/authTheme";
 import { AuthScreenShell, CheckboxRow, DividerOr, GoogleButton, InputField, PrimaryButton, RoleSwitch } from "../components/auth/AuthUI";
 import { useSSO } from "@clerk/clerk-expo";
 import { safeGoBack } from "../utils/navigation";
+import { polyfillBrowserApis } from "../utils/polyfillBrowserApis";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Signup">;
 
@@ -118,6 +119,7 @@ export function SignupScreen({ navigation }: Props) {
         setBusy(true);
         setFormError("");
         try {
+          polyfillBrowserApis();
           const result = await startSSOFlow({ strategy: "oauth_google" });
           console.log("[GoogleSignup] FULL result:", JSON.stringify(result, null, 2));
           const { createdSessionId, setActive } = result;
