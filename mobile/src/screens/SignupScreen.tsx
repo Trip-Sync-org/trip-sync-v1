@@ -124,7 +124,7 @@ export function SignupScreen({ navigation }: Props) {
           polyfillBrowserApis();
           const result = await startSSOFlow({
             strategy: "oauth_google",
-            redirectUrl: "tripsync://oauth-callback",
+            redirectUrl: "tripsync://oauth/clerk-callback",
           });
           console.log("[GoogleSignup] FULL result:", JSON.stringify(result, null, 2));
           const { createdSessionId, setActive } = result;
