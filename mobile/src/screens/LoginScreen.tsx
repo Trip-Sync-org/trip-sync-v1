@@ -145,7 +145,7 @@ export function LoginScreen({ navigation }: Props) {
     try {
       const { createdSessionId, setActive } = await startSSOFlow({
         strategy: "oauth_google",
-        redirectUrl: "tripsync://oauth/clerk-callback",
+        redirectUrl: "tripsync://sso-callback",
       });
       if (createdSessionId && setActive) {
         await setActive({ session: createdSessionId });
