@@ -1,10 +1,13 @@
 //index.ts
-// Polyfill window.location unconditionally BEFORE any Clerk/OAuth modules load.
+// IMPORTANT: react-native-gesture-handler MUST be the first import in the app.
+// Then polyfill window.location before Clerk/OAuth modules load.
+import "react-native-gesture-handler";
+
+// Polyfill window.location BEFORE any Clerk/OAuth modules load.
 // In production Hermes builds, Clerk accesses window.location.href at module init time,
 // and if the polyfill runs too late (inside a conditional after imports), it crashes.
 import "./src/utils/polyfillWindowLocation";
 
-import "react-native-gesture-handler";
 import { registerGlobals } from "@livekit/react-native";
 try {
   registerGlobals();
