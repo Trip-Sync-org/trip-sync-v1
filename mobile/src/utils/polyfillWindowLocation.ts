@@ -8,30 +8,30 @@
  * This file makes assignments unconditionally and is imported at the TOP of index.ts,
  * before any other imports (except react-native-gesture-handler which is needed for
  * the gesture system and does not interact with window.location).
+ *
+ * NOTE: No TS types (Location, DOMStringList) since they don't exist in RN's type env.
  */
 (function polyfillNow(): void {
-  // Unconditionally assign window.location — harmless if already defined,
-  // prevents 'Cannot read property href of undefined' crash in Clerk/OAuth.
   try {
     if (typeof window !== "undefined") {
-      const loc: Location = {
-        href: "",
-        origin: "",
-        protocol: "",
-        host: "",
-        hostname: "",
-        port: "",
-        pathname: "/",
-        search: "",
-        hash: "",
-        ancestorOrigins: [] as unknown as DOMStringList,
-        assign: () => {},
-        replace: () => {},
-        reload: () => {},
-        toString: () => "",
-      };
-      if (!(window as any).location) {
-        (window as any).location = loc;
+      var w: any = window;
+      if (!w.location) {
+        w.location = {
+          href: "",
+          origin: "",
+          protocol: "",
+          host: "",
+          hostname: "",
+          port: "",
+          pathname: "/",
+          search: "",
+          hash: "",
+          ancestorOrigins: [],
+          assign: function () {},
+          replace: function () {},
+          reload: function () {},
+          toString: function () { return ""; },
+        };
       }
     }
   } catch (_) {
