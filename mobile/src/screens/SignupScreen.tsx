@@ -122,10 +122,7 @@ export function SignupScreen({ navigation }: Props) {
           // Polyfill browser APIs (window.location, CustomEvent, dispatchEvent)
           // before Clerk's OAuth flow needs them — required in React Native Hermes builds.
           polyfillBrowserApis();
-          const result = await startSSOFlow({
-            strategy: "oauth_google",
-            redirectUrl: "tripsync://sso-callback",
-          });
+          const result = await startSSOFlow({ strategy: "oauth_google" });
           console.log("[GoogleSignup] FULL result:", JSON.stringify(result, null, 2));
           const { createdSessionId, setActive } = result;
           console.log("[GoogleSignup] sessionId:", createdSessionId, "| has setActive:", !!setActive);
