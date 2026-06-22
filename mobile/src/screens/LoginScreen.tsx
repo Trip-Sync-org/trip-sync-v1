@@ -14,6 +14,7 @@ import {
   PrimaryButton,
 } from "../components/auth/AuthUI";
 import { safeGoBack } from "../utils/navigation";
+import { polyfillBrowserApis } from "../utils/polyfillBrowserApis";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Login">;
 
@@ -137,6 +138,8 @@ export function LoginScreen({ navigation }: Props) {
 
   const onGooglePress = async () => {
     if (busy) return;
+    // Polyfill browser APIs before Clerk's OAuth flow needs them
+    polyfillBrowserApis();
     setBusy(true);
     setErrorText("");
     try {
