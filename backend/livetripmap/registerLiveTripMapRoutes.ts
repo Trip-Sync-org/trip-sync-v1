@@ -208,14 +208,9 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
     const tripStarted = ["active", "live", "started", "ongoing"].includes(tripStatus);
 
     // Organizer always has access to their own trip — no booking needed.
-    const userRoles = (actor as any)?.roles ?? [actor.role];
-    const isOrganizer = (actor.role === "organizer" || userRoles.includes("organizer")) && Number(trip.organizer_id) === userId;
-    if (isOrganizer) {
+    // The numeric organizer_id match is the definitive ownership check, independent of roles.
+    if (Number(trip.organizer_id) === userId) {
       return res.json({ allowed: true, reason: "organizer", trip_started: tripStarted, can_start: true });
-    }
-
-    if (!userRoles.includes("user")) {
-      return res.status(403).json({ allowed: false, error: "Invalid role for trip access" });
     }
 
     const { data: booking } = await ctx.supabase
@@ -250,8 +245,7 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
     const actor = await ctx.getUserById(userId);
     if (!actor) return res.status(404).json({ error: "User not found" });
 
-    const isOrganizer = actor.role === "organizer" && Number(trip.organizer_id) === userId;
-    if (!isOrganizer) {
+    if (Number(trip.organizer_id) !== userId) {
       const { data: booking } = await ctx.supabase
         .from("bookings")
         .select("id, status, payment_status")
@@ -465,8 +459,7 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
     const actor = await ctx.getUserById(userId);
     if (!actor) return res.status(404).json({ error: "User not found" });
 
-    const isOrganizer = actor.role === "organizer" && Number(trip.organizer_id) === userId;
-    if (!isOrganizer) {
+    if (Number(trip.organizer_id) !== userId) {
       const { data: booking } = await ctx.supabase
         .from("bookings")
         .select("id, status, payment_status")
@@ -526,8 +519,7 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
     const actor = await ctx.getUserById(userId);
     if (!actor) return res.status(404).json({ error: "User not found" });
 
-    const isTripOrganizer = actor.role === "organizer" && Number(trip.organizer_id) === userId;
-    if (!isTripOrganizer) {
+    if (Number(trip.organizer_id) !== userId) {
       const { data: booking } = await ctx.supabase
         .from("bookings")
         .select("id, status, payment_status")
@@ -587,8 +579,7 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
     const actor = await ctx.getUserById(userId);
     if (!actor) return res.status(404).json({ error: "User not found" });
 
-    const isTripOrganizer = actor.role === "organizer" && Number(trip.organizer_id) === userId;
-    if (!isTripOrganizer) {
+    if (Number(trip.organizer_id) !== userId) {
       const { data: booking } = await ctx.supabase
         .from("bookings")
         .select("id, status, payment_status")
@@ -652,8 +643,7 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
     const actor = await ctx.getUserById(userId);
     if (!actor) return res.status(404).json({ error: "User not found" });
 
-    const isTripOrganizer = actor.role === "organizer" && Number(trip.organizer_id) === userId;
-    if (!isTripOrganizer) {
+    if (Number(trip.organizer_id) !== userId) {
       const { data: booking } = await ctx.supabase
         .from("bookings")
         .select("id, status, payment_status")
