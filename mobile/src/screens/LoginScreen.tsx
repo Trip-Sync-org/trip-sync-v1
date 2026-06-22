@@ -143,7 +143,10 @@ export function LoginScreen({ navigation }: Props) {
     setBusy(true);
     setErrorText("");
     try {
-      const { createdSessionId, setActive } = await startSSOFlow({ strategy: "oauth_google" });
+      const { createdSessionId, setActive } = await startSSOFlow({
+        strategy: "oauth_google",
+        redirectUrl: "tripsync://oauth-callback",
+      });
       if (createdSessionId && setActive) {
         await setActive({ session: createdSessionId });
       }
