@@ -6,8 +6,11 @@
 export function polyfillBrowserApis(): void {
   try {
     if (typeof window === "undefined") return;
-    if (!(window as any).location) {
-      (window as any).location = { href: "", origin: "", protocol: "", host: "", hostname: "", pathname: "/", search: "", hash: "" };
+    // Clerk's OAuth flow reads window.location.href to determine the redirect URL.
+    // Set it before startSSOFlow() to prevent "Missing external verification redirect URL" error.
+    const w: any = window;
+    if (!w.location) {
+      w.location = { href: "tripsync://", origin: "", protocol: "tripsync:", host: "", hostname: "", pathname: "/", search: "", hash: "" };
     }
     if (typeof (window as any).CustomEvent === "undefined") {
       (window as any).CustomEvent = class {
