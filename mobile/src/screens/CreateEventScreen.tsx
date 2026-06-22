@@ -342,7 +342,7 @@ export function CreateEventScreen({ navigation }: Props) {
   }, [startCoords, endCoords, user?.id]);
 
   useEffect(() => {
-    if (!user?.id || user.role !== "organizer") {
+    if (!user?.id || user.activeRole !== "organizer") {
       setCommunitySuggestions([]);
       setCommunityAttractionsLoading(false);
       return;
@@ -396,7 +396,7 @@ export function CreateEventScreen({ navigation }: Props) {
       })();
     }, 500);
     return () => clearTimeout(t);
-  }, [routePolyline, startCoords, endCoords, user?.id, user?.role]);
+  }, [routePolyline, startCoords, endCoords, user?.id, user?.activeRole]);
 
   useEffect(() => {
     const q = cpSearch.trim();
@@ -702,7 +702,7 @@ export function CreateEventScreen({ navigation }: Props) {
   };
 
   const publish = async () => {
-    if (!user || user.role !== "organizer") {
+    if (!user || user.activeRole !== "organizer") {
       Alert.alert("Organizers only", "Sign in as an organizer to create events.");
       return;
     }

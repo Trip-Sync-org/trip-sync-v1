@@ -34,7 +34,7 @@ export function EditProfileScreen({ navigation }: Props) {
     if (!user?.id) return;
     setSaving(true);
     try {
-      if (user.role === "organizer") {
+      if (user.activeRole === "organizer") {
         await apiFetch(`/api/organizers/${user.id}/profile`, {
           method: "PATCH",
           body: JSON.stringify({ name: name.trim(), email: email.trim(), phone: phone.trim() }),

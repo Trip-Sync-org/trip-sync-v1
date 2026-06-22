@@ -154,6 +154,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
         body: JSON.stringify({
           trip_id: Number(id),
           user_id: Number(user.id),
+          active_role: user.activeRole,
           participants: 1,
           ...(appliedPct != null && coupon.trim() ? { coupon_code: coupon.trim() } : {}),
         }),

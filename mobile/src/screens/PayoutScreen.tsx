@@ -151,7 +151,7 @@ export function PayoutScreen() {
 
   useOrganizerPaymentsSocket({
     userId: Number.isFinite(uid) ? uid : undefined,
-    role: user?.role,
+    role: user?.activeRole,
     onPayoutUpdated: () => {
       void loadAll();
     },

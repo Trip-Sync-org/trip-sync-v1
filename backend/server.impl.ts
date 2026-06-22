@@ -1182,7 +1182,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
 
   // Bookings API (Supabase)
   app.post("/api/bookings", async (req, res) => {
-    const { trip_id, user_id, coupon_code, participants: participantsBody } = req.body;
+    const { trip_id, user_id, coupon_code, participants: participantsBody, active_role } = req.body;
     const tripId = Number(trip_id);
     const userId = await resolveUserNumericId(user_id, "user");
     const participants = Math.min(50, Math.max(1, Math.floor(Number(participantsBody) || 1)));
@@ -1191,9 +1191,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       return res.status(400).json({ error: "trip_id and user_id are required" });
     }
 
-    const actor = await getUserById(Number(userId));
-    const userRoles = (actor as any)?.roles ?? [actor?.role];
-    if (!actor || !userRoles.includes("user")) {
+    if (active_role !== "user") {
       return res.status(403).json({ error: "Only explorer accounts can join trips" });
     }
 

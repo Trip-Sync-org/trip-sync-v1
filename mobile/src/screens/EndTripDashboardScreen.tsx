@@ -151,7 +151,7 @@ export function EndTripDashboardScreen({ route, navigation }: Props) {
 
       <Pressable style={[styles.navBtn, { borderColor: colors.border }]} onPress={() => navigation.navigate("Main")}>
         <Text style={{ color: colors.text, fontWeight: "700" }}>
-          {user?.role === "organizer" ? "Organizer dashboard" : "Go to dashboard"}
+          {user?.activeRole === "organizer" ? "Organizer dashboard" : "Go to dashboard"}
         </Text>
       </Pressable>
     </ScrollView>

@@ -623,12 +623,12 @@ export function LiveTripScreen({ route, navigation }: Props) {
     localRole === "admin" ||
     localRole === "co-admin" ||
     localRole === "moderator" ||
-    user?.role === "organizer";
+    user?.activeRole === "organizer";
   const canSendLineupFormation =
     localRole === "organizer" ||
     localRole === "co-admin" ||
     localRole === "moderator" ||
-    user?.role === "organizer";
+    user?.activeRole === "organizer";
   const canSaveNearbyAttraction = canSendLineupFormation;
   useEffect(() => {
     isTripStaffRef.current = canSendLineupFormation;
@@ -649,13 +649,13 @@ export function LiveTripScreen({ route, navigation }: Props) {
     prevMapPinModalOpenRef.current = showMapPinRequestModal;
   }, [showMapPinRequestModal]);
   const isOrganizer =
-    user?.role === "organizer" || localRole === "organizer" || localRole === "admin";
+    user?.activeRole === "organizer" || localRole === "organizer" || localRole === "admin";
   const localIsStaff =
     localRole === "organizer" ||
     localRole === "admin" ||
     localRole === "co-admin" ||
     localRole === "moderator" ||
-    user?.role === "organizer";
+    user?.activeRole === "organizer";
 
   const {
     voiceMode,

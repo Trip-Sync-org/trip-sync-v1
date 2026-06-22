@@ -339,7 +339,7 @@ export function OrganizerScreen() {
 
   useOrganizerPaymentsSocket({
     userId: user?.id != null ? Number(user.id) : undefined,
-    role: user?.role,
+    role: user?.activeRole,
     onPaymentConfirmed: () => {
       void loadOrganizerMoney();
     },
