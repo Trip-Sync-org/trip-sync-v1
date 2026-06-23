@@ -1,4 +1,5 @@
 import React from "react";
+import { Bell } from "lucide-react-native";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -45,7 +46,7 @@ export function ProfileLayout({ navigation, title, children, fallback = "Main", 
         </Pressable>
         <Text style={styles.headerTitle}>{title}</Text>
         <Pressable onPress={() => navigateToRootStack(navigation, "Notifications")} hitSlop={8}>
-          <Text style={styles.headerIcon}>🔔</Text>
+          <Bell color="#FFFFFF" size={19} strokeWidth={2} />
         </Pressable>
       </View>
       <KeyboardAvoidingView

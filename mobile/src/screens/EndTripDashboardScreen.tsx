@@ -1,5 +1,6 @@
 import React from "react";
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, Alert } from "react-native";
+import { Star } from "lucide-react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -114,7 +115,7 @@ export function EndTripDashboardScreen({ route, navigation }: Props) {
           <View style={styles.stars}>
             {[1, 2, 3, 4, 5].map((s) => (
               <Pressable key={s} onPress={() => setRating(s)} style={styles.starBtn}>
-                <Text style={{ fontSize: 28 }}>{s <= rating ? "⭐" : "☆"}</Text>
+                <Star color={s <= rating ? "#fbbf24" : colors.muted} size={28} fill={s <= rating ? "#fbbf24" : "transparent"} strokeWidth={2} />
               </Pressable>
             ))}
           </View>

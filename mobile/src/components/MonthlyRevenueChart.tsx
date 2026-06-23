@@ -1,178 +1,135 @@
 import React, { useMemo, useState } from "react";
-import { View, Text, Pressable } from "react-native";
-
-type MonthlyDataPoint = {
-  month: number;
-  monthName: string;
-  totalAmount: number;
-  bookingCount: number;
-};
+import { View, Text, Pressable, StyleSheet, Dimensions } from "react-native";
+import { useAppTheme } from "../context/ThemeContext";
 
 type Props = {
-  data: MonthlyDataPoint[];
+  data: Array<{ month: number; monthName: string; totalAmount: number; bookingCount: number }>;
   year: number;
-  onYearChange: (newYear: number) => void;
+  onYearChange: (y: number) => void;
 };
 
+const W = Dimensions.get("window").width - 64;
+const BAR_H = 100;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 export function MonthlyRevenueChart({ data, year, onYearChange }: Props) {
-  const maxAmount = Math.max(...data.map((d) => d.totalAmount), 1);
-  const currentMonth = new Date().getMonth();
+  const { colors: c, mode } = useAppTheme();
+  const isLight = mode === "light";
   const currentYear = new Date().getFullYear();
-  const [selectedBar, setSelectedBar] = useState<number | null>(null);
+  const maxVal = Math.max(1, ...data.map((d) => d.totalAmount));
 
-  const CHART_HEIGHT = 160;
-  const BAR_WIDTH = 18;
-  const BAR_RADIUS = 4;
-
-  const totalAmount = useMemo(() => data.reduce((s, d) => s + d.totalAmount, 0), [data]);
-  const totalBookings = useMemo(() => data.reduce((s, d) => s + d.bookingCount, 0), [data]);
-  const bestMonth = useMemo(
-    () => data.reduce((best, d) => (d.totalAmount > best.totalAmount ? d : best), { totalAmount: 0, monthName: "—" } as MonthlyDataPoint),
-    [data],
-  );
+  const bestMonth = useMemo(() => {
+    let best = data[0];
+    for (const d of data) {
+      if (d.totalAmount > (best?.totalAmount ?? 0)) best = d;
+    }
+    return best;
+  }, [data]);
 
   return (
-    <View style={{ backgroundColor: "#1a1a1a", borderRadius: 16, padding: 20, marginBottom: 20 }}>
-      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <Text style={{ color: "#fff", fontSize: 18, fontWeight: "700" }}>Monthly Overview</Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <Pressable onPress={() => onYearChange(year - 1)}>
-            <Text style={{ color: "#00E5B0", fontSize: 18 }}>{"‹"}</Text>
+    <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+      <View style={styles.header}>
+        <Text style={[styles.title, { color: c.muted }]}>MONTHLY REVENUE</Text>
+        <View style={styles.yearNav}>
+          <Pressable onPress={() => onYearChange(year - 1)} hitSlop={8}>
+            <Text style={{ color: c.muted, fontSize: 18 }}>{"‹"}</Text>
           </Pressable>
-          <Text style={{ color: "#fff", fontSize: 14, fontWeight: "600" }}>{year}</Text>
-          <Pressable onPress={() => onYearChange(year + 1)} disabled={year >= currentYear}>
-            <Text style={{ color: year >= currentYear ? "rgba(255,255,255,0.2)" : "#00E5B0", fontSize: 18 }}>{"›"}</Text>
+          <Text style={[styles.yearLabel, { color: c.text }]}>{year}</Text>
+          <Pressable onPress={() => onYearChange(Math.min(currentYear, year + 1))} hitSlop={8}>
+            <Text style={{ color: year >= currentYear ? c.muted : c.text, fontSize: 18 }}>{"›"}</Text>
           </Pressable>
         </View>
       </View>
 
-      <Text style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginBottom: 20 }}>
-        Paid bookings (₹) by month · {year}
-      </Text>
-
-      {selectedBar !== null && data[selectedBar]?.totalAmount > 0 && (
-        <View
-          style={{
-            backgroundColor: "#00E5B0",
-            borderRadius: 8,
-            padding: 8,
-            alignSelf: "center",
-            marginBottom: 12,
-            minWidth: 140,
-            alignItems: "center",
-          }}
-        >
-          <Text style={{ color: "#000", fontSize: 13, fontWeight: "700" }}>
-            {data[selectedBar].monthName} {year}
-          </Text>
-          <Text style={{ color: "#000", fontSize: 15, fontWeight: "800" }}>
-            ₹{data[selectedBar].totalAmount.toLocaleString("en-IN")}
-          </Text>
-          <Text style={{ color: "rgba(0,0,0,0.6)", fontSize: 11 }}>
-            {data[selectedBar].bookingCount} booking{data[selectedBar].bookingCount !== 1 ? "s" : ""}
-          </Text>
-        </View>
-      )}
-
-      <View style={{ flexDirection: "row" }}>
-        <View style={{ justifyContent: "space-between", height: CHART_HEIGHT, paddingRight: 8, alignItems: "flex-end" }}>
-          {[1, 0.75, 0.5, 0.25, 0].map((ratio, i) => (
-            <Text key={i} style={{ color: "rgba(255,255,255,0.25)", fontSize: 9 }}>
-              {maxAmount === 1 ? "" : maxAmount * ratio >= 1000 ? `₹${((maxAmount * ratio) / 1000).toFixed(0)}k` : `₹${Math.round(maxAmount * ratio)}`}
-            </Text>
-          ))}
-        </View>
-
-        <View style={{ flex: 1 }}>
-          <View style={{ position: "absolute", width: "100%", height: CHART_HEIGHT }}>
-            {[0.25, 0.5, 0.75].map((ratio, i) => (
-              <View
-                key={i}
-                style={{
-                  position: "absolute",
-                  top: CHART_HEIGHT * (1 - ratio),
-                  width: "100%",
-                  height: 0.5,
-                  backgroundColor: "rgba(255,255,255,0.06)",
-                }}
-              />
-            ))}
-          </View>
-
-          <View style={{ flexDirection: "row", alignItems: "flex-end", height: CHART_HEIGHT, justifyContent: "space-between" }}>
-            {data.map((item, idx) => {
-              const barHeight = Math.max(item.totalAmount > 0 ? (item.totalAmount / maxAmount) * (CHART_HEIGHT - 8) : 0, item.totalAmount > 0 ? 4 : 0);
-              const isCurrentMonth = idx === currentMonth && year === currentYear;
-              const isSelected = selectedBar === idx;
-              const hasData = item.totalAmount > 0;
-              return (
-                <Pressable
-                  key={idx}
-                  onPress={() => setSelectedBar(isSelected ? null : idx)}
-                  style={{ alignItems: "center", justifyContent: "flex-end", height: CHART_HEIGHT, width: BAR_WIDTH }}
-                >
-                  <View
-                    style={{
-                      width: BAR_WIDTH,
-                      height: hasData ? barHeight : 3,
-                      borderRadius: hasData ? BAR_RADIUS : 2,
-                      backgroundColor: isSelected
-                        ? "#fff"
-                        : isCurrentMonth && hasData
-                          ? "#00E5B0"
-                          : hasData
-                            ? "rgba(0,229,176,0.55)"
-                            : "rgba(255,255,255,0.08)",
-                    }}
-                  />
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 8 }}>
-            {data.map((item, idx) => (
-              <Text
-                key={idx}
-                style={{
-                  color: idx === currentMonth && year === currentYear ? "#00E5B0" : "rgba(255,255,255,0.35)",
-                  fontSize: 9,
-                  width: BAR_WIDTH,
-                  textAlign: "center",
-                  fontWeight: idx === currentMonth ? "700" : "400",
-                }}
-              >
-                {item.monthName}
+      <View style={styles.chart}>
+        {data.map((d) => {
+          const pct = maxVal > 0 ? (d.totalAmount / maxVal) * 100 : 0;
+          return (
+            <View key={d.month} style={styles.barCol}>
+              <Text style={[styles.barVal, { color: c.muted }]}>
+                {d.totalAmount > 0 ? `₹${(d.totalAmount / 1000).toFixed(0)}k` : ""}
               </Text>
-            ))}
-          </View>
-        </View>
+              <View style={[styles.barBg, { backgroundColor: c.border }]}>
+                <View
+                  style={[
+                    styles.barFill,
+                    {
+                      height: `${Math.max(2, pct)}%`,
+                      backgroundColor: d.month === (bestMonth?.month ?? -1) && d.totalAmount > 0 ? c.text : c.muted,
+                    },
+                  ]}
+                />
+              </View>
+              <Text
+                style={[
+                  styles.barLabel,
+                  { color: d.month === (bestMonth?.month ?? -1) && d.totalAmount > 0 ? c.text : c.muted },
+                ]}
+              >
+                {d.monthName}
+              </Text>
+            </View>
+          );
+        })}
       </View>
 
-      <View
-        style={{
-          flexDirection: "row",
-          justifyContent: "space-between",
-          marginTop: 16,
-          paddingTop: 16,
-          borderTopWidth: 0.5,
-          borderTopColor: "rgba(255,255,255,0.08)",
-        }}
-      >
-        <View style={{ alignItems: "center" }}>
-          <Text style={{ color: "rgba(255,255,255,0.4)", fontSize: 10 }}>TOTAL {year}</Text>
-          <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700", marginTop: 2 }}>₹{totalAmount.toLocaleString("en-IN")}</Text>
+      {bestMonth && bestMonth.totalAmount > 0 ? (
+        <View style={styles.bestRow}>
+          <Text style={[styles.bestLabel, { color: c.muted }]}>Best month</Text>
+          <Text style={[styles.bestVal, { color: c.text }]}>
+            {bestMonth.monthName} · ₹{bestMonth.totalAmount.toLocaleString()}
+          </Text>
         </View>
-        <View style={{ alignItems: "center" }}>
-          <Text style={{ color: "rgba(255,255,255,0.4)", fontSize: 10 }}>BOOKINGS</Text>
-          <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700", marginTop: 2 }}>{totalBookings}</Text>
-        </View>
-        <View style={{ alignItems: "center" }}>
-          <Text style={{ color: "rgba(255,255,255,0.4)", fontSize: 10 }}>BEST MONTH</Text>
-          <Text style={{ color: "#00E5B0", fontSize: 16, fontWeight: "700", marginTop: 2 }}>{bestMonth.monthName}</Text>
-        </View>
-      </View>
+      ) : null}
     </View>
   );
 }
 
+const styles = StyleSheet.create({
+  card: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+  },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  title: { fontSize: 10, fontWeight: "800", letterSpacing: 1.2 },
+  yearNav: { flexDirection: "row", alignItems: "center", gap: 10 },
+  yearLabel: { fontSize: 14, fontWeight: "700", minWidth: 44, textAlign: "center" },
+  chart: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "flex-end",
+    height: BAR_H + 30,
+  },
+  barCol: { alignItems: "center", flex: 1 },
+  barVal: { fontSize: 7, fontWeight: "700", marginBottom: 4 },
+  barBg: {
+    width: "70%",
+    maxWidth: 16,
+    height: BAR_H,
+    borderRadius: 4,
+    justifyContent: "flex-end",
+    overflow: "hidden",
+  },
+  barFill: {
+    width: "100%",
+    borderRadius: 4,
+  },
+  barLabel: { fontSize: 8, fontWeight: "700", marginTop: 4 },
+  bestRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 14,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.06)",
+  },
+  bestLabel: { fontSize: 11, fontWeight: "700" },
+  bestVal: { fontSize: 13, fontWeight: "700" },
+});

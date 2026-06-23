@@ -10,6 +10,7 @@ import {
   Image,
   Modal,
   ActivityIndicator,
+  TouchableOpacity,
 } from "react-native";
 import { WebView } from "react-native-webview";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -17,6 +18,8 @@ import type { RootStackParamList } from "../navigation/AppNavigator";
 import { apiFetch, readApiErrorMessage } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { useThemeColors } from "../theme";
+import { MediaThumbnail } from "../components/MediaThumbnail";
+import { Badge } from "../components/ui";
 
 type Props = NativeStackScreenProps<RootStackParamList, "TripDetail">;
 
@@ -39,6 +42,8 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const [isPaymentLoading, setIsPaymentLoading] = useState(false);
   const [paymentHtml, setPaymentHtml] = useState<string | null>(null);
   const [cashfreeOrderId, setCashfreeOrderId] = useState<string | null>(null);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [fullscreenMediaIndex, setFullscreenMediaIndex] = useState<number | null>(null);
 
   const applyCoupon = async () => {
     const code = coupon.trim();
@@ -212,12 +217,14 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const max = Number(trip.max_participants ?? 0);
   const free = price <= 0;
   const payablePreview = Math.max(0, Math.round(price - appliedDiscountAmount));
+  const tripTags = (Array.isArray(trip.tags) ? trip.tags : []) as string[];
+  const tripGallery = (Array.isArray(trip.gallery) ? trip.gallery : []) as Array<{url: string; type: string; thumbnailUrl?: string}>;
 
   return (
     <>
       <ScrollView style={s.root} contentContainerStyle={{ paddingBottom: 40 }}>
         <Image
-          source={{ uri: `https://picsum.photos/seed/${id}/800/400` }}
+          source={{ uri: String(trip.banner_url ?? `https://picsum.photos/seed/${id}/800/400`) }}
           style={s.hero}
         />
         <View style={s.pad}>
@@ -286,6 +293,110 @@ export function TripDetailScreen({ route, navigation }: Props) {
           >
             <Text style={s.linkText}>Open live trip (beta)</Text>
           </Pressable>
+
+          {/* ── Trip Details Section ── */}
+          <View style={s.detailSection}>
+            <Text style={s.detailSectionTitle}>TRIP DETAILS</Text>
+
+            {trip.date ? (
+              <View style={s.detailRow}>
+                <Text style={s.detailLabel}>Date</Text>
+                <Text style={s.detailValue}>{String(trip.date)}</Text>
+              </View>
+            ) : null}
+            {trip.time ? (
+              <View style={s.detailRow}>
+                <Text style={s.detailLabel}>Time</Text>
+                <Text style={s.detailValue}>{String(trip.time)}</Text>
+              </View>
+            ) : null}
+            {trip.duration ? (
+              <View style={s.detailRow}>
+                <Text style={s.detailLabel}>Duration</Text>
+                <Text style={s.detailValue}>{String(trip.duration)}</Text>
+              </View>
+            ) : null}
+            {trip.max_participants ? (
+              <View style={s.detailRow}>
+                <Text style={s.detailLabel}>Capacity</Text>
+                <Text style={s.detailValue}>{joined}/{max} participants</Text>
+              </View>
+            ) : null}
+            {trip.start_place_name ? (
+              <View style={s.detailRow}>
+                <Text style={s.detailLabel}>Start</Text>
+                <Text style={s.detailValue}>{String(trip.start_place_name)}</Text>
+              </View>
+            ) : null}
+            {trip.end_place_name ? (
+              <View style={s.detailRow}>
+                <Text style={s.detailLabel}>End</Text>
+                <Text style={s.detailValue}>{String(trip.end_place_name)}</Text>
+              </View>
+            ) : null}
+          </View>
+
+          {tripTags.length > 0 && (
+            <View style={s.detailSection}>
+              <Text style={s.detailSectionTitle}>TAGS</Text>
+              <View style={s.tagRow}>
+                {tripTags.map((tag: string, idx: number) => (
+                  <Badge key={`${tag}-${idx}`} variant="default">{tag}</Badge>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {tripGallery.length > 0 && (
+            <View style={s.detailSection}>
+              <Pressable
+                style={s.galleryHeader}
+                onPress={() => setGalleryOpen((p) => !p)}
+              >
+                <Text style={s.detailSectionTitle}>
+                  PHOTOS & VIDEOS  ({tripGallery.length})
+                </Text>
+                <Text style={s.chevron}>{galleryOpen ? "▼" : "▶"}</Text>
+              </Pressable>
+              {galleryOpen ? (
+                tripGallery.length > 0 ? (
+                  <View style={s.galleryGrid}>
+                    {tripGallery.map((item, idx) => (
+                      <TouchableOpacity
+                        key={`${item.url}-${idx}`}
+                        style={s.galleryGridItem}
+                        activeOpacity={0.8}
+                        onPress={() => setFullscreenMediaIndex(idx)}
+                      >
+                        <MediaThumbnail
+                          url={item.url}
+                          type={item.type as "image" | "video"}
+                          thumbnailUrl={item.thumbnailUrl}
+                          size={160}
+                        />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={s.galleryEmpty}>No photos yet</Text>
+                )
+              ) : null}
+            </View>
+          )}
+
+          {trip.prerequisites ? (
+            <View style={s.detailSection}>
+              <Text style={s.detailSectionTitle}>PREREQUISITES</Text>
+              <Text style={s.detailBody}>{String(trip.prerequisites)}</Text>
+            </View>
+          ) : null}
+
+          {trip.terms ? (
+            <View style={s.detailSection}>
+              <Text style={s.detailSectionTitle}>TERMS & CONDITIONS</Text>
+              <Text style={s.detailBody}>{String(trip.terms)}</Text>
+            </View>
+          ) : null}
         </View>
       </ScrollView>
 
@@ -414,6 +525,78 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
     },
     payClose: { color: c.muted, fontSize: 16 },
     payTitle: { color: c.text, fontWeight: "700", fontSize: 16 },
+    detailSection: {
+      marginTop: 20,
+      padding: 14,
+      backgroundColor: c.surface,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    detailSectionTitle: {
+      fontSize: 11,
+      fontWeight: "800",
+      letterSpacing: 1.2,
+      color: c.muted,
+      marginBottom: 12,
+    },
+    detailRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      paddingVertical: 8,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+    },
+    detailLabel: {
+      fontSize: 13,
+      color: c.muted,
+      flex: 1,
+    },
+    detailValue: {
+      fontSize: 13,
+      fontWeight: "600",
+      color: c.text,
+      flex: 1,
+      textAlign: "right",
+    },
+    detailBody: {
+      fontSize: 13,
+      color: c.text,
+      lineHeight: 20,
+    },
+    galleryHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+    },
+    chevron: {
+      fontSize: 14,
+      color: c.muted,
+      marginBottom: 12,
+    },
+    galleryGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    galleryGridItem: {
+      width: "48%",
+      aspectRatio: 1,
+      borderRadius: 12,
+      overflow: "hidden",
+    },
+    galleryEmpty: {
+      color: c.muted,
+      fontSize: 13,
+      fontStyle: "italic",
+      textAlign: "center",
+      paddingVertical: 16,
+    },
+    tagRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 6,
+    },
     wvLoading: {
       ...StyleSheet.absoluteFillObject,
       justifyContent: "center",

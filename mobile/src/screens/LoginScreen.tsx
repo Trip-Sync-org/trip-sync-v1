@@ -171,7 +171,7 @@ export function LoginScreen({ navigation }: Props) {
             backgroundColor: mode === "password" ? c.accentOrange : "transparent",
           }}
         >
-          <Text style={{ color: mode === "password" ? "#fff" : c.textSecondary, fontWeight: "600", fontSize: 13 }}>
+          <Text style={{ color: mode === "password" ? c.bgCard : c.textSecondary, fontWeight: "600", fontSize: 13 }}>
             Password
           </Text>
         </Pressable>
@@ -184,7 +184,7 @@ export function LoginScreen({ navigation }: Props) {
             backgroundColor: mode === "code" ? c.accentOrange : "transparent",
           }}
         >
-          <Text style={{ color: mode === "code" ? "#fff" : c.textSecondary, fontWeight: "600", fontSize: 13 }}>
+          <Text style={{ color: mode === "code" ? c.bgCard : c.textSecondary, fontWeight: "600", fontSize: 13 }}>
             Email Code
           </Text>
         </Pressable>

@@ -1,5 +1,6 @@
 import React from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { MessageCircle, Phone, Mail, HelpCircle } from "lucide-react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { ProfileLayout } from "../components/profile/ProfileLayout";
@@ -12,23 +13,23 @@ export function ContactUsScreen({ navigation }: Props) {
   const c = useAuthPalette();
   const options = [
     {
-      icon: "💬",
+      icon: MessageCircle,
       iconBg: "#E8F5F1",
-      iconColor: "#4FA88A",
+      iconColor: c.textPrimary,
       title: "Support Chat",
       subtitle: "24x7 Online Support",
       onPress: () => navigateToRootStack(navigation, "SupportChat"),
     },
     {
-      icon: "📞",
+      icon: Phone,
       iconBg: "#FFF0EC",
-      iconColor: "#4FA88A",
+      iconColor: c.textPrimary,
       title: "Call Center",
       subtitle: "24x7 Customer Service",
       onPress: () => void Linking.openURL("tel:+1800000000"),
     },
     {
-      icon: "✉️",
+      icon: Mail,
       iconBg: "#F0ECFF",
       iconColor: "#7C4DFF",
       title: "Email",
@@ -36,7 +37,7 @@ export function ContactUsScreen({ navigation }: Props) {
       onPress: () => void Linking.openURL("mailto:admin@shifty.com"),
     },
     {
-      icon: "❓",
+      icon: HelpCircle,
       iconBg: "#FFFBEC",
       iconColor: "#FFC107",
       title: "FAQ",
@@ -56,7 +57,7 @@ export function ContactUsScreen({ navigation }: Props) {
         {options.map((opt) => (
           <Pressable key={opt.title} onPress={opt.onPress} style={[styles.card, { backgroundColor: c.bgCard, borderColor: c.borderDefault }]}>
             <View style={[styles.iconCircle, { backgroundColor: opt.iconBg }]}>
-              <Text style={{ color: opt.iconColor }}>{opt.icon}</Text>
+              {React.createElement(opt.icon, { color: opt.iconColor, size: 26, strokeWidth: 2 })}
             </View>
             <Text style={[styles.title, { color: c.textPrimary }]}>{opt.title}</Text>
             <Text style={[styles.sub, { color: c.textSecondary }]}>{opt.subtitle}</Text>

@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
   Alert,
 } from "react-native";
+import { Wallet, Ticket, BadgeCheck } from "lucide-react-native";
 import { useNavigation, useRoute, useFocusEffect, RouteProp } from "@react-navigation/native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { apiFetch, readApiErrorMessage } from "../api/client";
@@ -70,7 +71,7 @@ type CouponRow = {
 };
 
 const CAL_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const TEAL = "#00E5B0";
+const TEAL = "#000000";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function generateCouponCode(prefix: string): string {
@@ -477,7 +478,7 @@ export function OrganizerScreen() {
               <Card key={trip.id} style={{ padding: 14, marginBottom: 12 }}>
                 <View style={{ flexDirection: "row", gap: 12 }}>
                   <Image
-                    source={{ uri: `https://picsum.photos/seed/${trip.banner}/200/200` }}
+                    source={{ uri: trip.banner.startsWith("http") ? trip.banner : `https://picsum.photos/seed/${trip.banner}/200/200` }}
                     style={s.thumb}
                   />
                   <View style={{ flex: 1 }}>
@@ -533,7 +534,7 @@ export function OrganizerScreen() {
             <Card key={trip.id} style={{ padding: 14, marginBottom: 12 }}>
               <View style={{ flexDirection: "row", gap: 12 }}>
                 <Image
-                  source={{ uri: `https://picsum.photos/seed/${trip.banner}/200/200` }}
+                  source={{ uri: trip.banner.startsWith("http") ? trip.banner : `https://picsum.photos/seed/${trip.banner}/200/200` }}
                   style={s.thumbSm}
                 />
                 <View style={{ flex: 1 }}>
@@ -571,7 +572,7 @@ export function OrganizerScreen() {
               <Card key={trip.id} style={{ padding: 14, marginBottom: 12 }}>
                 <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
                   <Image
-                    source={{ uri: `https://picsum.photos/seed/${trip.banner}/200/200` }}
+                    source={{ uri: trip.banner.startsWith("http") ? trip.banner : `https://picsum.photos/seed/${trip.banner}/200/200` }}
                     style={s.thumbSm}
                   />
                   <View style={{ flex: 1 }}>
@@ -636,7 +637,7 @@ export function OrganizerScreen() {
           >
             <Text style={s.sectionTitleCaps}>Revenue</Text>
             <Pressable onPress={() => void exportRevenuePdf()} disabled={pdfBusy || !r}>
-              <Text style={{ color: TEAL, fontWeight: "700" }}>{pdfBusy ? "…" : "↑ Export PDF"}</Text>
+              <Text style={{ color: c.text, fontWeight: "700" }}>{pdfBusy ? "…" : "↑ Export PDF"}</Text>
             </Pressable>
           </View>
 
@@ -673,7 +674,7 @@ export function OrganizerScreen() {
 
           {revenueLoading ? (
             <Card style={{ padding: 24, alignItems: "center" }}>
-              <ActivityIndicator color={TEAL} />
+              <ActivityIndicator color={c.text} />
               <Text style={[s.mutedSmall, { marginTop: 12 }]}>Loading revenue…</Text>
             </Card>
           ) : r ? (
@@ -713,7 +714,7 @@ export function OrganizerScreen() {
                   <Card key={stat.label} style={{ padding: 14, width: "48%" }}>
                     <Text style={s.statVal}>{stat.value}</Text>
                     <Text style={s.mutedSmall}>{stat.label}</Text>
-                    <Text style={[s.mutedSmall, { color: c.emerald }]}>{stat.sub}</Text>
+                    <Text style={[s.mutedSmall, { color: c.muted }]}>{stat.sub}</Text>
                   </Card>
                 ))}
               </View>
@@ -733,17 +734,26 @@ export function OrganizerScreen() {
               </Text>
 
               <Card style={{ padding: 12, marginBottom: 12 }}>
-                <Text style={s.cardTitle}>
-                  💰 Real payments — ₹{r.realRevenue.toLocaleString()} · {r.realBookingCount} bookings
-                </Text>
-                <Text style={[s.cardTitle, { marginTop: 8 }]}>
-                  🎟️ Coupon payments — ₹{r.couponRevenue.toLocaleString()} · {r.couponBookingCount}{" "}
-                  bookings
-                </Text>
-                <Text style={[s.cardTitle, { marginTop: 8 }]}>
-                  🆓 Free coupons — {r.freeCouponCount} bookings (₹{r.freeCouponValue.toLocaleString()}{" "}
-                  face value, not paid)
-                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap" }}>
+                  <Wallet color={c.text} size={16} strokeWidth={2} style={{ marginRight: 6 }} />
+                  <Text style={s.cardTitle}>
+                    Real payments — ₹{r.realRevenue.toLocaleString()} · {r.realBookingCount} bookings
+                  </Text>
+                </View>
+                <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                  <Ticket color={c.text} size={16} strokeWidth={2} style={{ marginRight: 6 }} />
+                  <Text style={[s.cardTitle]}>
+                    Coupon payments — ₹{r.couponRevenue.toLocaleString()} · {r.couponBookingCount}{" "}
+                    bookings
+                  </Text>
+                </View>
+                <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                  <BadgeCheck color={c.text} size={16} strokeWidth={2} style={{ marginRight: 6 }} />
+                  <Text style={[s.cardTitle]}>
+                    Free coupons — {r.freeCouponCount} bookings (₹{r.freeCouponValue.toLocaleString()}{" "}
+                    face value, not paid)
+                  </Text>
+                </View>
               </Card>
 
               <View style={{ flexDirection: "row", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
@@ -755,12 +765,12 @@ export function OrganizerScreen() {
                       paddingHorizontal: 12,
                       paddingVertical: 8,
                       borderRadius: 10,
-                      backgroundColor: txnFilter === f ? TEAL : "rgba(255,255,255,0.06)",
+                      backgroundColor: txnFilter === f ? c.text : "rgba(255,255,255,0.06)",
                     }}
                   >
                     <Text
                       style={{
-                        color: txnFilter === f ? "#000" : c.text,
+                        color: txnFilter === f ? c.bg : c.text,
                         fontWeight: "700",
                         textTransform: "capitalize",
                       }}
@@ -794,7 +804,7 @@ export function OrganizerScreen() {
                           <Text style={s.cardTitle}>
                             {t.memberName} · {t.tripTitle}
                           </Text>
-                          <Text style={{ color: c.emerald, fontWeight: "800" }}>
+                          <Text style={{ color: c.text, fontWeight: "800" }}>
                             ₹{Number(t.amountPaid ?? 0).toLocaleString()}
                           </Text>
                           <Text style={s.mutedSmall}>
@@ -1137,11 +1147,11 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
       paddingVertical: 10,
       paddingHorizontal: 16,
       borderRadius: 999,
-      backgroundColor: "rgba(0,229,176,0.15)",
+      backgroundColor: c.surface,
       borderWidth: 1,
-      borderColor: TEAL,
+      borderColor: c.text,
     },
-    payoutBtnText: { color: TEAL, fontWeight: "800", fontSize: 15 },
+    payoutBtnText: { color: c.text, fontWeight: "800", fontSize: 15 },
     h1: { ...typography.h1, color: c.text },
     sectionTitle: { ...typography.h2, color: c.text, marginBottom: 12 },
     muted: { color: c.muted, fontSize: 14 },
@@ -1250,8 +1260,8 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
       marginBottom: 8,
       backgroundColor: c.surface,
     },
-    splitReal: { backgroundColor: TEAL },
-    splitCoupon: { backgroundColor: "rgba(0,229,176,0.35)" },
+    splitReal: { backgroundColor: "#000000" },
+    splitCoupon: { backgroundColor: "rgba(255,255,255,0.2)" },
     periodChip: {
       paddingHorizontal: 14,
       paddingVertical: 8,
@@ -1261,11 +1271,11 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
       borderColor: c.border,
     },
     periodChipOn: {
-      backgroundColor: "rgba(0,229,176,0.15)",
-      borderColor: TEAL,
+      backgroundColor: c.surface,
+      borderColor: c.text,
     },
     periodChipText: { color: c.text, fontWeight: "700", fontSize: 13 },
-    periodChipTextOn: { color: TEAL },
+    periodChipTextOn: { color: c.text },
     datePickRow: {
       padding: 14,
       borderRadius: 12,

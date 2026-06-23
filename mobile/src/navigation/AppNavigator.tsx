@@ -1,5 +1,6 @@
 import React from "react";
 import { ActivityIndicator, View, Text, Pressable, Modal, StyleSheet } from "react-native";
+import { Compass, Briefcase, Map, User } from "lucide-react-native";
 import { useNavigation } from "@react-navigation/native";
 import { NavigationContainer, DarkTheme, DefaultTheme } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
@@ -33,11 +34,10 @@ import { SupportChatScreen } from "../screens/SupportChatScreen";
 import { FAQScreen } from "../screens/FAQScreen";
 import { ReferFriendsScreen } from "../screens/ReferFriendsScreen";
 import { NotificationsScreen } from "../screens/NotificationsScreen";
+import { AppearanceScreen } from "../screens/AppearanceScreen";
 import type { NavigatorScreenParams } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { navigateToRootStack } from "./navigateRoot";
-
-const TEAL_ACCENT = "#00E5B0";
 
 export type MainTabParamList = {
   ExploreTab: undefined;
@@ -61,7 +61,7 @@ function OrganizerHeaderMenu() {
   return (
     <>
       <Pressable onPress={() => setOpen(true)} style={{ marginRight: 16 }} hitSlop={12}>
-        <Text style={{ color: TEAL_ACCENT, fontWeight: "800", fontSize: 22, lineHeight: 24 }}>⋯</Text>
+        <Text style={{ color: tc.text, fontWeight: "800", fontSize: 22, lineHeight: 24 }}>⋯</Text>
       </Pressable>
       <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
         <View style={{ flex: 1 }}>
@@ -104,7 +104,7 @@ function OrganizerHeaderMenu() {
                 navigateToRootStack(navigation, "Payout");
               }}
             >
-              <Text style={{ color: TEAL_ACCENT, fontWeight: "800" }}>Payout</Text>
+              <Text style={{ color: tc.text, fontWeight: "800" }}>Payout</Text>
             </Pressable>
           </View>
         </View>
@@ -143,6 +143,7 @@ export type RootStackParamList = {
   FAQ: undefined;
   ReferFriends: undefined;
   Notifications: undefined;
+  Appearance: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -166,7 +167,12 @@ function MainTabs() {
       <Tab.Screen
         name="ExploreTab"
         component={ExploreScreen}
-        options={{ title: "Explore", tabBarLabel: "Explore", headerShown: false }}
+        options={{
+          title: "Explore",
+          tabBarLabel: "Explore",
+          headerShown: false,
+          tabBarIcon: ({ focused, color }) => <Compass color={color} size={24} strokeWidth={focused ? 2.5 : 1.5} />,
+        }}
       />
       <Tab.Screen
         name="MyTripsTab"
@@ -175,9 +181,19 @@ function MainTabs() {
           title: isOrg ? "Organizer" : "My trips",
           tabBarLabel: isOrg ? "Host" : "Trips",
           headerRight: isOrg === true ? () => <OrganizerHeaderMenu /> : undefined,
+          tabBarIcon: ({ focused, color }) =>
+            isOrg ? (
+              <Briefcase color={color} size={24} strokeWidth={focused ? 2.5 : 1.5} />
+            ) : (
+              <Map color={color} size={24} strokeWidth={focused ? 2.5 : 1.5} />
+            ),
         }}
       />
-      <Tab.Screen name="ProfileTab" component={ProfileScreen} options={{ title: "Profile", headerShown: false }} />
+      <Tab.Screen name="ProfileTab" component={ProfileScreen} options={{
+        title: "Profile",
+        headerShown: false,
+        tabBarIcon: ({ focused, color }) => <User color={color} size={24} strokeWidth={focused ? 2.5 : 1.5} />,
+      }} />
     </Tab.Navigator>
   );
 }
@@ -195,7 +211,7 @@ export function AppNavigator() {
         card: tc.surface,
         text: tc.text,
         border: tc.border,
-        primary: colors.accent,
+        primary: tc.text,
       },
     }),
     [mode, tc.bg, tc.surface, tc.text, tc.border],
@@ -261,6 +277,7 @@ export function AppNavigator() {
             <Stack.Screen name="FAQ" component={FAQScreen} />
             <Stack.Screen name="ReferFriends" component={ReferFriendsScreen} />
             <Stack.Screen name="Notifications" component={NotificationsScreen} />
+            <Stack.Screen name="Appearance" component={AppearanceScreen} />
           </>
         )}
       </Stack.Navigator>

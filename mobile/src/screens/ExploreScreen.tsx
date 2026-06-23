@@ -155,7 +155,7 @@ export function ExploreScreen() {
           <Pressable style={s.card} onPress={() => openTrip(item.id)}>
             <Image
               source={{
-                uri: `https://picsum.photos/seed/trip-${item.id}/800/500`,
+                uri: item.banner_url ?? `https://picsum.photos/seed/trip-${item.id}/800/500`,
               }}
               style={s.banner}
             />

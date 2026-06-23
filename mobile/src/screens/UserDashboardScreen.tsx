@@ -8,6 +8,7 @@ import {
   Image,
   Pressable,
 } from "react-native";
+import { Calendar } from "lucide-react-native";
 import { useNavigation, type NavigationProp } from "@react-navigation/native";
 import { apiFetch } from "../api/client";
 import type { RootStackParamList } from "../navigation/AppNavigator";
@@ -119,7 +120,7 @@ export function UserDashboardScreen() {
             <Text style={s.muted}>Loading your booked trips…</Text>
           ) : upcomingList.length === 0 ? (
             <Card style={{ padding: 32, alignItems: "center" }}>
-              <Text style={{ fontSize: 40, marginBottom: 8 }}>📅</Text>
+              <Calendar color={c.muted} size={40} strokeWidth={2} style={{ marginBottom: 8 }} />
               <Text style={[s.muted, { marginBottom: 16 }]}>No upcoming trips</Text>
               <PrimaryButton title="Explore Trips" onPress={goExploreTab} />
             </Card>

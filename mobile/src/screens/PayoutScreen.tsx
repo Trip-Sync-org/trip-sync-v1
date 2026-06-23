@@ -1,29 +1,29 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
-  ScrollView,
-  StyleSheet,
   Pressable,
-  TextInput,
-  Modal,
+  StyleSheet,
+  ScrollView,
+  RefreshControl,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Alert,
+  Platform,
+  TextInput,
+  KeyboardAvoidingView,
+  Modal,
+  Dimensions,
 } from "react-native";
-import { useNavigation } from "@react-navigation/native";
-import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import type { RootStackParamList } from "../navigation/AppNavigator";
 import { apiFetch, readApiErrorMessage } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { typography, useThemeColors } from "../theme";
-import type { RootStackParamList } from "../navigation/AppNavigator";
 import { navigateToRootStack } from "../navigation/navigateRoot";
 import { useOrganizerPaymentsSocket } from "../hooks/useOrganizerPaymentsSocket";
 import { buildPayoutHistoryHtml, shareRevenuePdf } from "../lib/revenuePdf";
-
-const TEAL = "#00E5B0";
 
 type Balance = {
   eligibleForPayout: number;
@@ -33,242 +33,194 @@ type Balance = {
 };
 
 type RevenueMini = {
-  totalGrossRevenue: number;
-  platformFee: number;
-  eligibleForPayout: number;
+  totalBookings: number;
+  totalRevenue: number;
 };
 
-type PayoutDetailRow = {
-  payout_method?: string;
-  upi_id?: string | null;
-  bank_name?: string | null;
-  bank_account_number_masked?: string | null;
+type PayoutRow = {
+  id: string;
+  amount: number;
+  status: "completed" | "processing" | "pending" | "failed";
+  createdAt: string;
+  processedAt?: string | null;
+  utr?: string | null;
+  accountLabel?: string | null;
+  note?: string | null;
 };
 
-type PayoutHistoryRow = {
-  id: number;
-  amount?: number;
-  status?: string;
-  requested_at?: string;
-  processed_at?: string | null;
-  payout_method_snapshot?: string | null;
-  failure_reason?: string | null;
+type BankAccount = {
+  id: string;
+  accountNumber: string;
+  ifsc: string;
+  bankName?: string;
+  accountHolderName?: string;
 };
 
-export function PayoutScreen() {
+type Props = NativeStackScreenProps<RootStackParamList, "Payout">;
+
+const { width: SW } = Dimensions.get("window");
+
+export function PayoutScreen({ navigation }: Props) {
   const { user } = useAuth();
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const insets = useSafeAreaInsets();
   const c = useThemeColors();
+  const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
-  const historySectionY = useRef(0);
-
-  const s = useMemo(() => makeStyles(c), [c]);
-
-  const [balance, setBalance] = useState<Balance>({
-    eligibleForPayout: 0,
-    totalPaidOut: 0,
-    pendingPayout: 0,
-    availableBalance: 0,
-  });
-  const [mini, setMini] = useState<RevenueMini>({
-    totalGrossRevenue: 0,
-    platformFee: 0,
-    eligibleForPayout: 0,
-  });
-  const [payoutDetails, setPayoutDetails] = useState<PayoutDetailRow | null>(null);
-  const [history, setHistory] = useState<PayoutHistoryRow[]>([]);
-  const [amountStr, setAmountStr] = useState("");
   const [loading, setLoading] = useState(true);
-  const [requesting, setRequesting] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [balance, setBalance] = useState<Balance | null>(null);
+  const [revenueMini, setRevenueMini] = useState<RevenueMini | null>(null);
+  const [payouts, setPayouts] = useState<PayoutRow[]>([]);
+  const [banks, setBanks] = useState<BankAccount[]>([]);
+  const [selectedBankId, setSelectedBankId] = useState<string | null>(null);
+  const [amount, setAmount] = useState<number>(0);
+  const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
+  const [payoutError, setPayoutError] = useState<string | null>(null);
+  const [historyModal, setHistoryModal] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [showBankForm, setShowBankForm] = useState(false);
+  const [newBank, setNewBank] = useState({ accountNumber: "", ifsc: "", accountHolderName: "" });
+  const [bankBusy, setBankBusy] = useState(false);
 
-  const uid = user?.id != null ? Number(user.id) : NaN;
+  const maxPayout = balance?.eligibleForPayout ?? 0;
+  const disabledReason =
+    banks.length === 0
+      ? "Add a bank account first"
+      : amount <= 0
+        ? "Enter a payout amount"
+        : amount > maxPayout
+          ? `Maximum eligible: ₹${maxPayout.toLocaleString("en-IN")}`
+          : null;
+  const canPayout = !disabledReason && !busy;
 
-  const fetchBalanceOnly = useCallback(async () => {
-    if (!Number.isFinite(uid)) return;
-    const res = await apiFetch(`/api/organizer/payout/balance/${uid}`);
-    if (!res.ok) return;
-    const j = (await res.json()) as Balance;
-    setBalance({
-      eligibleForPayout: Number(j.eligibleForPayout ?? 0),
-      totalPaidOut: Number(j.totalPaidOut ?? 0),
-      pendingPayout: Number(j.pendingPayout ?? 0),
-      availableBalance: Number(j.availableBalance ?? 0),
-    });
-  }, [uid]);
-
-  const loadAll = useCallback(async () => {
-    if (!Number.isFinite(uid)) return;
-    setLoading(true);
-    setError(null);
+  const refresh = useCallback(async () => {
+    if (!user?.id) return;
     try {
-      const [revRes, histRes, detRes, balRes] = await Promise.all([
-        apiFetch(`/api/organizer/revenue/${uid}`),
-        apiFetch(`/api/organizer/payout/history/${uid}`),
-        apiFetch(`/api/organizer/payout-details/${uid}`),
-        apiFetch(`/api/organizer/payout/balance/${uid}`),
+      setRefreshing(true);
+      const [balRes, revRes, payRes, bankRes] = await Promise.all([
+        apiFetch(`/api/organizers/${user.id}/payout-balance`),
+        apiFetch(`/api/organizer/revenue/mini/${encodeURIComponent(String(user.id))}`),
+        apiFetch(`/api/organizers/${user.id}/payouts`),
+        apiFetch(`/api/organizers/${user.id}/bank-accounts`),
       ]);
-      if (revRes.ok) {
-        const r = (await revRes.json()) as RevenueMini;
-        setMini({
-          totalGrossRevenue: Number(r.totalGrossRevenue ?? 0),
-          platformFee: Number(r.platformFee ?? 0),
-          eligibleForPayout: Number(r.eligibleForPayout ?? 0),
-        });
-      }
       if (balRes.ok) {
-        const j = (await balRes.json()) as Balance;
-        setBalance({
-          eligibleForPayout: Number(j.eligibleForPayout ?? 0),
-          totalPaidOut: Number(j.totalPaidOut ?? 0),
-          pendingPayout: Number(j.pendingPayout ?? 0),
-          availableBalance: Number(j.availableBalance ?? 0),
-        });
+        const b = (await balRes.json()) as Balance;
+        setBalance(b);
       }
-      if (histRes.ok) setHistory((await histRes.json()) as PayoutHistoryRow[]);
-      if (detRes.ok) {
-        const row = await detRes.json();
-        setPayoutDetails(row && typeof row === "object" ? (row as PayoutDetailRow) : null);
+      if (revRes.ok) {
+        const r = (await revRes.json()) as { totalBookings?: number; totalRevenue?: number };
+        setRevenueMini({ totalBookings: r.totalBookings ?? 0, totalRevenue: r.totalRevenue ?? 0 });
       }
+      if (payRes.ok) {
+        const rows = (await payRes.json()) as PayoutRow[];
+        setPayouts(Array.isArray(rows) ? rows.reverse() : []);
+      }
+      if (bankRes.ok) {
+        const bs = (await bankRes.json()) as BankAccount[];
+        setBanks(Array.isArray(bs) ? bs : []);
+        if (bs.length > 0 && !selectedBankId) setSelectedBankId(bs[0].id);
+      }
+    } catch {
+      /* keep partial */
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [uid]);
-
-  useEffect(() => {
-    void loadAll();
-  }, [loadAll]);
-
-  useEffect(() => {
-    const t = setInterval(() => {
-      void fetchBalanceOnly();
-    }, 30000);
-    return () => clearInterval(t);
-  }, [fetchBalanceOnly]);
+  }, [user?.id, selectedBankId]);
 
   useOrganizerPaymentsSocket({
-    userId: Number.isFinite(uid) ? uid : undefined,
+    userId: user?.id != null ? Number(user.id) : undefined,
     role: user?.activeRole,
-    onPayoutUpdated: () => {
-      void loadAll();
-    },
+    onPaymentConfirmed: () => void refresh(),
+    onPayoutUpdated: () => void refresh(),
   });
 
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      title: "Payout Dashboard",
-      headerRight: () => (
-        <Pressable
-          onPress={() =>
-            scrollRef.current?.scrollTo({ y: Math.max(0, historySectionY.current - 12), animated: true })
-          }
-          hitSlop={12}
-        >
-          <Text style={{ color: TEAL, fontWeight: "700", fontSize: 15 }}>History</Text>
-        </Pressable>
-      ),
-    });
-  }, [navigation]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
-  const hasMethod = payoutDetails != null;
-  const method = String(payoutDetails?.payout_method ?? "") === "bank" ? "bank" : "upi";
-  const methodSummary =
-    method === "upi"
-      ? `UPI — ${String(payoutDetails?.upi_id ?? "").trim()}`
-      : `Bank — ${String(payoutDetails?.bank_name ?? "").trim()} ${String(payoutDetails?.bank_account_number_masked ?? "").trim()}`;
-
-  const avail = balance.availableBalance;
-  const pendingAmt = balance.pendingPayout;
-  const hasPending = pendingAmt > 0.01;
-
-  const parsedAmount = parseFloat(amountStr.replace(/,/g, ""));
-  const amount = Number.isFinite(parsedAmount) ? parsedAmount : NaN;
-  const validAmount =
-    Number.isFinite(amount) && amount >= 100 && amount <= avail + 0.001 && !hasPending;
-
-  const setMax = () => setAmountStr(avail > 0 ? String(Math.floor(avail * 100) / 100) : "");
-
-  const submitRequest = async () => {
-    if (!Number.isFinite(uid) || !Number.isFinite(amount)) return;
-    setRequesting(true);
-    setError(null);
+  const requestPayout = async () => {
+    if (!user?.id || !canPayout) return;
+    setBusy(true);
+    setPayoutError(null);
     try {
-      const res = await apiFetch("/api/organizer/payout/request", {
+      const res = await apiFetch(`/api/organizers/${user.id}/payouts`, {
         method: "POST",
-        body: JSON.stringify({ organizerId: uid, amount }),
+        body: JSON.stringify({
+          amount: Math.round(amount),
+          bank_account_id: selectedBankId,
+        }),
       });
-      const body = (await res.json().catch(() => ({}))) as {
-        error?: string;
-        message?: string;
-        availableBalance?: number;
-        pendingPayout?: number;
-        eligibleForPayout?: number;
-        totalPaidOut?: number;
-      };
       if (!res.ok) {
-        setError(body.error ?? (await readApiErrorMessage(res)));
+        const msg = await readApiErrorMessage(res);
+        setPayoutError(msg);
         return;
       }
-      setConfirmOpen(false);
-      setAmountStr("");
-      setSuccess(`✓ Payout of ₹${amount.toLocaleString("en-IN")} requested! Processing in 2-3 days.`);
-      await loadAll();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Request failed");
+      setSuccess(`Payout of ₹${Math.round(amount).toLocaleString("en-IN")} initiated.`);
+      setTimeout(() => setSuccess(null), 3000);
+      setAmount(0);
+      void refresh();
     } finally {
-      setRequesting(false);
+      setBusy(false);
     }
   };
 
-  const exportHistoryPdf = async () => {
+  const addBankAccount = async () => {
+    if (!user?.id) return;
+    if (!newBank.accountNumber.trim() || !newBank.ifsc.trim() || !newBank.accountHolderName.trim()) {
+      Alert.alert("Bank account", "All fields are required.");
+      return;
+    }
+    setBankBusy(true);
     try {
-      const html = buildPayoutHistoryHtml(
-        history as unknown as Array<Record<string, unknown>>,
-        user?.name ?? "Organizer",
-        new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }),
-      );
-      await shareRevenuePdf(html);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      Alert.alert("Export failed", msg || "Could not generate or share PDF.");
-      setError(msg);
+      const res = await apiFetch(`/api/organizers/${user.id}/bank-accounts`, {
+        method: "POST",
+        body: JSON.stringify({
+          account_number: newBank.accountNumber.trim(),
+          ifsc: newBank.ifsc.trim().toUpperCase(),
+          account_holder_name: newBank.accountHolderName.trim(),
+        }),
+      });
+      if (!res.ok) {
+        Alert.alert("Bank account", await readApiErrorMessage(res));
+        return;
+      }
+      setShowBankForm(false);
+      setNewBank({ accountNumber: "", ifsc: "", accountHolderName: "" });
+      const bankRes = await apiFetch(`/api/organizers/${user.id}/bank-accounts`);
+      if (bankRes.ok) {
+        const bs = (await bankRes.json()) as BankAccount[];
+        setBanks(Array.isArray(bs) ? bs : []);
+      }
+    } finally {
+      setBankBusy(false);
     }
   };
 
-  const goProfile = () => {
-    navigateToRootStack(navigation, "Main", { screen: "ProfileTab" });
+  const exportPayoutHistory = async () => {
+    if (!user?.id) return;
+    setPdfBusy(true);
+    try {
+      const html = buildPayoutHistoryHtml({
+        organizerName: user.name ?? "Organizer",
+        rows: payouts.map((r) => ({
+          amount: r.amount,
+          status: r.status,
+          date: r.createdAt,
+          utr: r.utr ?? undefined,
+        })),
+      });
+      await shareRevenuePdf(html);
+    } catch {
+      Alert.alert("Export failed");
+    } finally {
+      setPdfBusy(false);
+    }
   };
-
-  const goRevenue = () => {
-    navigateToRootStack(navigation, "Main", {
-      screen: "MyTripsTab",
-      params: { openTab: "Revenue Analytics" },
-    });
-  };
-
-  const disabledReason = !hasMethod
-    ? "Add payout method first"
-    : hasPending
-      ? "Pending request in progress"
-      : Number.isFinite(amount) && amount < 100
-        ? "Minimum ₹100"
-        : Number.isFinite(amount) && amount > avail + 0.01
-          ? "Insufficient balance"
-          : !Number.isFinite(amount) || amount <= 0
-            ? "Enter an amount"
-            : null;
-
-  const primaryLabel =
-    disabledReason != null
-      ? disabledReason
-      : `Request Payout of ₹${Number.isFinite(amount) ? amount.toLocaleString("en-IN") : "0"}`;
 
   const badgeForStatus = (s: string) => {
     const x = s.toLowerCase();
-    if (x === "completed") return { bg: "rgba(16,185,129,0.25)", fg: "#34d399", label: "COMPLETED ✓" };
+    if (x === "completed") return { bg: "rgba(0,0,0,0.1)", fg: "#000000", label: "COMPLETED ✓" };
     if (x === "processing") return { bg: "rgba(59,130,246,0.25)", fg: "#60a5fa", label: "PROCESSING" };
     if (x === "pending") return { bg: "rgba(245,158,11,0.25)", fg: "#fbbf24", label: "PENDING" };
     if (x === "failed") return { bg: "rgba(248,113,113,0.25)", fg: "#f87171", label: "FAILED" };
@@ -287,7 +239,7 @@ export function PayoutScreen() {
       >
         {loading ? (
           <View style={{ paddingVertical: 40, alignItems: "center" }}>
-            <ActivityIndicator color={TEAL} />
+            <ActivityIndicator color={c.text} />
           </View>
         ) : null}
 
@@ -299,176 +251,232 @@ export function PayoutScreen() {
 
         {/* Section A — Balance */}
         <View style={s.balanceCard}>
-          <Text style={typography.label}>AVAILABLE BALANCE</Text>
-          <Text style={s.balanceAmt}>₹ {avail.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</Text>
-          <Text style={s.balanceSub}>
-            Eligible: ₹{balance.eligibleForPayout.toLocaleString("en-IN")} · Paid: ₹
-            {balance.totalPaidOut.toLocaleString("en-IN")}
+          <Text style={typography.label}>Available Balance</Text>
+          <Text style={[s.balanceAmt, { color: c.text }]}>
+            ₹{Number(balance?.availableBalance ?? 0).toLocaleString("en-IN")}
           </Text>
-          <Text style={s.balanceSub}>Pending: ₹{pendingAmt.toLocaleString("en-IN")}</Text>
-        </View>
-
-        {/* Section B — Request */}
-        <Text style={[typography.label, { marginTop: 24, marginBottom: 8 }]}>REQUEST PAYOUT</Text>
-        <View style={s.amountRow}>
-          <Text style={s.rupee}>₹</Text>
-          <TextInput
-            style={s.amountInput}
-            placeholder="0"
-            placeholderTextColor={c.muted}
-            keyboardType="decimal-pad"
-            value={amountStr}
-            onChangeText={setAmountStr}
-          />
-          <Pressable style={s.maxBtn} onPress={setMax}>
-            <Text style={s.maxBtnText}>MAX</Text>
-          </Pressable>
-        </View>
-
-        {Number.isFinite(amount) && amount < 100 && amountStr.length > 0 ? (
-          <Text style={s.err}>Minimum payout is ₹100</Text>
-        ) : null}
-        {Number.isFinite(amount) && amount > avail + 0.01 ? (
-          <Text style={s.err}>Exceeds available balance</Text>
-        ) : null}
-        {hasPending ? <Text style={s.warn}>You have a pending payout request</Text> : null}
-        {Number.isFinite(amount) && validAmount ? (
-          <Text style={s.ok}>✓ Ready to request</Text>
-        ) : null}
-        {error ? <Text style={s.err}>{error}</Text> : null}
-
-        <View style={s.methodBox}>
-          <Text style={s.methodLabel}>{hasMethod ? `Via: ${methodSummary}` : "No payout method saved"}</Text>
-          <Pressable onPress={goProfile}>
-            <Text style={s.changeLink}>Change →</Text>
-          </Pressable>
-        </View>
-
-        <Pressable
-          style={[s.primaryBtn, (!validAmount || !hasMethod || hasPending || requesting) && s.primaryBtnDis]}
-          disabled={!validAmount || !hasMethod || hasPending || requesting}
-          onPress={() => {
-            setError(null);
-            if (!validAmount || !hasMethod || hasPending) return;
-            setConfirmOpen(true);
-          }}
-        >
-          {requesting ? (
-            <ActivityIndicator color="#000" />
-          ) : (
-            <Text style={s.primaryBtnText}>{primaryLabel}</Text>
-          )}
-        </Pressable>
-
-        {/* Section C — Revenue mini */}
-        <Text style={[typography.label, { marginTop: 28, marginBottom: 10 }]}>REVENUE (SUMMARY)</Text>
-        <View style={s.miniGrid}>
-          <View style={s.miniCell}>
-            <Text style={s.miniVal}>₹{mini.totalGrossRevenue.toLocaleString("en-IN")}</Text>
-            <Text style={s.miniLbl}>Gross</Text>
-          </View>
-          <View style={s.miniCell}>
-            <Text style={s.miniVal}>₹{mini.platformFee.toLocaleString("en-IN")}</Text>
-            <Text style={s.miniLbl}>Platform fee (10%)</Text>
-          </View>
-          <View style={s.miniCell}>
-            <Text style={[s.miniVal, { color: TEAL }]}>₹{mini.eligibleForPayout.toLocaleString("en-IN")}</Text>
-            <Text style={s.miniLbl}>Eligible for you</Text>
+          <View style={s.balanceMeta}>
+            <View>
+              <Text style={s.metaLabel}>Eligible for payout</Text>
+              <Text style={[s.metaVal, { color: c.text }]}>
+                ₹{Number(balance?.eligibleForPayout ?? 0).toLocaleString("en-IN")}
+              </Text>
+            </View>
+            <View style={{ alignItems: "flex-end" }}>
+              <Text style={s.metaLabel}>Total paid out</Text>
+              <Text style={[s.metaVal, { color: c.text }]}>
+                ₹{Number(balance?.totalPaidOut ?? 0).toLocaleString("en-IN")}
+              </Text>
+            </View>
           </View>
         </View>
-        <Pressable onPress={goRevenue} style={{ marginBottom: 8 }}>
-          <Text style={s.link}>See full breakdown →</Text>
-        </Pressable>
 
-        {/* Section D — History */}
-        <View
-          onLayout={(e) => {
-            historySectionY.current = e.nativeEvent.layout.y;
-          }}
-          style={{ marginTop: 16 }}
-        >
-          <View style={s.historyHeader}>
-            <Text style={typography.label}>PAYOUT HISTORY</Text>
-            <Pressable onPress={() => void exportHistoryPdf()} hitSlop={8}>
-              <Text style={s.exportLink}>↑ Export PDF</Text>
+        {/* Section B — Bank */}
+        <View style={s.card}>
+          <View style={s.rowBetween}>
+            <Text style={typography.label}>Bank Account</Text>
+            <Pressable onPress={() => setShowBankForm((v) => !v)}>
+              <Text style={[s.changeLink, { color: c.text }]}>{banks.length > 0 ? "+ Add" : "Add bank"}</Text>
             </Pressable>
           </View>
-
-          {history.length === 0 ? (
-            <Text style={s.empty}>
-              No payout requests yet.{"\n"}Request your first payout above.
-            </Text>
-          ) : (
-            history.map((p) => {
-              const b = badgeForStatus(String(p.status ?? ""));
-              return (
-                <View key={p.id} style={s.histRow}>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                      <Text style={s.histAmt}>₹{Number(p.amount ?? 0).toLocaleString("en-IN")}</Text>
-                      <View style={[s.badge, { backgroundColor: b.bg }]}>
-                        <Text style={[s.badgeTxt, { color: b.fg }]}>{b.label}</Text>
-                      </View>
-                    </View>
-                    <Text style={s.histMeta}>{p.payout_method_snapshot ?? "—"}</Text>
-                    <Text style={s.histMeta}>
-                      Requested:{" "}
-                      {p.requested_at
-                        ? new Date(p.requested_at).toLocaleDateString("en-IN", {
-                            day: "numeric",
-                            month: "short",
-                            year: "numeric",
-                          })
-                        : "—"}
+          {banks.length > 0 ? (
+            <>
+              {banks.map((b) => (
+                <Pressable
+                  key={b.id}
+                  onPress={() => setSelectedBankId(b.id)}
+                  style={[s.bankRow, selectedBankId === b.id && s.bankRowActive]}
+                >
+                  <View>
+                    <Text style={{ color: c.text, fontWeight: "700" }}>
+                      {b.bankName ?? "Bank"} · {b.accountNumber.slice(-4)}
                     </Text>
-                    {p.processed_at ? (
-                      <Text style={s.histMeta}>
-                        Processed:{" "}
-                        {new Date(p.processed_at).toLocaleDateString("en-IN", {
-                          day: "numeric",
-                          month: "short",
-                          year: "numeric",
-                        })}
-                      </Text>
-                    ) : null}
-                    {String(p.status ?? "").toLowerCase() === "failed" && p.failure_reason ? (
-                      <Text style={s.errSmall}>{p.failure_reason}</Text>
-                    ) : null}
+                    <Text style={s.mutedSmall}>
+                      {b.accountHolderName} · {b.ifsc}
+                    </Text>
+                  </View>
+                  <Ionicons
+                    name={selectedBankId === b.id ? "radio-button-on" : "radio-button-off"}
+                    size={20}
+                    color={selectedBankId === b.id ? c.text : c.muted}
+                  />
+                </Pressable>
+              ))}
+            </>
+          ) : (
+            <Text style={s.mutedSmall}>No bank account added yet</Text>
+          )}
+        </View>
+
+        {showBankForm ? (
+          <View style={s.bankForm}>
+            <Text style={typography.label}>New Bank Account</Text>
+            <TextInput
+              style={s.input}
+              placeholder="Account holder name"
+              placeholderTextColor={c.muted}
+              value={newBank.accountHolderName}
+              onChangeText={(t) => setNewBank((p) => ({ ...p, accountHolderName: t }))}
+            />
+            <TextInput
+              style={s.input}
+              placeholder="Account number"
+              placeholderTextColor={c.muted}
+              keyboardType="number-pad"
+              value={newBank.accountNumber}
+              onChangeText={(t) => setNewBank((p) => ({ ...p, accountNumber: t }))}
+            />
+            <TextInput
+              style={s.input}
+              placeholder="IFSC code"
+              placeholderTextColor={c.muted}
+              autoCapitalize="characters"
+              value={newBank.ifsc}
+              onChangeText={(t) => setNewBank((p) => ({ ...p, ifsc: t }))}
+            />
+            <Pressable
+              style={[s.maxBtn, bankBusy && { opacity: 0.65 }]}
+              onPress={() => void addBankAccount()}
+              disabled={bankBusy}
+            >
+              <Text style={[s.maxBtnText, { color: c.text }]}>
+                {bankBusy ? "Saving…" : "Save Account"}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {/* Section C — Payout Amount */}
+        <View style={s.card}>
+          <Text style={typography.label}>Payout Amount (₹)</Text>
+          <View style={s.amtRow}>
+            <TextInput
+              style={s.amtInput}
+              keyboardType="number-pad"
+              placeholder="0"
+              placeholderTextColor={c.muted}
+              value={amount > 0 ? String(amount) : ""}
+              onChangeText={(t) => setAmount(parseInt(t.replace(/\D/g, ""), 10) || 0)}
+            />
+            <Pressable style={s.maxBtn} onPress={() => setAmount(maxPayout)}>
+              <Text style={[s.maxBtnText, { color: c.text }]}>Max</Text>
+            </Pressable>
+          </View>
+          <Text style={s.mutedSmall}>
+            Eligible: ₹{maxPayout.toLocaleString("en-IN")}
+          </Text>
+          {payoutError ? (
+            <View style={s.errorBox}>
+              <Text style={{ color: c.danger, fontSize: 12 }}>{payoutError}</Text>
+            </View>
+          ) : null}
+          <Pressable
+            style={[s.primaryCta, !canPayout && { opacity: 0.5 }]}
+            onPress={() => void requestPayout()}
+            disabled={!canPayout}
+          >
+            {busy ? (
+              <ActivityIndicator color="#000" />
+            ) : (
+              <Text style={s.primaryCtaText}>
+                {disabledReason ?? "Request Payout"}
+              </Text>
+            )}
+          </Pressable>
+          {disabledReason ? (
+            <Text style={s.mutedSmall}>{disabledReason}</Text>
+          ) : null}
+        </View>
+
+        {/* Section D — Mini Revenue */}
+        {revenueMini ? (
+          <View style={[s.card, { flexDirection: "row", justifyContent: "space-between" }]}>
+            <View>
+              <Text style={typography.label}>Total Revenue</Text>
+              <Text style={[s.miniVal, { color: c.text }]}>
+                ₹{revenueMini.totalRevenue.toLocaleString("en-IN")}
+              </Text>
+            </View>
+            <View style={{ alignItems: "flex-end" }}>
+              <Text style={typography.label}>Bookings</Text>
+              <Text style={[s.miniVal, { color: c.text }]}>{revenueMini.totalBookings}</Text>
+            </View>
+          </View>
+        ) : null}
+
+        {/* Section E — History */}
+        <View style={[s.card, { marginTop: 12 }]}>
+          <View style={s.rowBetween}>
+            <Text style={typography.label}>Payout History</Text>
+            <Pressable onPress={() => setHistoryModal(true)}>
+              <Text style={[s.link, { color: c.text }]}>View All</Text>
+            </Pressable>
+          </View>
+          {payouts.length === 0 ? (
+            <Text style={s.mutedSmall}>No payouts yet</Text>
+          ) : (
+            payouts.slice(0, 5).map((p) => {
+              const b = badgeForStatus(p.status);
+              return (
+                <View key={p.id} style={s.historyRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: c.text, fontWeight: "700" }}>
+                      ₹{p.amount.toLocaleString("en-IN")}
+                    </Text>
+                    <Text style={s.mutedSmall}>
+                      {p.createdAt.slice(0, 10)} · {p.accountLabel ?? ""}
+                    </Text>
+                  </View>
+                  <View style={[s.statusBadge, { backgroundColor: b.bg }]}>
+                    <Text style={{ color: b.fg, fontSize: 9, fontWeight: "800" }}>{b.label}</Text>
                   </View>
                 </View>
               );
             })
           )}
+          <Pressable
+            style={[s.exportLink]}
+            onPress={() => void exportPayoutHistory()}
+          >
+            <Text style={[s.exportLinkText, { color: c.text }]}>
+              {pdfBusy ? "Exporting…" : "↑ Export PDF"}
+            </Text>
+          </Pressable>
         </View>
       </ScrollView>
 
-      <Modal visible={confirmOpen} transparent animationType="slide">
-        <View style={s.sheetOverlay}>
-          <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setConfirmOpen(false)} />
-          <View style={[s.sheet, { paddingBottom: insets.bottom + 16 }]}>
-            <Text style={s.sheetTitle}>Confirm Payout Request</Text>
-            <Text style={s.sheetRow}>
-              Amount: <Text style={s.sheetEm}>₹ {Number.isFinite(amount) ? amount.toLocaleString("en-IN") : "—"}</Text>
-            </Text>
-            <Text style={s.sheetMuted}>Platform fee already deducted</Text>
-            <Text style={s.sheetRow}>Via: {methodSummary}</Text>
-            <Text style={s.sheetMuted}>Timeline: 2–3 business days</Text>
-            <View style={{ flexDirection: "row", gap: 12, marginTop: 20 }}>
-              <Pressable style={s.btnWhite} onPress={() => setConfirmOpen(false)}>
-                <Text style={s.btnWhiteText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={s.btnTeal}
-                onPress={() => void submitRequest()}
-                disabled={requesting}
-              >
-                {requesting ? (
-                  <ActivityIndicator color="#000" />
-                ) : (
-                  <Text style={s.btnTealText}>Confirm & Request</Text>
-                )}
+      <Modal visible={historyModal} transparent animationType="slide">
+        <View style={s.modalWrap}>
+          <View style={s.modalSheet}>
+            <View style={s.sheetHeader}>
+              <Text style={typography.label}>Payout History</Text>
+              <Pressable onPress={() => setHistoryModal(false)}>
+                <Ionicons name="close" size={24} color={c.text} />
               </Pressable>
             </View>
+            {payouts.length === 0 ? (
+              <Text style={[s.mutedSmall, { padding: 20 }]}>No payouts yet.</Text>
+            ) : (
+              <ScrollView style={{ maxHeight: 360 }}>
+                {payouts.map((p) => {
+                  const b = badgeForStatus(p.status);
+                  return (
+                    <View key={p.id} style={s.historyRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: c.text, fontWeight: "700" }}>
+                          ₹{p.amount.toLocaleString("en-IN")}
+                        </Text>
+                        <Text style={s.mutedSmall}>{p.createdAt.slice(0, 10)}</Text>
+                        {p.utr ? <Text style={s.mutedSmall}>UTR: {p.utr}</Text> : null}
+                      </View>
+                      <View style={[s.statusBadge, { backgroundColor: b.bg }]}>
+                        <Text style={{ color: b.fg, fontSize: 9, fontWeight: "800" }}>{b.label}</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            )}
           </View>
         </View>
       </Modal>
@@ -476,118 +484,127 @@ export function PayoutScreen() {
   );
 }
 
-const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
-  StyleSheet.create({
-    balanceCard: {
-      backgroundColor: c.surface,
-      borderRadius: 16,
-      padding: 20,
-      borderWidth: 1,
-      borderColor: "rgba(0,229,176,0.35)",
-    },
-    balanceAmt: { fontSize: 32, fontWeight: "800", color: TEAL, marginTop: 8 },
-    balanceSub: { color: c.muted, marginTop: 6, fontSize: 14 },
-    amountRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      backgroundColor: c.surface,
-      borderRadius: 12,
-      paddingHorizontal: 12,
-      borderWidth: 1,
-      borderColor: c.border,
-    },
-    rupee: { color: c.text, fontSize: 20, fontWeight: "700", marginRight: 4 },
-    amountInput: { flex: 1, color: c.text, fontSize: 22, fontWeight: "700", paddingVertical: 14 },
-    maxBtn: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "rgba(0,229,176,0.15)", borderRadius: 8 },
-    maxBtnText: { color: TEAL, fontWeight: "800", fontSize: 13 },
-    methodBox: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      marginTop: 16,
-      marginBottom: 12,
-    },
-    methodLabel: { color: c.text, flex: 1, fontSize: 14 },
-    changeLink: { color: TEAL, fontWeight: "700" },
-    primaryBtn: {
-      backgroundColor: TEAL,
-      borderRadius: 14,
-      paddingVertical: 16,
-      alignItems: "center",
-    },
-    primaryBtnDis: { backgroundColor: "#333" },
-    primaryBtnText: { color: "#000", fontWeight: "800", fontSize: 16 },
-    miniGrid: { flexDirection: "row", gap: 8 },
-    miniCell: {
-      flex: 1,
-      backgroundColor: c.surface,
-      borderRadius: 12,
-      padding: 12,
-      alignItems: "center",
-    },
-    miniVal: { color: c.text, fontWeight: "800", fontSize: 15 },
-    miniLbl: { color: c.muted, fontSize: 10, marginTop: 4, textAlign: "center" },
-    link: { color: TEAL, fontWeight: "700", marginTop: 10 },
-    historyHeader: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      marginBottom: 12,
-    },
-    exportLink: { color: TEAL, fontWeight: "700", fontSize: 13 },
-    empty: { color: c.muted, lineHeight: 22, marginBottom: 16 },
-    histRow: {
-      backgroundColor: c.surface,
-      borderRadius: 14,
-      padding: 14,
-      marginBottom: 10,
-      borderWidth: 1,
-      borderColor: c.border,
-    },
-    histAmt: { color: c.text, fontSize: 18, fontWeight: "800" },
-    histMeta: { color: c.muted, fontSize: 12, marginTop: 4 },
-    badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-    badgeTxt: { fontSize: 10, fontWeight: "800" },
-    err: { color: c.danger, marginTop: 6, fontSize: 13 },
-    errSmall: { color: c.danger, marginTop: 4, fontSize: 12 },
-    warn: { color: c.warn, marginTop: 6, fontSize: 13 },
-    ok: { color: c.success, marginTop: 6, fontSize: 13 },
-    successBanner: {
-      backgroundColor: "rgba(16,185,129,0.15)",
-      padding: 12,
-      borderRadius: 12,
-      marginBottom: 16,
-    },
-    successText: { color: c.success, fontWeight: "600" },
-    sheetOverlay: {
-      flex: 1,
-      justifyContent: "flex-end",
-      backgroundColor: "rgba(0,0,0,0.7)",
-    },
-    sheet: {
-      backgroundColor: c.surface,
-      borderTopLeftRadius: 20,
-      borderTopRightRadius: 20,
-      padding: 20,
-    },
-    sheetTitle: { color: c.text, fontSize: 18, fontWeight: "800", marginBottom: 12 },
-    sheetRow: { color: c.text, marginTop: 6, fontSize: 15 },
-    sheetEm: { fontWeight: "800", color: TEAL },
-    sheetMuted: { color: c.muted, marginTop: 4, fontSize: 13 },
-    btnWhite: {
-      flex: 1,
-      backgroundColor: "#FFFFFF",
-      borderRadius: 12,
-      paddingVertical: 14,
-      alignItems: "center",
-    },
-    btnWhiteText: { color: "#000", fontWeight: "800" },
-    btnTeal: {
-      flex: 1,
-      backgroundColor: TEAL,
-      borderRadius: 12,
-      paddingVertical: 14,
-      alignItems: "center",
-    },
-    btnTealText: { color: "#000", fontWeight: "800" },
-  });
+const s = StyleSheet.create({
+  card: {
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+  },
+  balanceCard: {
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 12,
+    marginTop: 8,
+  },
+  balanceAmt: { fontSize: 32, fontWeight: "800", marginTop: 8 },
+  balanceMeta: { flexDirection: "row", justifyContent: "space-between", marginTop: 14 },
+  metaLabel: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: "700" },
+  metaVal: { fontSize: 16, fontWeight: "800", marginTop: 4 },
+  rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+  changeLink: { fontWeight: "700", fontSize: 13 },
+  bankRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    borderBottomWidth: 0.5,
+    borderBottomColor: "rgba(255,255,255,0.06)",
+  },
+  bankRowActive: { opacity: 1 },
+  bankForm: {
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    borderRadius: 10,
+    padding: 12,
+    color: "#fff",
+    marginTop: 8,
+  },
+  amtRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 8 },
+  amtInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    borderRadius: 12,
+    padding: 14,
+    color: "#fff",
+    fontSize: 22,
+    fontWeight: "800",
+  },
+  maxBtn: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  maxBtnText: { fontWeight: "800", fontSize: 13 },
+  errorBox: {
+    backgroundColor: "rgba(248,113,113,0.12)",
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 8,
+  },
+  primaryCta: {
+    backgroundColor: "#fff",
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: "center",
+    marginTop: 12,
+  },
+  primaryCtaText: { color: "#000", fontWeight: "800", fontSize: 15 },
+  miniVal: { fontSize: 20, fontWeight: "800", marginTop: 4 },
+  historyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    borderBottomWidth: 0.5,
+    borderBottomColor: "rgba(255,255,255,0.06)",
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  link: { fontWeight: "700", fontSize: 13 },
+  exportLink: { marginTop: 10, alignItems: "center" },
+  exportLinkText: { fontWeight: "700", fontSize: 13 },
+  mutedSmall: { color: "rgba(255,255,255,0.35)", fontSize: 11, marginTop: 4 },
+  successBanner: {
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    marginBottom: 12,
+  },
+  successText: { color: "#ffffff", fontWeight: "600", textAlign: "center" },
+  modalWrap: { flex: 1, justifyContent: "flex-end" },
+  modalSheet: {
+    backgroundColor: "#111",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: "75%",
+    borderTopWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+});

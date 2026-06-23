@@ -18,6 +18,8 @@ module.exports = {
       supportsTablet: true,
       infoPlist: {
         NSMicrophoneUsageDescription: "Trip-Sync needs microphone for convoy voice chat",
+        NSPhotoLibraryUsageDescription: "Allow TripSync to access your photos and videos to add media to events and attractions.",
+        NSCameraUsageDescription: "Allow TripSync to take photos for your profile and events.",
         UIBackgroundModes: ["audio", "voip"],
         NSAppTransportSecurity: {
           NSAllowsLocalNetworking: true,
@@ -37,10 +39,11 @@ module.exports = {
         "android.permission.BLUETOOTH_CONNECT",
         "android.permission.BLUETOOTH_SCAN",
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
       ],
       blockedPermissions: [
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.CAMERA",
       ],
       adaptiveIcon: {
         foregroundImage: "./assets/images/apk-logo.png",
@@ -69,8 +72,9 @@ module.exports = {
         "expo-image-picker",
         {
           photosPermission:
-            "Allow TripSync to access your photos to add images to nearby attractions.",
-          cameraPermission: false,
+            "Allow TripSync to access your photos and videos to add media to events, attractions, and your profile.",
+          cameraPermission:
+            "Allow TripSync to take photos for your profile and events.",
           microphonePermission: false,
         },
       ],

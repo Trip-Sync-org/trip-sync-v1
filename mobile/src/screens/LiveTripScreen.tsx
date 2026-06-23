@@ -457,6 +457,8 @@ function mergeRidersIntoMembers(prev: LiveMember[], riders: LiveRider[], selfUid
   return next;
 }
 
+import { HelpCircle, Mic, Lock } from "lucide-react-native";
+
 const SOS_OPTIONS: Array<{ id: string; label: string; icon: string; reason: string }> = [
   { id: "breakdown", label: "Breakdown", icon: "🚓", reason: "Vehicle issue" },
   { id: "medical", label: "Medical", icon: "⚕️", reason: "Medical emergency" },
@@ -2911,20 +2913,34 @@ export function LiveTripScreen({ route, navigation }: Props) {
                   onPress={() => void setVoiceMode("open")}
                   style={[styles.voicePill, voiceMode === "open" && styles.voicePillActive]}
                 >
-                  <Text style={[styles.voicePillText, voiceMode === "open" && styles.voicePillTextOn]}>
-                    🎙 Talk All
-                  </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                    <Mic
+                      color={voiceMode === "open" ? "#000" : "rgba(255,255,255,0.45)"}
+                      size={14}
+                      strokeWidth={2}
+                    />
+                    <Text style={[styles.voicePillText, voiceMode === "open" && styles.voicePillTextOn]}>
+                      Talk All
+                    </Text>
+                  </View>
                 </Pressable>
                 <Pressable
                   disabled={!canModerateVoice}
                   onPress={() => void setVoiceMode("controlled")}
                   style={[styles.voicePill, voiceMode === "controlled" && styles.voicePillActive]}
                 >
-                  <Text
-                    style={[styles.voicePillText, voiceMode === "controlled" && styles.voicePillTextOn]}
-                  >
-                    🔒 Staff Talk
-                  </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                    <Lock
+                      color={voiceMode === "controlled" ? "#000" : "rgba(255,255,255,0.45)"}
+                      size={14}
+                      strokeWidth={2}
+                    />
+                    <Text
+                      style={[styles.voicePillText, voiceMode === "controlled" && styles.voicePillTextOn]}
+                    >
+                      Staff Talk
+                    </Text>
+                  </View>
                 </Pressable>
               </View>
               {/* Mode description */}
@@ -3661,18 +3677,34 @@ export function LiveTripScreen({ route, navigation }: Props) {
                   onPress={() => void setVoiceMode("open")}
                   style={[styles.voicePill, voiceMode === "open" && styles.voicePillActive]}
                 >
-                  <Text style={[styles.voicePillText, voiceMode === "open" && styles.voicePillTextOn]}>
-                    🎙 Talk All
-                  </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                    <Mic
+                      color={voiceMode === "open" ? "#000" : "rgba(255,255,255,0.45)"}
+                      size={14}
+                      strokeWidth={2}
+                    />
+                    <Text style={[styles.voicePillText, voiceMode === "open" && styles.voicePillTextOn]}>
+                      Talk All
+                    </Text>
+                  </View>
                 </Pressable>
                 <Pressable
                   disabled={!canModerateVoice}
                   onPress={() => void setVoiceMode("controlled")}
                   style={[styles.voicePill, voiceMode === "controlled" && styles.voicePillActive]}
                 >
-                  <Text style={[styles.voicePillText, voiceMode === "controlled" && styles.voicePillTextOn]}>
-                    🔒 Staff Talk
-                  </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                    <Lock
+                      color={voiceMode === "controlled" ? "#000" : "rgba(255,255,255,0.45)"}
+                      size={14}
+                      strokeWidth={2}
+                    />
+                    <Text
+                      style={[styles.voicePillText, voiceMode === "controlled" && styles.voicePillTextOn]}
+                    >
+                      Staff Talk
+                    </Text>
+                  </View>
                 </Pressable>
               </View>
               <Text style={[styles.mutedSmall, { marginTop: 6, lineHeight: 16 }]}>
@@ -4512,12 +4544,12 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingVertical: 14,
     borderRadius: 12,
-    backgroundColor: "rgba(52,211,153,0.12)",
+    backgroundColor: "#000000",
     borderWidth: 1,
-    borderColor: "rgba(52,211,153,0.25)",
+    borderColor: "#000000",
     alignItems: "center",
   },
-  joinVoiceText: { color: "#6ee7b7", fontSize: 12, fontWeight: "800" },
+  joinVoiceText: { color: "#FFFFFF", fontSize: 12, fontWeight: "800" },
   muteBtn: {
     marginLeft: 8,
     paddingHorizontal: 14,

@@ -9,6 +9,7 @@ export type User = {
   activeRole?: string;
   level?: number;
   xp?: number;
+  avatar_url?: string | null;
 };
 
 export type TripListItem = {
@@ -21,6 +22,7 @@ export type TripListItem = {
   joined_count?: number;
   status?: string;
   banner_url?: string;
+  gallery?: MediaItemData[] | null;
 };
 
 export type CheckpointSource = "manual" | "nearby_attraction" | "map_pin";
@@ -40,6 +42,12 @@ export type TripCheckpoint = {
   created_at?: string;
 };
 
+export type MediaItemData = {
+  url: string;
+  type: "image" | "video";
+  thumbnailUrl?: string | null;
+};
+
 export type NearbyAttraction = {
   id: string;
   name: string;
@@ -49,6 +57,7 @@ export type NearbyAttraction = {
   latitude?: number;
   longitude?: number;
   images?: string[] | null;
+  media?: MediaItemData[] | null;
   trip_id?: number | null;
   created_at?: string;
 };

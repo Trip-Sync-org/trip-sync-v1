@@ -19,6 +19,7 @@ import {
   Keyboard,
   useWindowDimensions,
 } from "react-native";
+import { Globe, MapPin, Lock, Sparkles, Flag } from "lucide-react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
@@ -29,7 +30,7 @@ import type { RootStackParamList } from "../navigation/AppNavigator";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { apiFetch, readApiErrorMessage } from "../api/client";
 import { useAuth } from "../context/AuthContext";
-import { colors, typography } from "../theme";
+import { colors, typography, useThemeColors } from "../theme";
 import { Badge, Card } from "../components/ui";
 import {
   THEMES,
@@ -42,6 +43,10 @@ import {
 } from "../constants/createEvent";
 import { formatShortDate, formatTime12h, setTimeOnDate } from "../lib/createEventFormat";
 import { getMapboxPublicToken, mapboxTokenConfigError } from "../lib/mapboxPublicToken";
+import { useR2Upload } from "../hooks/useR2Upload";
+import type { UploadResult } from "../hooks/useR2Upload";
+import { MediaPickerGrid } from "../components/MediaPickerGrid";
+import { supabase } from "../lib/supabase";
 
 type Props = NativeStackScreenProps<RootStackParamList, "CreateEvent">;
 
@@ -186,6 +191,7 @@ function defaultEndDate(): Date {
 
 export function CreateEventScreen({ navigation }: Props) {
   const { user } = useAuth();
+  const colors = useThemeColors();
 
   const [name, setName] = useState("");
   const [selectedThemes, setSelectedThemes] = useState<string[]>([THEMES[0] ?? "Adventure"]);
@@ -217,8 +223,10 @@ export function CreateEventScreen({ navigation }: Props) {
 
   const [privacy, setPrivacy] = useState<"Public" | "Private">("Public");
 
+  const { pickAndUpload, isUploading, uploadProgress } = useR2Upload();
   const [bannerPreview, setBannerPreview] = useState<string | null>(null);
-  const [galleryUris, setGalleryUris] = useState<string[]>([]);
+  const [bannerUrl, setBannerUrl] = useState<string | null>(null);
+  const [galleryMedia, setGalleryMedia] = useState<UploadResult[]>([]);
 
   const [couponForm, setCouponForm] = useState({
     prefix: "EVENT",
@@ -273,6 +281,7 @@ export function CreateEventScreen({ navigation }: Props) {
     lat: number;
     lng: number;
     images?: string[] | null;
+    media?: Array<{ url: string; type: string; thumbnailUrl?: string | null }> | null;
   };
 
   const [checkpointDrafts, setCheckpointDrafts] = useState<CpDraft[]>([]);
@@ -658,39 +667,37 @@ export function CreateEventScreen({ navigation }: Props) {
   };
 
   const pickBanner = async () => {
-    const r = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.85,
-      base64: true,
+    // Use R2 upload for banner
+    if (!user?.id) return;
+    const results = await pickAndUpload({
+      entityType: "event_banner",
+      entityId: user.id,
+      maxFiles: 1,
+      accept: "images",
     });
-    if (r.canceled || !r.assets?.[0]) return;
-    const a = r.assets[0];
-    if (a.base64) {
-      const mime = a.mimeType?.includes("png") ? "image/png" : "image/jpeg";
-      setBannerPreview(`data:${mime};base64,${a.base64}`);
-    } else if (a.uri) {
-      setBannerPreview(a.uri);
+    if (results.length > 0) {
+      const uploaded = results[0];
+      setBannerUrl(uploaded.url);
+      setBannerPreview(uploaded.url); // Show uploaded image immediately
     }
   };
 
   const addGallery = async () => {
-    const r = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsMultipleSelection: true,
-      selectionLimit: 10 - galleryUris.length,
-      quality: 0.85,
+    if (!user?.id) return;
+    const remaining = 10 - galleryMedia.length;
+    if (remaining <= 0) {
+      Alert.alert("Limit reached", "Maximum 10 gallery items allowed.");
+      return;
+    }
+    const results = await pickAndUpload({
+      entityType: "event_gallery",
+      entityId: user.id,
+      maxFiles: remaining,
+      accept: "images+videos",
     });
-    if (r.canceled || !r.assets?.length) return;
-    setGalleryUris((prev) => {
-      const next = [...prev];
-      for (const a of r.assets) {
-        if (next.length >= 10) break;
-        if (a.uri) next.push(a.uri);
-      }
-      return next;
-    });
+    if (results.length > 0) {
+      setGalleryMedia((prev) => [...prev, ...results]);
+    }
   };
 
   const addInvite = () => {
@@ -746,6 +753,10 @@ export function CreateEventScreen({ navigation }: Props) {
 
       const tagMerge = [...new Set([...selectedThemes, ...selectedLanguages])];
 
+      const galleryPayload = bannerUrl
+        ? [{ url: bannerUrl, type: "image" as const }]
+        : [];
+
       const payload = {
         organizer_id: Number(user.id) || undefined,
         name: name.trim(),
@@ -767,13 +778,17 @@ export function CreateEventScreen({ navigation }: Props) {
         end_place_name: endLocation || null,
         end_place_address: endLocation || null,
         privacy: privacy.toLowerCase(),
-        banner_url: bannerPreview || null,
+        banner_url: bannerUrl || null,
+        gallery: galleryMedia.length > 0 ? galleryMedia : undefined,
         start_location: meetupPoint,
         end_location: endLocation,
         prerequisites: prerequisites.trim(),
         terms: terms.trim(),
         tags: tagMerge,
       };
+
+      console.log("[CreateEvent] Publishing with banner_url:", bannerUrl);
+      console.log("[CreateEvent] Publishing with gallery items:", galleryMedia.length);
 
       const res = await apiFetch("/api/trips", {
         method: "POST",
@@ -998,30 +1013,20 @@ export function CreateEventScreen({ navigation }: Props) {
 
         <Card style={styles.galleryCard}>
           <View style={styles.galleryHead}>
-            <Text style={typography.label}>Gallery Images</Text>
+            <Text style={typography.label}>Gallery (Photos & Videos)</Text>
             <Pressable style={styles.smallAdd} onPress={addGallery}>
-              <Text style={styles.smallAddText}>+ Add Photos</Text>
+              <Text style={styles.smallAddText}>+ Add Photos & Videos</Text>
             </Pressable>
           </View>
-          {galleryUris.length === 0 ? (
-            <Pressable style={styles.galleryEmpty} onPress={addGallery}>
-              <Text style={styles.mutedXs}>Upload up to 10 photos</Text>
-            </Pressable>
-          ) : (
-            <View style={styles.galleryGrid}>
-              {galleryUris.map((uri) => (
-                <View key={uri} style={styles.gThumbWrap}>
-                  <Image source={{ uri }} style={styles.gThumb} />
-                  <Pressable
-                    style={styles.gRemove}
-                    onPress={() => setGalleryUris((p) => p.filter((u) => u !== uri))}
-                  >
-                    <Text style={styles.gRemoveText}>×</Text>
-                  </Pressable>
-                </View>
-              ))}
-            </View>
-          )}
+          <MediaPickerGrid
+            items={galleryMedia}
+            onAdd={addGallery}
+            onRemove={(index) => setGalleryMedia((prev) => prev.filter((_, i) => i !== index))}
+            maxFiles={10}
+            entityType="event_gallery"
+            uploading={isUploading}
+            uploadProgress={uploadProgress}
+          />
         </Card>
 
         <Collapsible
@@ -1110,7 +1115,8 @@ export function CreateEventScreen({ navigation }: Props) {
                   </Pressable>
                 </View>
                 <Pressable style={styles.tzBtn} onPress={() => setShowTzModal(true)}>
-                  <Text style={styles.tzBtnTxt}>🌐 {timezone.offset}</Text>
+                  <Globe color={colors.text} size={14} strokeWidth={2} />
+                  <Text style={[styles.tzBtnTxt, { marginLeft: 4 }]}>{timezone.offset}</Text>
                 </Pressable>
               </View>
             </View>
@@ -1139,7 +1145,7 @@ export function CreateEventScreen({ navigation }: Props) {
               disabled={locLoading !== null}
               onPress={() => handleLocPress("start")}
             >
-              <Text style={styles.locGpsBtnTxt}>{locLoading === "start" ? "…" : "📍"}</Text>
+              {locLoading === "start" ? <Text style={styles.locGpsBtnTxt}>…</Text> : <MapPin color={colors.text} size={18} strokeWidth={2} />}
             </Pressable>
           </View>
           {locError === "start" ? (
@@ -1181,7 +1187,7 @@ export function CreateEventScreen({ navigation }: Props) {
               disabled={locLoading !== null}
               onPress={() => handleLocPress("end")}
             >
-              <Text style={styles.locGpsBtnTxt}>{locLoading === "end" ? "…" : "📍"}</Text>
+              {locLoading === "end" ? <Text style={styles.locGpsBtnTxt}>…</Text> : <MapPin color={colors.text} size={18} strokeWidth={2} />}
             </Pressable>
           </View>
           {locError === "end" ? (
@@ -1210,14 +1216,16 @@ export function CreateEventScreen({ navigation }: Props) {
             <Text style={styles.mapPhTitle}>Map preview</Text>
             <MapboxCreatePreview start={startCoords} end={endCoords} />
             {startCoords ? (
-              <Text style={styles.coordLine}>
-                📍 {meetupPoint || "Start"} ({startCoords.lat.toFixed(5)}, {startCoords.lng.toFixed(5)})
-              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <MapPin color={colors.text} size={14} strokeWidth={2} />
+                <Text style={[styles.coordLine, { marginLeft: 6, flex: 1 }]}> {meetupPoint || "Start"} ({startCoords.lat.toFixed(5)}, {startCoords.lng.toFixed(5)})</Text>
+              </View>
             ) : null}
             {endCoords ? (
-              <Text style={styles.coordLine}>
-                🏁 {endLocation || "End"} ({endCoords.lat.toFixed(5)}, {endCoords.lng.toFixed(5)})
-              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <Flag color={colors.text} size={14} strokeWidth={2} />
+                <Text style={[styles.coordLine, { marginLeft: 6, flex: 1 }]}> {endLocation || "End"} ({endCoords.lat.toFixed(5)}, {endCoords.lng.toFixed(5)})</Text>
+              </View>
             ) : null}
           </View>
         </Collapsible>
@@ -1624,7 +1632,10 @@ export function CreateEventScreen({ navigation }: Props) {
         {privacy === "Private" ? (
           <View style={styles.privateBox}>
             <View style={styles.privateHead}>
-              <Text style={styles.privateTitle}>🔒 Private Invite List</Text>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <Lock color={colors.text} size={14} strokeWidth={2} />
+                <Text style={[styles.privateTitle, { marginLeft: 6 }]}> Private Invite List</Text>
+              </View>
               {invites.length > 0 ? (
                 <Text style={styles.inviteCount}>{invites.length} invites</Text>
               ) : null}
@@ -1695,17 +1706,19 @@ export function CreateEventScreen({ navigation }: Props) {
               style={[styles.privacyChip, privacy === "Public" && styles.privacyChipOn]}
               onPress={() => setPrivacy("Public")}
             >
-              <Text style={[styles.privacyChipTxt, privacy === "Public" && styles.privacyChipTxtOn]}>
-                🌐 Public
-              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center" }}>
+                <Globe color={privacy === "Public" ? colors.bg : colors.text} size={14} strokeWidth={2} />
+                <Text style={[styles.privacyChipTxt, privacy === "Public" && styles.privacyChipTxtOn, { marginLeft: 6 }]}> Public</Text>
+              </View>
             </Pressable>
             <Pressable
               style={[styles.privacyChip, privacy === "Private" && styles.privacyChipOn]}
               onPress={() => setPrivacy("Private")}
             >
-              <Text style={[styles.privacyChipTxt, privacy === "Private" && styles.privacyChipTxtOn]}>
-                🔒 Private
-              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center" }}>
+                <Lock color={privacy === "Private" ? colors.bg : colors.text} size={14} strokeWidth={2} />
+                <Text style={[styles.privacyChipTxt, privacy === "Private" && styles.privacyChipTxtOn, { marginLeft: 6 }]}> Private</Text>
+              </View>
             </Pressable>
           </View>
           <Text style={styles.mutedXs}>
@@ -1725,7 +1738,10 @@ export function CreateEventScreen({ navigation }: Props) {
           {busy ? (
             <ActivityIndicator color={colors.bg} />
           ) : (
-            <Text style={styles.publishTxt}>✦ Publish Event</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center" }}>
+              <Sparkles color={colors.bg} size={14} strokeWidth={2} />
+              <Text style={[styles.publishTxt, { marginLeft: 6 }]}> Publish Event</Text>
+            </View>
           )}
         </Pressable>
         <Text style={styles.footnote}>Event will be reviewed before going live</Text>
@@ -1843,33 +1859,41 @@ export function CreateEventScreen({ navigation }: Props) {
               ) : (
                 <Text style={styles.attractionDetailDescEmpty}>No description added</Text>
               )}
-              {attractionDetail?.images && attractionDetail.images.length > 0 ? (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.attractionPhotoRow}
-                  nestedScrollEnabled
-                >
-                  {attractionDetail.images.map((url, idx) => (
-                    <TouchableOpacity
-                      key={`${url}-${idx}`}
-                      activeOpacity={0.85}
-                      onPress={() => {
-                        const imgs = attractionDetail.images ?? [];
-                        if (imgs.length === 0) return;
-                        setFullscreenImage(imgs);
-                        setFullscreenIndex(idx);
-                      }}
-                    >
-                      <Image
-                        source={{ uri: url }}
-                        style={styles.attractionPhoto}
-                        resizeMode="cover"
-                      />
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              ) : null}
+              {(() => {
+                // Backward compat: prefer media (JSONB), fall back to images (TEXT[])
+                const mediaItems: Array<{ url: string; type: string; thumbnailUrl?: string | null }> =
+                  (attractionDetail?.media && (attractionDetail.media as Array<{ url: string; type: string; thumbnailUrl?: string | null }>).length > 0)
+                    ? (attractionDetail.media as Array<{ url: string; type: string; thumbnailUrl?: string | null }>)
+                    : ((attractionDetail?.images || []) as string[]).map((url: string) => ({ url, type: "image", thumbnailUrl: null }));
+                if (mediaItems.length === 0) return null;
+                return (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.attractionPhotoRow}
+                    nestedScrollEnabled
+                  >
+                    {mediaItems.map((item, idx) => (
+                      <TouchableOpacity
+                        key={`${item.url}-${idx}`}
+                        activeOpacity={0.85}
+                        onPress={() => {
+                          const urls = mediaItems.map((m) => m.url);
+                          if (urls.length === 0) return;
+                          setFullscreenImage(urls);
+                          setFullscreenIndex(idx);
+                        }}
+                      >
+                        <Image
+                          source={{ uri: item.thumbnailUrl || item.url }}
+                          style={styles.attractionPhoto}
+                          resizeMode="cover"
+                        />
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                );
+              })()}
             </ScrollView>
             <View style={styles.attractionDetailButtons}>
               <TouchableOpacity

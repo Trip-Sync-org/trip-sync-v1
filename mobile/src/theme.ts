@@ -13,24 +13,24 @@ export const colors = {
   muted: "rgba(255,255,255,0.45)",
   muted2: "rgba(255,255,255,0.3)",
   accent: "#ffffff",
-  success: "#34d399",
+  success: "#ffffff",
   danger: "#f87171",
   warn: "#fbbf24",
-  emerald: "#34d399",
+  emerald: "#ffffff",
 };
 
 /** Hook that returns the current theme colors from ThemeContext (light or dark based on system). */
 export function useThemeColors() {
-  const { colors: themeColors } = useAppTheme();
+  const { colors: themeColors, mode } = useAppTheme();
   return {
     ...themeColors,
     // Add any extra tokens that ThemeContext doesn't provide but theme.ts consumers expect
     muted2: themeColors.muted, // approximate mapping
     accent: themeColors.text,
-    success: "#34d399",
+    success: mode === "light" ? "#000000" : "#ffffff",
     danger: "#f87171",
     warn: "#fbbf24",
-    emerald: "#34d399",
+    emerald: mode === "light" ? "#000000" : "#ffffff",
   };
 }
 

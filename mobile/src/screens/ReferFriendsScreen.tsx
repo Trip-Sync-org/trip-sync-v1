@@ -1,5 +1,6 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Gift } from "lucide-react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { ProfileLayout } from "../components/profile/ProfileLayout";
@@ -9,12 +10,13 @@ type Props = NativeStackScreenProps<RootStackParamList, "ReferFriends">;
 
 export function ReferFriendsScreen({ navigation }: Props) {
   const c = useAuthPalette();
+  const linkColor = c.textPrimary;
   const isDark = c.bgPage === "#000000";
   return (
     <ProfileLayout navigation={navigation} title="Refer to Friends" fallback="Main">
       <View style={styles.center}>
         <View style={[styles.giftCircle, { backgroundColor: isDark ? "#1A2E29" : "#FFF0EC" }]}>
-          <Text style={styles.giftEmoji}>🎁</Text>
+          <Gift color={c.textPrimary} size={52} strokeWidth={2} />
         </View>
         <Text style={[styles.title, { color: c.textPrimary }]}>Refer to Friends</Text>
         <Text style={[styles.subtitle, { color: c.textSecondary }]}>
@@ -23,7 +25,7 @@ export function ReferFriendsScreen({ navigation }: Props) {
       </View>
 
       <View style={[styles.linkBox, { backgroundColor: isDark ? "#1C1C1C" : "#F0F7F5", borderColor: isDark ? "#2A2A2A" : "#D0EAE4" }]}>
-        <Text style={{ color: "#4FA88A" }}>https://ui8.net/76738b</Text>
+        <Text style={{ color: c.textPrimary }}>https://ui8.net/76738b</Text>
       </View>
 
       <View style={[styles.comingSoon, { borderColor: isDark ? "#333333" : "#CCCCCC" }]}>
@@ -40,7 +42,6 @@ export function ReferFriendsScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   center: { alignItems: "center", marginTop: 8 },
   giftCircle: { width: 120, height: 120, borderRadius: 60, justifyContent: "center", alignItems: "center" },
-  giftEmoji: { fontSize: 52 },
   title: { fontSize: 24 / 1.54, fontWeight: "700", marginTop: 12 },
   subtitle: { fontSize: 13, marginTop: 6, textAlign: "center", lineHeight: 18 },
   linkBox: { borderWidth: 1, borderRadius: 10, padding: 14, marginVertical: 16, alignItems: "center" },

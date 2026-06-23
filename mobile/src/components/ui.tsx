@@ -25,14 +25,14 @@ export function Badge({
   const isLight = mode === "light";
   const bg: Record<typeof variant, string> = {
     default: isLight ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.1)",
-    success: isLight ? "rgba(16,185,129,0.12)" : "rgba(16,185,129,0.2)",
+    success: isLight ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.15)",
     warning: isLight ? "rgba(245,158,11,0.12)" : "rgba(245,158,11,0.2)",
     danger: isLight ? "rgba(248,113,113,0.12)" : "rgba(248,113,113,0.2)",
     info: isLight ? "rgba(59,130,246,0.12)" : "rgba(59,130,246,0.2)",
   };
   const fg: Record<typeof variant, string> = {
     default: isLight ? "rgba(0,0,0,0.65)" : "rgba(255,255,255,0.85)",
-    success: "#34d399",
+    success: isLight ? "#000000" : "#ffffff",
     warning: "#fbbf24",
     danger: "#f87171",
     info: "#60a5fa",

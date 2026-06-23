@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from "react";
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import React, { useMemo, useState, useRef } from "react";
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View, Alert } from "react-native";
+import { Camera } from "lucide-react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useNavigation } from "@react-navigation/native";
 import type { RootStackParamList } from "../navigation/AppNavigator";
@@ -8,6 +9,8 @@ import { useAuthPalette } from "../theme/authTheme";
 import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../api/client";
 import { navigateToRootStack } from "../navigation/navigateRoot";
+import { useR2Upload } from "../hooks/useR2Upload";
+import { supabase } from "../lib/supabase";
 
 type Props = NativeStackScreenProps<RootStackParamList, "EditProfile">;
 
@@ -15,9 +18,11 @@ export function EditProfileScreen({ navigation }: Props) {
   const c = useAuthPalette();
   const rootNav = useNavigation();
   const { user } = useAuth();
+  const { pickAndUpload, isUploading, uploadProgress } = useR2Upload();
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(user?.avatar_url ?? null);
   const avatarUri = useMemo(
-    () => `https://api.dicebear.com/7.x/avataaars/png?seed=${encodeURIComponent(user?.name || "User")}`,
-    [user?.name],
+    () => avatarUrl || `https://api.dicebear.com/7.x/avataaars/png?seed=${encodeURIComponent(user?.name || "User")}`,
+    [avatarUrl, user?.name],
   );
   const [name, setName] = useState(user?.name ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
@@ -29,6 +34,37 @@ export function EditProfileScreen({ navigation }: Props) {
   const [saving, setSaving] = useState(false);
 
   const isValidPhone = /^\d{7,15}$/.test(phone.replace(/\D/g, ""));
+
+  const pickAvatar = async () => {
+    if (!user?.id) return;
+    const results = await pickAndUpload({
+      entityType: "profile",
+      entityId: user.id,
+      maxFiles: 1,
+      accept: "images",
+    });
+    if (results.length > 0) {
+      const uploaded = results[0];
+      console.log("[EditProfile] Uploaded avatar URL:", uploaded.url);
+      setAvatarUrl(uploaded.url); // Optimistic update
+      // Save to Supabase profiles table using clerk_id, not numeric id
+      if (supabase && user.authUserId) {
+        try {
+          const { data, error } = await supabase
+            .from("users")
+            .update({ avatar_url: uploaded.url })
+            .eq("clerk_id", user.authUserId);
+          if (error) {
+            console.warn("[EditProfile] Supabase update error:", error);
+          } else {
+            console.log("[EditProfile] Avatar URL saved to users.avatar_url");
+          }
+        } catch (e) {
+          console.warn("[EditProfile] Failed to save avatar_url to Supabase:", e);
+        }
+      }
+    }
+  };
 
   const onSave = async () => {
     if (!user?.id) return;
@@ -49,12 +85,18 @@ export function EditProfileScreen({ navigation }: Props) {
   return (
     <ProfileLayout navigation={navigation} title="Edit Profile" fallback="Main">
       <View style={styles.center}>
-        <View style={styles.avatarWrapper}>
+        <Pressable style={styles.avatarWrapper} onPress={pickAvatar} disabled={isUploading}>
           <Image source={{ uri: avatarUri }} style={styles.avatar} />
-          <View style={[styles.cameraOverlay, { backgroundColor: c.accentOrange }]}>
-            <Text>📷</Text>
-          </View>
-        </View>
+          {isUploading ? (
+            <View style={[styles.cameraOverlay, { backgroundColor: "rgba(0,0,0,0.6)" }]}>
+              <ActivityIndicator color="#fff" size="small" />
+            </View>
+          ) : (
+            <View style={[styles.cameraOverlay, { backgroundColor: c.accentOrange }]}>
+              <Camera color={c.bgCard} size={14} strokeWidth={2} />
+            </View>
+          )}
+        </Pressable>
       </View>
 
       <Text style={[styles.label, { color: c.textSecondary }]}>Full Name</Text>
@@ -98,7 +140,7 @@ export function EditProfileScreen({ navigation }: Props) {
       </Pressable>
 
       <Pressable style={[styles.saveBtn, { backgroundColor: c.accentOrange }]} onPress={() => void onSave()}>
-        {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Save Changes</Text>}
+        {saving ? <ActivityIndicator color={c.bgCard} /> : <Text style={[styles.saveText, { color: c.bgCard }]}>Save Changes</Text>}
       </Pressable>
     </ProfileLayout>
   );

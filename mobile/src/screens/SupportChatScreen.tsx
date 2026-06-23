@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Paperclip, Mic } from "lucide-react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { ProfileLayout } from "../components/profile/ProfileLayout";
@@ -58,8 +59,8 @@ export function SupportChatScreen({ navigation }: Props) {
       </View>
 
       <View style={[styles.inputBar, { backgroundColor: c.bgInput, borderColor: c.borderDefault }]}>
-        <Text>📎</Text>
-        <Text>🎤</Text>
+        <Paperclip color={c.textSecondary} size={20} strokeWidth={2} />
+        <Mic color={c.textSecondary} size={20} strokeWidth={2} />
         <TextInput
           style={[styles.input, { color: c.textPrimary }]}
           placeholder="Aa message"

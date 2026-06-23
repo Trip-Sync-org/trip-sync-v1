@@ -153,7 +153,7 @@ export function PrimaryButton({ title, disabled = false, onPress }: PrimaryButto
       onPress={onPress}
       disabled={disabled}
     >
-      <Text style={[styles.primaryBtnText, disabled ? styles.primaryBtnTextDisabled : null]}>{title}</Text>
+      <Text style={[styles.primaryBtnText, { color: c.bgCard }, disabled ? styles.primaryBtnTextDisabled : null]}>{title}</Text>
     </Pressable>
   );
 }
@@ -236,14 +236,14 @@ export function RoleSwitch({ value, onChange }: RoleSwitchProps) {
         style={[styles.roleBtn, value === "explorer" ? styles.roleBtnActive : null]}
         accessibilityLabel="Explorer account type"
       >
-        <Text style={[styles.roleText, value === "explorer" ? styles.roleTextActive : null]}>Explorer</Text>
+        <Text style={[styles.roleText, { color: value === "explorer" ? c.bgCard : c.textSecondary }]}>Explorer</Text>
       </Pressable>
       <Pressable
         onPress={() => onChange("organisor")}
         style={[styles.roleBtn, value === "organisor" ? styles.roleBtnActive : null]}
         accessibilityLabel="Organisor account type"
       >
-        <Text style={[styles.roleText, value === "organisor" ? styles.roleTextActive : null]}>Organisor</Text>
+        <Text style={[styles.roleText, { color: value === "organisor" ? c.bgCard : c.textSecondary }]}>Organisor</Text>
       </Pressable>
     </View>
   );
@@ -304,7 +304,7 @@ const getStyles = (c: ReturnType<typeof useAuthPalette>) =>
       marginTop: 16,
     },
     primaryBtnDisabled: { backgroundColor: c.btnDisabledBg },
-    primaryBtnText: { color: "#FFFFFF", fontSize: 15, fontWeight: "600" },
+    primaryBtnText: { fontSize: 15, fontWeight: "600" },
     primaryBtnTextDisabled: { color: c.btnDisabledTxt },
     checkboxRow: { flexDirection: "row", alignItems: "center", marginTop: 14 },
     checkbox: {
@@ -318,7 +318,7 @@ const getStyles = (c: ReturnType<typeof useAuthPalette>) =>
       backgroundColor: "transparent",
     },
     checkboxOn: { borderColor: c.checkboxFill, backgroundColor: c.checkboxFill },
-    checkboxTick: { color: "#fff", fontSize: 9, lineHeight: 10, fontWeight: "700" },
+    checkboxTick: { color: c.bgCard, fontSize: 9, lineHeight: 10, fontWeight: "700" },
     checkboxLabelWrap: { marginLeft: 8, flex: 1 },
     orRow: { flexDirection: "row", alignItems: "center", marginVertical: 14, gap: 8 },
     orLine: { flex: 1, height: 1, backgroundColor: c.borderDefault },
@@ -348,5 +348,4 @@ const getStyles = (c: ReturnType<typeof useAuthPalette>) =>
     },
     roleBtnActive: { borderColor: c.accentOrange, backgroundColor: c.accentOrange },
     roleText: { color: c.textSecondary, fontSize: 13, fontWeight: "600" },
-    roleTextActive: { color: "#FFFFFF" },
   });
