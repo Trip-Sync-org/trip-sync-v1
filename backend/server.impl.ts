@@ -1118,7 +1118,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
 
   app.patch("/api/trips/:id/status", async (req, res) => {
     const tripId = Number(req.params.id);
-    const { status, user_id } = req.body;
+    const { status, user_id, active_role } = req.body;
     const userId = Number(user_id);
 
     const rawStatus = String(status || "").toLowerCase();
@@ -1132,8 +1132,8 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       return res.status(400).json({ error: "Invalid status" });
     }
 
-    const actor = await getUserById(userId);
-    if (!actor || actor.role !== "organizer") {
+    const activeRole = active_role || (await getUserById(userId))?.role || "user";
+    if (activeRole !== "organizer") {
       return res.status(403).json({ error: "Only organizers can update trip status" });
     }
 

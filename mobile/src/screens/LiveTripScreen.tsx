@@ -2146,6 +2146,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
         body: JSON.stringify({
           status: "active",
           user_id: Number(user.id),
+          active_role: user.activeRole,
         }),
       });
       if (!res.ok) {
@@ -2661,10 +2662,11 @@ export function LiveTripScreen({ route, navigation }: Props) {
           const res = await apiFetch(`/api/trips/${tripIdNum}/map-pin-requests/${pinId}/review`, {
             method: "PATCH",
             skipApiTimeout: true,
-            body: JSON.stringify({
-              user_id: uid,
-              action,
-            }),
+        body: JSON.stringify({
+          status: "completed",
+          user_id: Number(user.id),
+          active_role: user.activeRole,
+        }),
           });
           if (!res.ok) {
             setTransientToast({ message: "Action failed — please try again", tone: "error" });
