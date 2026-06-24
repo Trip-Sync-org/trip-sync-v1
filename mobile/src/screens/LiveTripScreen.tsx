@@ -2964,6 +2964,11 @@ export function LiveTripScreen({ route, navigation }: Props) {
     setRouteProgress(_progressPct);
   }, []);
 
+  // Update navSpeedKmh from the GPS speed (currentSpeedKmh is already populated by GPS watcher)
+  useEffect(() => {
+    setNavSpeedKmh(currentSpeedKmh);
+  }, [currentSpeedKmh]);
+
   // Maneuver icon helper
   const getManeuverIcon = (type: string): string => {
     const icons: Record<string, string> = {
