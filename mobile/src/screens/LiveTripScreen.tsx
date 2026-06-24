@@ -208,6 +208,7 @@ function uint8ArrayFromBase64(b64: string): Uint8Array {
 async function uploadAttractionImagesToR2(
   tripIdNum: number,
   assets: ImagePicker.ImagePickerAsset[],
+  getToken?: () => Promise<string | null>,
 ): Promise<Array<{ url: string; type: "image" | "video"; thumbnailUrl?: string }>> {
   const results: Array<{ url: string; type: "image" | "video"; thumbnailUrl?: string }> = [];
   const EDGE_FUNCTION_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.replace(/\/+$/, "");
@@ -226,16 +227,13 @@ async function uploadAttractionImagesToR2(
     const filename = `attr-${tripIdNum}-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 10)}.${safeExt}`;
 
     try {
-      // Use supabase session token for edge function auth
-      const { supabase: sb } = await import("../lib/supabase");
-      if (!sb) {
-        console.warn("[attraction] Supabase not available for auth");
-        continue;
+      // Get fresh Clerk JWT for edge function auth (same pattern as useR2Upload)
+      let token: string | null = null;
+      if (getToken) {
+        token = await getToken();
       }
-      const { data: sessionData } = await sb.auth.getSession();
-      const token = sessionData?.session?.access_token;
       if (!token) {
-        console.warn("[attraction] No auth token available");
+        console.warn("[attraction] No auth token available — aborting upload");
         continue;
       }
 
@@ -2767,7 +2765,14 @@ export function LiveTripScreen({ route, navigation }: Props) {
       let media: Array<{ url: string; type: "image" | "video"; thumbnailUrl?: string }> = [];
       if (attrImages.length > 0) {
         if (__DEV__) console.log("[attraction] uploading to R2", attrImages.length, "image(s)");
-        const r2Results = await uploadAttractionImagesToR2(tripIdNum, attrImages);
+        // Get fresh Clerk JWT at call time (same pattern as useR2Upload)
+        const { useAuth: useClerkAuth } = await import("@clerk/clerk-expo");
+        const { getToken } = useClerkAuth();
+        const tokenFn = async () => {
+          const t = await getToken({ template: "supabase" });
+          return t ?? null;
+        };
+        const r2Results = await uploadAttractionImagesToR2(tripIdNum, attrImages, tokenFn);
         media = r2Results;
         if (__DEV__) console.log("[attraction] uploaded media:", media);
       }
