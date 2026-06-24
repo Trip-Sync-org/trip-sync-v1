@@ -40,6 +40,7 @@ import { supabase } from "../lib/supabase";
 import { useConvoyVoice } from "../hooks/useConvoyVoice";
 import { useWaitingRoomVoice } from "../voice/useWaitingRoomVoice";
 import { useR2Upload } from "../hooks/useR2Upload";
+import { useAuth as useClerkAuth } from "@clerk/clerk-expo";
 
 type Props = NativeStackScreenProps<RootStackParamList, "LiveTrip">;
 
@@ -681,6 +682,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
     localRole === "co-admin" ||
     localRole === "moderator" ||
     user?.activeRole === "organizer";
+
+  const { getToken: getClerkToken } = useClerkAuth();
 
   const {
     voiceMode,
@@ -2765,11 +2768,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
       let media: Array<{ url: string; type: "image" | "video"; thumbnailUrl?: string }> = [];
       if (attrImages.length > 0) {
         if (__DEV__) console.log("[attraction] uploading to R2", attrImages.length, "image(s)");
-        // Get fresh Clerk JWT at call time (same pattern as useR2Upload)
-        const { useAuth: useClerkAuth } = await import("@clerk/clerk-expo");
-        const { getToken } = useClerkAuth();
         const tokenFn = async () => {
-          const t = await getToken({ template: "supabase" });
+          const t = await getClerkToken({ template: "supabase" });
           return t ?? null;
         };
         const r2Results = await uploadAttractionImagesToR2(tripIdNum, attrImages, tokenFn);
