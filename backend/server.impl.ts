@@ -1084,7 +1084,11 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
 
     // Helper: fetch route from Mapbox Directions API
     const MAPBOX_TOKEN = process.env.MAPBOX_SECRET_TOKEN || process.env.VITE_MAPBOX_PUBLIC_TOKEN || "";
-    async function fetchMapboxRoute(coordStr: string): Promise<{
+    async function fetchMapboxRoute(
+      coordStr: string,
+      radiuses?: string,
+      allWaypointsForSnapLog?: Array<{ lat: number; lng: number; name: string; type: string; id: string }>
+    ): Promise<{
       coordinates: { latitude: number; longitude: number }[];
       distanceMeters: number | null;
       durationSeconds: number | null;
@@ -1097,9 +1101,12 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
         bannerInstructions: Array<{ primary: { text: string; type: string; components: Array<{ text: string; type: string }> } }>;
         geometry: { coordinates: [number, number][] };
       }>;
+      rawData?: {
+        waypoints?: Array<{ location: [number, number] }>;
+      };
     } | null> {
       try {
-        const url = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coordStr}` +
+        let url = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coordStr}` +
           `?alternatives=false` +
           `&geometries=geojson` +
           `&overview=full` +
@@ -1107,8 +1114,11 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
           `&banner_instructions=true` +
           `&voice_instructions=true` +
           `&roundabout_exits=true` +
-          `&annotations=duration,distance,speed` +
-          `&access_token=${MAPBOX_TOKEN}`;
+          `&annotations=duration,distance,speed`;
+        if (radiuses) {
+          url += `&radiuses=${encodeURIComponent(radiuses)}`;
+        }
+        url += `&access_token=${MAPBOX_TOKEN}`;
         const r = await fetch(url);
         if (!r.ok) {
           const body = await r.text().catch(() => "");
@@ -1136,6 +1146,22 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
           console.warn("[driving-route] Mapbox Directions returned non-Ok:", j.code);
           return null;
         }
+        // Log waypoint snapping warnings
+        const jAny = j as any;
+        if (allWaypointsForSnapLog && jAny.waypoints) {
+          const mapboxWaypoints = jAny.waypoints as Array<{ location: [number, number] }>;
+          for (let i = 0; i < Math.min(mapboxWaypoints.length, allWaypointsForSnapLog.length); i++) {
+            const req = allWaypointsForSnapLog[i];
+            const snapped = mapboxWaypoints[i];
+            if (req && snapped && snapped.location) {
+              const snapDist = haversineMeters(snapped.location[1], snapped.location[0], req.lat, req.lng);
+              if (snapDist > 200) {
+                console.warn(`[driving-route] waypoint ${i} snapped ${snapDist.toFixed(0)}m from requested (${req.name})`);
+              }
+            }
+          }
+        }
+
         const route = j.routes[0];
         const rawCoords = route?.geometry?.coordinates;
         const coordinates = Array.isArray(rawCoords)
@@ -1163,6 +1189,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
           distanceMeters: route?.distance ?? null,
           durationSeconds: route?.duration != null ? Math.round(route.duration) : null,
           steps,
+          rawData: { waypoints: (jAny.waypoints as Array<{ location: [number, number] }> | undefined) },
         };
       } catch (e) {
         console.warn("[driving-route] Mapbox Directions fetch error:", e);
