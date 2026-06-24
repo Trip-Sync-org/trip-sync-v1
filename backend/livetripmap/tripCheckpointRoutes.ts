@@ -270,10 +270,22 @@ export function registerTripCheckpointRoutes(app: Express, ctx: TripCheckpointRo
       return res.status(400).json({ error: "invalid routeCoords JSON" });
     }
 
-    const { data: rows, error } = await supabase
+    // Try with media column (may not exist in older DBs), fall back to images only
+    let { data: rows, error } = await supabase
       .from("nearby_attractions")
       .select("id, name, description, lat, lng, media, images, created_at")
       .limit(2000);
+
+    // If media column doesn't exist, retry without it
+    if (error && String(error.message ?? "").includes("column") && String(error.message ?? "").includes("media")) {
+      const fallback = await supabase
+        .from("nearby_attractions")
+        .select("id, name, description, lat, lng, images, created_at")
+        .limit(2000);
+      rows = fallback.data;
+      error = fallback.error;
+      console.log("[route-suggestions] media column missing, fell back to images only");
+    }
 
     if (error) {
       if (isMissingTableError(error.message)) return res.json([]);
@@ -349,10 +361,22 @@ export function registerTripCheckpointRoutes(app: Express, ctx: TripCheckpointRo
       return res.status(400).json({ error: "invalid routeCoords JSON" });
     }
 
-    const { data: rows, error } = await supabase
+    // Try with media column (may not exist in older DBs), fall back to images only
+    let { data: rows, error } = await supabase
       .from("nearby_attractions")
       .select("id, name, description, lat, lng, media, images, created_at")
       .limit(2000);
+
+    // If media column doesn't exist, retry without it
+    if (error && String(error.message ?? "").includes("column") && String(error.message ?? "").includes("media")) {
+      const fallback = await supabase
+        .from("nearby_attractions")
+        .select("id, name, description, lat, lng, images, created_at")
+        .limit(2000);
+      rows = fallback.data;
+      error = fallback.error;
+      console.log("[community-route-suggestions] media column missing, fell back to images only");
+    }
 
     if (error) {
       if (isMissingTableError(error.message)) return res.json([]);

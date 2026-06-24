@@ -30,7 +30,7 @@ import type { RootStackParamList } from "../navigation/AppNavigator";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { apiFetch, readApiErrorMessage } from "../api/client";
 import { useAuth } from "../context/AuthContext";
-import { colors, typography, useThemeColors } from "../theme";
+import { colors as staticColors, typography, useThemeColors } from "../theme";
 import { Badge, Card } from "../components/ui";
 import {
   THEMES,
@@ -86,7 +86,7 @@ function MapboxCreatePreview({
     return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css"/><style>html,body,#map{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0a0a0a}.dot{width:12px;height:12px;border-radius:999px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)}.err{padding:12px;color:#fecaca;background:#7f1d1d;font:12px sans-serif}</style></head><body><div id="map"></div><script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script><script>const S=${JSON.stringify(start)},E=${JSON.stringify(end)},TOKEN=${JSON.stringify(mapboxToken)};let map=null;function mk(c){const d=document.createElement('div');d.className='dot';d.style.background=c;return d;}function showErr(m){const el=document.getElementById('map');if(el)el.innerHTML='<div class="err">'+String(m).replace(/</g,'&lt;')+'</div>';}function fit(){if(!map)return;const pts=[];if(S)pts.push([S.lng,S.lat]);if(E)pts.push([E.lng,E.lat]);if(!pts.length)return;const lats=pts.map(p=>p[1]),lngs=pts.map(p=>p[0]);if(pts.length===1){map.flyTo({center:pts[0],zoom:13,duration:700});return;}map.fitBounds([[Math.min(...lngs),Math.min(...lats)],[Math.max(...lngs),Math.max(...lats)]],{padding:60,maxZoom:15,duration:800});}function init(){if(!window.mapboxgl){showErr("Mapbox SDK failed to load");return;}mapboxgl.accessToken=TOKEN;map=new mapboxgl.Map({container:'map',style:'mapbox://styles/mapbox/navigation-night-v1',center:S?[S.lng,S.lat]:[78.9629,20.5937],zoom:S?11:4,attributionControl:false});map.on('load',()=>{if(S)new mapboxgl.Marker({element:mk('#22c55e')}).setLngLat([S.lng,S.lat]).addTo(map);if(E)new mapboxgl.Marker({element:mk('#ef4444')}).setLngLat([E.lng,E.lat]).addTo(map);if(S&&E){const line={type:'Feature',properties:{},geometry:{type:'LineString',coordinates:[[S.lng,S.lat],[E.lng,E.lat]]}};map.addSource('route',{type:'geojson',data:line});map.addLayer({id:'route-casing',type:'line',source:'route',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#fff','line-width':8,'line-opacity':0.85}});map.addLayer({id:'route-line',type:'line',source:'route',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#4285F4','line-width':4}});}fit();});map.on('error',e=>showErr((e&&e.error&&e.error.message)||'Mapbox map error'));}if(!TOKEN){showErr("Missing EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN")}else{init();}</script></body></html>`;
   }, [end, start]);
 
-  return <WebView originWhitelist={["*"]} source={{ html }} style={styles.mapImage} javaScriptEnabled domStorageEnabled mixedContentMode="always" />;
+  return <WebView originWhitelist={["*"]} source={{ html }} style={{ width: "100%", height: 160, borderRadius: 12, marginBottom: 8, backgroundColor: "#0a0a0a" }} javaScriptEnabled domStorageEnabled mixedContentMode="always" />;
 }
 
 function parseGeocodeFeatures(data: unknown): PlaceSuggestion[] {
@@ -119,19 +119,21 @@ function Collapsible({
   open,
   onToggle,
   children,
+  colors,
 }: {
   label: string;
   open: boolean;
   onToggle: () => void;
   children: React.ReactNode;
+  colors: ReturnType<typeof useThemeColors>;
 }) {
   return (
-    <View style={styles.sectionOuter}>
-      <Pressable style={styles.sectionHead} onPress={onToggle}>
-        <Text style={styles.sectionHeadText}>{label}</Text>
-        <Text style={styles.chevron}>{open ? "▼" : "▶"}</Text>
+    <View style={{ borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, marginBottom: 10, overflow: "hidden" }}>
+      <Pressable style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 14 }} onPress={onToggle}>
+        <Text style={{ color: colors.text, fontSize: 14, fontWeight: "700" }}>{label}</Text>
+        <Text style={{ color: colors.muted2, fontSize: 12 }}>{open ? "▼" : "▶"}</Text>
       </Pressable>
-      {open ? <View style={styles.sectionInner}>{children}</View> : null}
+      {open ? <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>{children}</View> : null}
     </View>
   );
 }
@@ -151,10 +153,10 @@ function OptionModal({
 }) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.optModalWrap}>
+      <View style={{ flex: 1, justifyContent: "center", paddingHorizontal: 24, backgroundColor: "rgba(0,0,0,0.65)" }}>
         <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
-        <View style={styles.optSheetCentered}>
-          <Text style={styles.optTitle}>{title}</Text>
+        <View style={{ backgroundColor: "#111", borderRadius: 16, borderWidth: 1, borderColor: staticColors.border, padding: 12, maxHeight: "80%" }}>
+          <Text style={{ ...typography.label, marginBottom: 8, textAlign: "center", color: staticColors.muted }}>{title}</Text>
           <FlatList
             data={options}
             keyExtractor={(item) => item}
@@ -162,13 +164,13 @@ function OptionModal({
             style={{ maxHeight: 360 }}
             renderItem={({ item }) => (
               <Pressable
-                style={styles.optRow}
+                style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: staticColors.border }}
                 onPress={() => {
                   onSelect(item);
                   onClose();
                 }}
               >
-                <Text style={styles.optRowText}>{item}</Text>
+                <Text style={{ color: staticColors.text, fontSize: 14 }}>{item}</Text>
               </Pressable>
             )}
           />
@@ -192,6 +194,7 @@ function defaultEndDate(): Date {
 export function CreateEventScreen({ navigation }: Props) {
   const { user } = useAuth();
   const colors = useThemeColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
 
   const [name, setName] = useState("");
   const [selectedThemes, setSelectedThemes] = useState<string[]>([THEMES[0] ?? "Adventure"]);
@@ -1031,7 +1034,7 @@ export function CreateEventScreen({ navigation }: Props) {
           />
         </Card>
 
-        <Collapsible
+        <Collapsible colors={colors}
           label="Basic Info"
           open={sections.basic}
           onToggle={() => toggleSection("basic")}
@@ -1084,7 +1087,7 @@ export function CreateEventScreen({ navigation }: Props) {
           </View>
         </Collapsible>
 
-        <Collapsible
+        <Collapsible colors={colors}
           label="Date & Time"
           open={sections.datetime}
           onToggle={() => toggleSection("datetime")}
@@ -1125,7 +1128,7 @@ export function CreateEventScreen({ navigation }: Props) {
           </View>
         </Collapsible>
 
-        <Collapsible
+        <Collapsible colors={colors}
           label="Meetup Location"
           open={sections.location}
           onToggle={() => toggleSection("location")}
@@ -1232,7 +1235,7 @@ export function CreateEventScreen({ navigation }: Props) {
           </View>
         </Collapsible>
 
-        <Collapsible
+        <Collapsible colors={colors}
           label="Trip checkpoints"
           open={sections.checkpoints}
           onToggle={() => toggleSection("checkpoints")}
@@ -1367,7 +1370,7 @@ export function CreateEventScreen({ navigation }: Props) {
           )}
         </Collapsible>
 
-        <Collapsible
+        <Collapsible colors={colors}
           label="Capacity & Pricing"
           open={sections.capacity}
           onToggle={() => toggleSection("capacity")}
@@ -1439,7 +1442,7 @@ export function CreateEventScreen({ navigation }: Props) {
           </View>
         </Collapsible>
 
-        <Collapsible
+        <Collapsible colors={colors}
           label="About the Event"
           open={sections.about}
           onToggle={() => toggleSection("about")}
@@ -1454,7 +1457,7 @@ export function CreateEventScreen({ navigation }: Props) {
           />
         </Collapsible>
 
-        <Collapsible
+        <Collapsible colors={colors}
           label="Prerequisites & Terms"
           open={sections.requirements}
           onToggle={() => toggleSection("requirements")}
@@ -1479,7 +1482,7 @@ export function CreateEventScreen({ navigation }: Props) {
           />
         </Collapsible>
 
-        <Collapsible
+        <Collapsible colors={colors}
           label="Organizer Contact"
           open={sections.contact}
           onToggle={() => toggleSection("contact")}
@@ -1513,7 +1516,7 @@ export function CreateEventScreen({ navigation }: Props) {
           />
         </Collapsible>
 
-        <Collapsible
+        <Collapsible colors={colors}
           label="Coupon Generator"
           open={sections.coupons}
           onToggle={() => toggleSection("coupons")}
@@ -1990,8 +1993,8 @@ export function CreateEventScreen({ navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  scroll: { padding: 16, paddingBottom: 48, backgroundColor: colors.bg },
+const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
+  scroll: { padding: 16, paddingBottom: 48, backgroundColor: c.bg },
   kicker: { ...typography.label, marginBottom: 6 },
   heroTitle: { ...typography.hero, fontSize: 32, lineHeight: 38, marginBottom: 8 },
   topRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
@@ -2001,25 +2004,25 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "rgba(255,255,255,0.04)",
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
   },
-  pillBtnText: { color: colors.muted, fontSize: 12, fontWeight: "700" },
+  pillBtnText: { color: c.muted, fontSize: 12, fontWeight: "700" },
   attrChip: {
     maxWidth: 160,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     backgroundColor: "rgba(255,255,255,0.04)",
     marginRight: 8,
   },
-  attrChipTxt: { color: colors.text, fontSize: 12, fontWeight: "700" },
+  attrChipTxt: { color: c.text, fontSize: 12, fontWeight: "700" },
   attrChipAdded: {
     borderColor: "rgba(34,197,94,0.5)",
     backgroundColor: "rgba(34,197,94,0.12)",
   },
-  emptyHint: { fontSize: 12, color: colors.muted2, lineHeight: 18 },
+  emptyHint: { fontSize: 12, color: c.muted2, lineHeight: 18 },
   attractionModalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.75)",
@@ -2161,14 +2164,14 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    borderBottomColor: c.border,
   },
-  cpDraftTxt: { flex: 1, color: colors.text, fontSize: 13 },
+  cpDraftTxt: { flex: 1, color: c.text, fontSize: 13 },
   cpSuggestBox: {
     marginTop: 6,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     overflow: "hidden",
     maxHeight: 200,
   },
@@ -2177,11 +2180,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: "rgba(255,255,255,0.04)",
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     marginBottom: 10,
     gap: 8,
   },
-  communityName: { color: colors.text, fontWeight: "800", fontSize: 14, flex: 1 },
+  communityName: { color: c.text, fontWeight: "800", fontSize: 14, flex: 1 },
   badgeCommunity: {
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -2197,15 +2200,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 10,
-    backgroundColor: colors.text,
+    backgroundColor: c.text,
   },
   communityAddBtnTxt: { color: "#000", fontWeight: "800", fontSize: 12 },
   cpReorder: { flexDirection: "column", gap: 2 },
-  cpReorderTxt: { color: colors.muted, fontSize: 14, fontWeight: "900" },
+  cpReorderTxt: { color: c.muted, fontSize: 14, fontWeight: "900" },
   bigName: {
     fontSize: 32,
     fontWeight: "800",
-    color: colors.text,
+    color: c.text,
     marginBottom: 16,
     paddingVertical: 4,
   },
@@ -2220,10 +2223,10 @@ const styles = StyleSheet.create({
   },
   bannerImg: { width: "100%", height: "100%" },
   bannerEmpty: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  bannerEmptyTitle: { color: colors.muted, fontSize: 16, fontWeight: "700" },
-  bannerEmptySub: { color: colors.muted2, fontSize: 11, marginTop: 6 },
+  bannerEmptyTitle: { color: c.muted, fontSize: 16, fontWeight: "700" },
+  bannerEmptySub: { color: c.muted2, fontSize: 11, marginTop: 6 },
   bannerActions: { flexDirection: "row", gap: 16, marginBottom: 12 },
-  linkBtn: { color: colors.muted, fontWeight: "700", fontSize: 13 },
+  linkBtn: { color: c.muted, fontWeight: "700", fontSize: 13 },
   galleryCard: { padding: 14, marginBottom: 12 },
   galleryHead: {
     flexDirection: "row",
@@ -2236,15 +2239,15 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
   },
-  smallAddText: { fontSize: 10, fontWeight: "700", color: colors.muted },
+  smallAddText: { fontSize: 10, fontWeight: "700", color: c.muted },
   galleryEmpty: {
     height: 88,
     borderRadius: 12,
     borderWidth: 1,
     borderStyle: "dashed",
-    borderColor: colors.border,
+    borderColor: c.border,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2266,7 +2269,7 @@ const styles = StyleSheet.create({
   sectionOuter: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     backgroundColor: "rgba(255,255,255,0.03)",
     marginBottom: 10,
     overflow: "hidden",
@@ -2278,11 +2281,11 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   sectionHeadText: { color: "rgba(255,255,255,0.8)", fontSize: 14, fontWeight: "700" },
-  chevron: { color: colors.muted2, fontSize: 12 },
+  chevron: { color: c.muted2, fontSize: 12 },
   sectionInner: { paddingHorizontal: 16, paddingBottom: 16 },
   selectFake: {
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -2291,11 +2294,11 @@ const styles = StyleSheet.create({
   selectFakeText: { color: "rgba(255,255,255,0.85)", fontSize: 14, fontWeight: "600" },
   input: {
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    color: colors.text,
+    color: c.text,
     fontSize: 14,
     fontWeight: "600",
     backgroundColor: "rgba(255,255,255,0.04)",
@@ -2309,9 +2312,9 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.08)",
     backgroundColor: "rgba(255,255,255,0.03)",
   },
-  chipOn: { backgroundColor: colors.text, borderColor: colors.text },
-  chipTxt: { fontSize: 11, fontWeight: "700", color: colors.muted },
-  chipTxtOn: { color: colors.bg },
+  chipOn: { backgroundColor: c.text, borderColor: c.text },
+  chipTxt: { fontSize: 11, fontWeight: "700", color: c.muted },
+  chipTxtOn: { color: c.bg },
   tagChip: {
     paddingHorizontal: 8,
     paddingVertical: 5,
@@ -2319,14 +2322,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
   },
-  tagChipTxt: { fontSize: 10, fontWeight: "700", color: colors.muted },
+  tagChipTxt: { fontSize: 10, fontWeight: "700", color: c.muted },
   selTag: {
     paddingHorizontal: 8,
     paddingVertical: 5,
     borderRadius: 8,
     backgroundColor: "rgba(255,255,255,0.06)",
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
   },
   selTagTxt: { fontSize: 9, fontWeight: "700", color: "rgba(255,255,255,0.6)" },
   dtRow: { flexDirection: "row", gap: 10, marginBottom: 12, alignItems: "flex-start" },
@@ -2352,7 +2355,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     backgroundColor: "rgba(255,255,255,0.04)",
   },
   dtChipTxt: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.7)" },
@@ -2362,16 +2365,16 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
   },
-  tzBtnTxt: { fontSize: 11, fontWeight: "700", color: colors.muted },
+  tzBtnTxt: { fontSize: 11, fontWeight: "700", color: c.muted },
   suggestBox: {
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: 12,
     marginTop: 6,
     maxHeight: 160,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     zIndex: 100,
     elevation: 12,
     overflow: "hidden",
@@ -2382,12 +2385,12 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     backgroundColor: "rgba(255,255,255,0.06)",
     alignItems: "center",
     justifyContent: "center",
   },
-  locErrorText: { fontSize: 11, color: colors.warn, marginTop: 4, lineHeight: 16 },
+  locErrorText: { fontSize: 11, color: c.warn, marginTop: 4, lineHeight: 16 },
   locGpsBtnTxt: { fontSize: 18 },
   suggestRow: { paddingHorizontal: 12, paddingVertical: 10 },
   suggestText: { fontSize: 12, color: "rgba(255,255,255,0.75)" },
@@ -2396,7 +2399,7 @@ const styles = StyleSheet.create({
     minHeight: 200,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     padding: 12,
     overflow: "hidden",
   },
@@ -2407,28 +2410,28 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     backgroundColor: "#0a0a0a",
   },
-  mapPhTitle: { fontWeight: "700", color: colors.muted, marginBottom: 6 },
-  coordLine: { fontSize: 11, color: colors.emerald, marginTop: 6 },
+  mapPhTitle: { fontWeight: "700", color: c.muted, marginBottom: 6 },
+  coordLine: { fontSize: 11, color: c.emerald, marginTop: 6 },
   stepRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   stepBtn: {
     width: 40,
     height: 40,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.04)",
   },
-  stepBtnTxt: { fontSize: 20, color: colors.muted, fontWeight: "700" },
+  stepBtnTxt: { fontSize: 20, color: c.muted, fontWeight: "700" },
   stepInput: {
     flex: 1,
     textAlign: "center",
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: 12,
     paddingVertical: 10,
-    color: colors.text,
+    color: c.text,
     fontWeight: "800",
   },
   freePaidRow: { flexDirection: "row", gap: 8 },
@@ -2440,9 +2443,9 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.08)",
     alignItems: "center",
   },
-  freePaidOn: { backgroundColor: colors.text, borderColor: colors.text },
-  freePaidTxt: { fontSize: 12, fontWeight: "700", color: colors.muted },
-  freePaidTxtOn: { color: colors.bg },
+  freePaidOn: { backgroundColor: c.text, borderColor: c.text },
+  freePaidTxt: { fontSize: 12, fontWeight: "700", color: c.muted },
+  freePaidTxtOn: { color: c.bg },
   rupeeRow: { position: "relative", marginTop: 8 },
   rupee: {
     position: "absolute",
@@ -2450,7 +2453,7 @@ const styles = StyleSheet.create({
     top: 13,
     zIndex: 1,
     fontWeight: "800",
-    color: colors.muted2,
+    color: c.muted2,
   },
   approvalRow: {
     flexDirection: "row",
@@ -2492,13 +2495,13 @@ const styles = StyleSheet.create({
   couponCodeTxt: {
     flex: 1,
     marginRight: 8,
-    color: colors.text,
+    color: c.text,
     fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
     fontWeight: "800",
     fontSize: 15,
     letterSpacing: 1,
   },
-  couponShareLink: { color: colors.muted, fontWeight: "700", fontSize: 13 },
+  couponShareLink: { color: c.muted, fontWeight: "700", fontSize: 13 },
   couponActions: { flexDirection: "row", gap: 8 },
   outlineBtn: {
     paddingHorizontal: 16,
@@ -2507,16 +2510,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.15)",
   },
-  outlineBtnTxt: { fontSize: 12, fontWeight: "700", color: colors.muted },
-  attachBtn: { backgroundColor: colors.text, borderColor: colors.text },
-  attachBtnTxt: { fontSize: 12, fontWeight: "800", color: colors.bg },
+  outlineBtnTxt: { fontSize: 12, fontWeight: "700", color: c.muted },
+  attachBtn: { backgroundColor: c.text, borderColor: c.text },
+  attachBtnTxt: { fontSize: 12, fontWeight: "800", color: c.bg },
   couponCard: {
     flexDirection: "row",
     alignItems: "center",
     padding: 12,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     marginTop: 8,
     backgroundColor: "rgba(255,255,255,0.03)",
   },
@@ -2535,15 +2538,15 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   privateTitle: { fontSize: 14, fontWeight: "800", color: "rgba(255,255,255,0.85)" },
-  inviteCount: { fontSize: 12, fontWeight: "800", color: colors.warn },
+  inviteCount: { fontSize: 12, fontWeight: "800", color: c.warn },
   inviteRow: { flexDirection: "row", gap: 8, marginTop: 10 },
   addInvBtn: {
     paddingHorizontal: 16,
     borderRadius: 12,
-    backgroundColor: colors.text,
+    backgroundColor: c.text,
     justifyContent: "center",
   },
-  addInvBtnTxt: { fontWeight: "800", color: colors.bg, fontSize: 12 },
+  addInvBtnTxt: { fontWeight: "800", color: c.bg, fontSize: 12 },
   inviteItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -2562,7 +2565,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     gap: 12,
   },
-  previewK: { fontSize: 12, color: colors.muted },
+  previewK: { fontSize: 12, color: c.muted },
   previewV: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.85)", flex: 1, textAlign: "right" },
   privacyRow: { marginBottom: 12 },
   privacyChips: { flexDirection: "row", gap: 10, marginTop: 8, marginBottom: 6 },
@@ -2571,31 +2574,31 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     alignItems: "center",
     backgroundColor: "rgba(255,255,255,0.04)",
   },
-  privacyChipOn: { backgroundColor: colors.text, borderColor: colors.text },
-  privacyChipTxt: { fontSize: 13, fontWeight: "700", color: colors.muted },
-  privacyChipTxtOn: { color: colors.bg },
+  privacyChipOn: { backgroundColor: c.text, borderColor: c.text },
+  privacyChipTxt: { fontSize: 13, fontWeight: "700", color: c.muted },
+  privacyChipTxtOn: { color: c.bg },
   saveDraftBottom: {
     paddingVertical: 14,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     alignItems: "center",
     marginBottom: 12,
     backgroundColor: "rgba(255,255,255,0.04)",
   },
-  saveDraftBottomTxt: { color: colors.muted, fontWeight: "700", fontSize: 14 },
+  saveDraftBottomTxt: { color: c.muted, fontWeight: "700", fontSize: 14 },
   publishBtn: {
-    backgroundColor: colors.text,
+    backgroundColor: c.text,
     paddingVertical: 16,
     borderRadius: 16,
     alignItems: "center",
     marginBottom: 8,
   },
-  publishTxt: { color: colors.bg, fontWeight: "800", fontSize: 16, letterSpacing: 0.5 },
+  publishTxt: { color: c.bg, fontWeight: "800", fontSize: 16, letterSpacing: 0.5 },
   footnote: {
     textAlign: "center",
     fontSize: 10,
@@ -2604,7 +2607,7 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 24,
   },
-  mutedXs: { fontSize: 11, color: colors.muted2, lineHeight: 16 },
+  mutedXs: { fontSize: 11, color: c.muted2, lineHeight: 16 },
   optModalWrap: {
     flex: 1,
     justifyContent: "center",
@@ -2615,13 +2618,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#111",
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     padding: 12,
     maxHeight: "80%",
   },
   optTitle: { ...typography.label, marginBottom: 8, textAlign: "center" },
   optRow: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
-  optRowText: { color: colors.text, fontSize: 14 },
+  optRowText: { color: c.text, fontSize: 14 },
   iosPickerWrap: { flex: 1, justifyContent: "flex-end" },
   iosBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.55)" },
   iosPickerSheet: {
@@ -2632,7 +2635,7 @@ const styles = StyleSheet.create({
     paddingTop: 8,
   },
   iosPickerDone: { alignItems: "center", paddingVertical: 14 },
-  iosPickerDoneTxt: { color: colors.text, fontWeight: "800", fontSize: 16 },
+  iosPickerDoneTxt: { color: c.text, fontWeight: "800", fontSize: 16 },
   tzModalWrap: {
     flex: 1,
     justifyContent: "center",
@@ -2643,7 +2646,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#111",
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     padding: 12,
   },
   tzRow: {
@@ -2653,7 +2656,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "rgba(255,255,255,0.06)",
   },
-  tzCity: { fontSize: 14, fontWeight: "600", color: colors.text },
-  tzLab: { fontSize: 10, color: colors.muted2, marginTop: 2 },
-  tzOff: { fontSize: 12, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", color: colors.muted2 },
+  tzCity: { fontSize: 14, fontWeight: "600", color: c.text },
+  tzLab: { fontSize: 10, color: c.muted2, marginTop: 2 },
+  tzOff: { fontSize: 12, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", color: c.muted2 },
 });

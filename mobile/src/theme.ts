@@ -12,6 +12,7 @@ export const colors = {
   text: "#ffffff",
   muted: "rgba(255,255,255,0.45)",
   muted2: "rgba(255,255,255,0.3)",
+  card: "rgba(255,255,255,0.04)",
   accent: "#ffffff",
   success: "#ffffff",
   danger: "#f87171",
@@ -73,6 +74,5 @@ export const typography = {
     fontWeight: "700",
     letterSpacing: 2,
     textTransform: "uppercase" as const,
-    color: colors.muted2,
   } satisfies TextStyle,
 };

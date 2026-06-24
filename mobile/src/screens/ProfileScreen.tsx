@@ -219,7 +219,7 @@ function RoleToggleCard({ user, addRole, switchRole, c }: {
           </View>
         ) : null}
       </View>
-      {toastVisible && toastMsg ? (
+      {toastVisible && toastMsg && toastMsg.length > 0 ? (
         <Animated.View style={[styles.roleToastContainer, { transform: [{ translateY: slideAnim }] }]} pointerEvents="none">
           <View style={[styles.roleToastInner, { backgroundColor: c.accentOrange }]}>
             <CheckCircle2 color={c.bgCard} size={18} strokeWidth={2} />
