@@ -97,7 +97,7 @@ function MapboxCreatePreview({
     return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css"/><style>html,body,#map{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0a0a0a}.dot{width:12px;height:12px;border-radius:999px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)}.err{padding:12px;color:#fecaca;background:#7f1d1d;font:12px sans-serif}</style></head><body><div id="map"></div><script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script><script>const S=${JSON.stringify(start)},E=${JSON.stringify(end)},TOKEN=${JSON.stringify(mapboxToken)};let map=null;function mk(c){const d=document.createElement('div');d.className='dot';d.style.background=c;return d;}function showErr(m){const el=document.getElementById('map');if(el)el.innerHTML='<div class="err">'+String(m).replace(/</g,'&lt;')+'</div>';}function fit(){if(!map)return;const pts=[];if(S)pts.push([S.lng,S.lat]);if(E)pts.push([E.lng,E.lat]);if(!pts.length)return;const lats=pts.map(p=>p[1]),lngs=pts.map(p=>p[0]);if(pts.length===1){map.flyTo({center:pts[0],zoom:13,duration:700});return;}map.fitBounds([[Math.min(...lngs),Math.min(...lats)],[Math.max(...lngs),Math.max(...lats)]],{padding:60,maxZoom:15,duration:800});}function init(){if(!window.mapboxgl){showErr("Mapbox SDK failed to load");return;}mapboxgl.accessToken=TOKEN;map=new mapboxgl.Map({container:'map',style:'mapbox://styles/mapbox/navigation-night-v1',center:S?[S.lng,S.lat]:[78.9629,20.5937],zoom:S?11:4,attributionControl:false});map.on('load',()=>{if(S)new mapboxgl.Marker({element:mk('#22c55e')}).setLngLat([S.lng,S.lat]).addTo(map);if(E)new mapboxgl.Marker({element:mk('#ef4444')}).setLngLat([E.lng,E.lat]).addTo(map);if(S&&E){const line={type:'Feature',properties:{},geometry:{type:'LineString',coordinates:[[S.lng,S.lat],[E.lng,E.lat]]}};map.addSource('route',{type:'geojson',data:line});map.addLayer({id:'route-casing',type:'line',source:'route',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#fff','line-width':8,'line-opacity':0.85}});map.addLayer({id:'route-line',type:'line',source:'route',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#4285F4','line-width':4}});}fit();});map.on('error',e=>showErr((e&&e.error&&e.error.message)||'Mapbox map error'));}if(!TOKEN){showErr("Missing EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN")}else{init();}</script></body></html>`;
   }, [end, start]);
 
-  return <WebView originWhitelist={["*"]} source={{ html }} style={{ width: "100%", height: 160, borderRadius: 12, marginBottom: 8, backgroundColor: "#0a0a0a" }} javaScriptEnabled domStorageEnabled mixedContentMode="always" />;
+  return <WebView originWhitelist={["*"]} source={{ html }} style={{ width: "100%", height: 160, borderRadius: 12, marginBottom: 8, backgroundColor: staticColors.surface }} javaScriptEnabled domStorageEnabled mixedContentMode="always" />;
 }
 
 function parseGeocodeFeatures(data: unknown): PlaceSuggestion[] {
@@ -166,7 +166,7 @@ function OptionModal({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={{ flex: 1, justifyContent: "center", paddingHorizontal: 24, backgroundColor: "rgba(0,0,0,0.65)" }}>
         <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
-        <View style={{ backgroundColor: "#111", borderRadius: 16, borderWidth: 1, borderColor: staticColors.border, padding: 12, maxHeight: "80%" }}>
+        <View style={{ backgroundColor: staticColors.surface, borderRadius: 16, borderWidth: 1, borderColor: staticColors.border, padding: 12, maxHeight: "80%" }}>
           <Text style={{ ...typography.label, marginBottom: 8, textAlign: "center", color: staticColors.muted }}>{title}</Text>
           <FlatList
             data={options}
@@ -1104,7 +1104,7 @@ export function CreateEventScreen({ navigation }: Props) {
         <TextInput
           style={styles.bigName}
           placeholder="Event Name"
-          placeholderTextColor="rgba(255,255,255,0.08)"
+          placeholderTextColor={colors.muted2}
           value={name}
           onChangeText={setName}
         />
@@ -1132,7 +1132,7 @@ export function CreateEventScreen({ navigation }: Props) {
 
         <Card style={styles.galleryCard}>
           <View style={styles.galleryHead}>
-            <Text style={typography.label}>Gallery (Photos & Videos)</Text>
+            <Text style={[typography.label, { color: colors.muted }]}>Gallery (Photos & Videos)</Text>
             <Pressable style={styles.smallAdd} onPress={addGallery}>
               <Text style={styles.smallAddText}>+ Add Photos & Videos</Text>
             </Pressable>
@@ -1153,7 +1153,7 @@ export function CreateEventScreen({ navigation }: Props) {
           open={sections.basic}
           onToggle={() => toggleSection("basic")}
         >
-          <Text style={typography.label}>Theme / Category (multi-select)</Text>
+          <Text style={[typography.label, { color: colors.muted }]}>Theme / Category (multi-select)</Text>
           <View style={styles.chipWrap}>
             {THEMES.map((t) => (
               <Pressable
@@ -1167,11 +1167,11 @@ export function CreateEventScreen({ navigation }: Props) {
               </Pressable>
             ))}
           </View>
-          <Text style={[typography.label, { marginTop: 12 }]}>Duration</Text>
+          <Text style={[typography.label, { marginTop: 12, color: colors.muted }]}>Duration</Text>
           <Pressable style={styles.selectFake} onPress={() => setDurationModal(true)}>
             <Text style={styles.selectFakeText}>{duration}</Text>
           </Pressable>
-          <Text style={[typography.label, { marginTop: 12 }]}>Age Group</Text>
+          <Text style={[typography.label, { marginTop: 12, color: colors.muted }]}>Age Group</Text>
           <View style={styles.chipWrap}>
             {AGE_GROUPS.map((ag) => (
               <Pressable
@@ -1183,7 +1183,7 @@ export function CreateEventScreen({ navigation }: Props) {
               </Pressable>
             ))}
           </View>
-          <Text style={[typography.label, { marginTop: 12 }]}>Languages (multi-select)</Text>
+          <Text style={[typography.label, { marginTop: 12, color: colors.muted }]}>Languages (multi-select)</Text>
           <View style={styles.chipWrap}>
             {LANGUAGES.map((lang) => (
               <Pressable
@@ -1209,7 +1209,7 @@ export function CreateEventScreen({ navigation }: Props) {
           <View style={styles.dtRow}>
             <View style={styles.dtDot} />
             <View>
-              <Text style={typography.label}>Start</Text>
+              <Text style={[typography.label, { color: colors.muted }]}>Start</Text>
               <View style={styles.dtBtns}>
                 <Pressable style={styles.dtChip} onPress={() => openPicker("sd")}>
                   <Text style={styles.dtChipTxt}>{formatShortDate(startDt)}</Text>
@@ -1223,7 +1223,7 @@ export function CreateEventScreen({ navigation }: Props) {
           <View style={styles.dtRow}>
             <View style={[styles.dtDot, styles.dtDotFilled]} />
             <View style={{ flex: 1 }}>
-              <Text style={typography.label}>End</Text>
+              <Text style={[typography.label, { color: colors.muted }]}>End</Text>
               <View style={styles.dtEndRow}>
                 <View style={styles.dtBtns}>
                   <Pressable style={styles.dtChip} onPress={() => openPicker("ed")}>
@@ -1247,7 +1247,7 @@ export function CreateEventScreen({ navigation }: Props) {
           open={sections.location}
           onToggle={() => toggleSection("location")}
         >
-          <Text style={typography.label}>Start / Meetup Point</Text>
+          <Text style={[typography.label, { color: colors.muted }]}>Start / Meetup Point</Text>
           <View style={styles.locInputRow}>
             <TextInput
               style={[styles.input, { flex: 1 }]}
@@ -1289,7 +1289,7 @@ export function CreateEventScreen({ navigation }: Props) {
             </View>
           ) : null}
 
-          <Text style={[typography.label, { marginTop: 12 }]}>End / Drop-off Location</Text>
+          <Text style={[typography.label, { marginTop: 12, color: colors.muted }]}>End / Drop-off Location</Text>
           <View style={styles.locInputRow}>
             <TextInput
               style={[styles.input, { flex: 1 }]}
@@ -1358,11 +1358,11 @@ export function CreateEventScreen({ navigation }: Props) {
             Add stops along the route. Tap community-saved attractions, or build the list from the web editor for
             precise pins.
           </Text>
-          <Text style={[typography.label, { marginTop: 10 }]}>Search places (Mapbox)</Text>
+          <Text style={[typography.label, { marginTop: 10, color: colors.muted }]}>Search places (Mapbox)</Text>
           <TextInput
             style={styles.input}
             placeholder="Search address or place"
-            placeholderTextColor="rgba(255,255,255,0.35)"
+            placeholderTextColor={colors.muted2}
             value={cpSearch}
             onChangeText={setCpSearch}
           />
@@ -1395,7 +1395,7 @@ export function CreateEventScreen({ navigation }: Props) {
             </View>
           ) : null}
 
-          <Text style={[typography.label, { marginTop: 12 }]}>Community attractions</Text>
+          <Text style={[typography.label, { marginTop: 12, color: colors.muted }]}>Community attractions</Text>
           <Text style={[styles.mutedXs, { marginBottom: 6 }]}>
             Within 50 km of your route (straight line until directions load, then OSRM path).
           </Text>
@@ -1435,7 +1435,7 @@ export function CreateEventScreen({ navigation }: Props) {
             </ScrollView>
           )}
 
-          <Text style={[typography.label, { marginTop: 14 }]}>Planned checkpoints ({checkpointDrafts.length})</Text>
+          <Text style={[typography.label, { marginTop: 14, color: colors.muted }]}>Planned checkpoints ({checkpointDrafts.length})</Text>
           {checkpointDrafts.length === 0 ? (
             <Text style={[styles.mutedXs, { marginTop: 6 }]}>None yet — search above or add community suggestions.</Text>
           ) : (
@@ -1489,7 +1489,7 @@ export function CreateEventScreen({ navigation }: Props) {
           open={sections.capacity}
           onToggle={() => toggleSection("capacity")}
         >
-          <Text style={typography.label}>Max Participants</Text>
+          <Text style={[typography.label, { color: colors.muted }]}>Max Participants</Text>
           <View style={styles.stepRow}>
             <Pressable
               style={styles.stepBtn}
@@ -1510,7 +1510,7 @@ export function CreateEventScreen({ navigation }: Props) {
             </Pressable>
           </View>
 
-          <Text style={[typography.label, { marginTop: 14 }]}>Ticket Price</Text>
+          <Text style={[typography.label, { marginTop: 14, color: colors.muted }]}>Ticket Price</Text>
           <View style={styles.freePaidRow}>
             <Pressable
               style={[styles.freePaidBtn, isFree && styles.freePaidOn]}
@@ -1551,7 +1551,7 @@ export function CreateEventScreen({ navigation }: Props) {
               value={requireApproval}
               onValueChange={setRequireApproval}
               trackColor={{ false: "rgba(255,255,255,0.15)", true: colors.text }}
-              thumbColor={requireApproval ? colors.bg : "rgba(255,255,255,0.4)"}
+              thumbColor={requireApproval ? colors.bg : colors.muted2}
             />
           </View>
         </Collapsible>
@@ -1576,7 +1576,7 @@ export function CreateEventScreen({ navigation }: Props) {
           open={sections.requirements}
           onToggle={() => toggleSection("requirements")}
         >
-          <Text style={typography.label}>Prerequisites</Text>
+          <Text style={[typography.label, { color: colors.muted }]}>Prerequisites</Text>
           <TextInput
             style={styles.textareaSm}
             multiline
@@ -1585,7 +1585,7 @@ export function CreateEventScreen({ navigation }: Props) {
             value={prerequisites}
             onChangeText={setPrerequisites}
           />
-          <Text style={[typography.label, { marginTop: 12 }]}>Terms & Conditions</Text>
+          <Text style={[typography.label, { marginTop: 12, color: colors.muted }]}>Terms & Conditions</Text>
           <TextInput
             style={styles.textareaSm}
             multiline
@@ -1601,7 +1601,7 @@ export function CreateEventScreen({ navigation }: Props) {
           open={sections.contact}
           onToggle={() => toggleSection("contact")}
         >
-          <Text style={typography.label}>Name</Text>
+          <Text style={[typography.label, { color: colors.muted }]}>Name</Text>
           <TextInput
             style={styles.input}
             placeholder="John Doe"
@@ -1609,7 +1609,7 @@ export function CreateEventScreen({ navigation }: Props) {
             value={contactName}
             onChangeText={setContactName}
           />
-          <Text style={[typography.label, { marginTop: 10 }]}>Phone</Text>
+          <Text style={[typography.label, { marginTop: 10, color: colors.muted }]}>Phone</Text>
           <TextInput
             style={styles.input}
             placeholder="+91 98765 43210"
@@ -1618,7 +1618,7 @@ export function CreateEventScreen({ navigation }: Props) {
             value={contactPhone}
             onChangeText={setContactPhone}
           />
-          <Text style={[typography.label, { marginTop: 10 }]}>Email</Text>
+          <Text style={[typography.label, { marginTop: 10, color: colors.muted }]}>Email</Text>
           <TextInput
             style={styles.input}
             placeholder="organizer@email.com"
@@ -1637,7 +1637,7 @@ export function CreateEventScreen({ navigation }: Props) {
         >
           <View style={styles.couponGrid}>
             <View style={{ flex: 1 }}>
-              <Text style={typography.label}>Prefix</Text>
+              <Text style={[typography.label, { color: colors.muted }]}>Prefix</Text>
               <TextInput
                 style={styles.input}
                 value={couponForm.prefix}
@@ -1648,7 +1648,7 @@ export function CreateEventScreen({ navigation }: Props) {
               />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={typography.label}>Discount %</Text>
+              <Text style={[typography.label, { color: colors.muted }]}>Discount %</Text>
               <TextInput
                 style={styles.input}
                 keyboardType="number-pad"
@@ -1664,7 +1664,7 @@ export function CreateEventScreen({ navigation }: Props) {
           </View>
           <View style={styles.couponGrid}>
             <View style={{ flex: 1 }}>
-              <Text style={typography.label}>Usage Limit</Text>
+              <Text style={[typography.label, { color: colors.muted }]}>Usage Limit</Text>
               <TextInput
                 style={styles.input}
                 keyboardType="number-pad"
@@ -1678,7 +1678,7 @@ export function CreateEventScreen({ navigation }: Props) {
               />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={typography.label}>Expires (YYYY-MM-DD)</Text>
+              <Text style={[typography.label, { color: colors.muted }]}>Expires (YYYY-MM-DD)</Text>
               <TextInput
                 style={styles.input}
                 placeholder="optional"
@@ -1723,7 +1723,7 @@ export function CreateEventScreen({ navigation }: Props) {
           </View>
           {coupons.length > 0 ? (
             <View style={{ marginTop: 12 }}>
-              <Text style={typography.label}>
+              <Text style={[typography.label, { color: colors.muted }]}>
                 {coupons.length} coupon{coupons.length > 1 ? "s" : ""} attached
               </Text>
               {coupons.map((c) => (
@@ -1794,7 +1794,7 @@ export function CreateEventScreen({ navigation }: Props) {
         ) : null}
 
         <Card style={styles.previewCard}>
-          <Text style={typography.label}>Event Preview</Text>
+          <Text style={[typography.label, { color: colors.muted }]}>Event Preview</Text>
           {[
             ["Name", name || "—"],
             ["Themes", selectedThemes.join(", ") || "—"],
@@ -1819,7 +1819,7 @@ export function CreateEventScreen({ navigation }: Props) {
         </Card>
 
         <View style={styles.privacyRow}>
-          <Text style={typography.label}>Privacy</Text>
+          <Text style={[typography.label, { color: colors.muted }]}>Privacy</Text>
           <View style={styles.privacyChips}>
             <Pressable
               style={[styles.privacyChip, privacy === "Public" && styles.privacyChipOn]}
@@ -2109,14 +2109,14 @@ export function CreateEventScreen({ navigation }: Props) {
 
 const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
   scroll: { padding: 16, paddingBottom: 48, backgroundColor: c.bg },
-  kicker: { ...typography.label, marginBottom: 6 },
+  kicker: { ...typography.label, marginBottom: 6, color: c.muted },
   heroTitle: { ...typography.hero, fontSize: 32, lineHeight: 38, marginBottom: 8 },
   topRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
   pillBtn: {
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: c.card,
     borderWidth: 1,
     borderColor: c.border,
   },
@@ -2128,7 +2128,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: c.border,
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: c.card,
     marginRight: 8,
   },
   attrChipTxt: { color: c.text, fontSize: 12, fontWeight: "700" },
@@ -2145,7 +2145,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
   },
   attractionDetailCard: {
     width: "100%",
-    backgroundColor: "#1C1C1E",
+    backgroundColor: c.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 24,
@@ -2155,7 +2155,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
   attractionSheetHandle: {
     width: 36,
     height: 4,
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: c.card,
     borderRadius: 2,
     alignSelf: "center",
     marginBottom: 20,
@@ -2168,30 +2168,30 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
   },
   attractionDetailCoords: {
     fontSize: 12,
-    color: "rgba(255,255,255,0.4)",
+    color: c.muted,
     marginBottom: 12,
     fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
   },
   attractionDetailDesc: {
     fontSize: 15,
-    color: "rgba(255,255,255,0.75)",
+    color: c.text,
     lineHeight: 22,
     marginBottom: 4,
   },
   attractionDetailDescEmpty: {
     fontSize: 14,
-    color: "rgba(255,255,255,0.3)",
+    color: c.muted2,
     fontStyle: "italic",
   },
   attractionPhotoRow: { marginVertical: 12 },
-  attractionPhoto: { width: 120, height: 90, borderRadius: 8, marginRight: 8, backgroundColor: "#111" },
+  attractionPhoto: { width: 120, height: 90, borderRadius: 8, marginRight: 8, backgroundColor: c.surface },
   attractionDetailButtons: {
     flexDirection: "row",
     gap: 10,
     marginTop: 20,
     paddingTop: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255,255,255,0.1)",
+    borderTopColor: c.border,
   },
   attractionCloseBtnSecondary: {
     flex: 0,
@@ -2199,12 +2199,12 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
+    borderColor: c.border,
     alignItems: "center",
     justifyContent: "center",
   },
   attractionCloseBtnSecondaryTxt: {
-    color: "rgba(255,255,255,0.6)",
+    color: c.muted,
     fontSize: 14,
     fontWeight: "500",
   },
@@ -2234,7 +2234,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     position: "absolute",
     right: 20,
     zIndex: 10,
-    backgroundColor: "rgba(255,255,255,0.15)",
+    backgroundColor: c.surface,
     borderRadius: 20,
     width: 40,
     height: 40,
@@ -2245,7 +2245,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
   fullscreenCounter: {
     position: "absolute",
     left: 20,
-    color: "rgba(255,255,255,0.7)",
+    color: c.text,
     fontSize: 14,
     zIndex: 10,
   },
@@ -2269,7 +2269,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
   },
   fullscreenDotInactive: {
     width: 6,
-    backgroundColor: "rgba(255,255,255,0.35)",
+    backgroundColor: c.surface,
   },
   cpDraftRow: {
     flexDirection: "row",
@@ -2292,7 +2292,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
   communityCard: {
     padding: 12,
     borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: c.card,
     borderWidth: 1,
     borderColor: c.border,
     marginBottom: 10,
@@ -2308,7 +2308,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     borderColor: "rgba(45,212,191,0.35)",
   },
   badgeCommunityTxt: { fontSize: 9, fontWeight: "800", color: "#5eead4" },
-  communityThumb: { width: 56, height: 56, borderRadius: 10, backgroundColor: "#111" },
+  communityThumb: { width: 56, height: 56, borderRadius: 10, backgroundColor: c.surface },
   communityAddBtn: {
     alignSelf: "flex-start",
     paddingHorizontal: 12,
@@ -2330,10 +2330,15 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     aspectRatio: 1,
     borderRadius: 24,
     overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderWidth: 2,
+    borderColor: c.border,
     marginBottom: 8,
-    backgroundColor: "#0a0a0a",
+    backgroundColor: c.surface,
+    shadowColor: c.text,
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
   },
   bannerImg: { width: "100%", height: "100%" },
   bannerEmpty: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
@@ -2384,7 +2389,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: c.border,
-    backgroundColor: "rgba(255,255,255,0.03)",
+    backgroundColor: c.card,
     marginBottom: 10,
     overflow: "hidden",
   },
@@ -2394,7 +2399,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
-  sectionHeadText: { color: "rgba(255,255,255,0.8)", fontSize: 14, fontWeight: "700" },
+  sectionHeadText: { color: c.text, fontSize: 14, fontWeight: "700" },
   chevron: { color: c.muted2, fontSize: 12 },
   sectionInner: { paddingHorizontal: 16, paddingBottom: 16 },
   selectFake: {
@@ -2403,9 +2408,9 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: c.card,
   },
-  selectFakeText: { color: "rgba(255,255,255,0.85)", fontSize: 14, fontWeight: "600" },
+  selectFakeText: { color: c.text, fontSize: 14, fontWeight: "600" },
   input: {
     borderWidth: 1,
     borderColor: c.border,
@@ -2415,7 +2420,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     color: c.text,
     fontSize: 14,
     fontWeight: "600",
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: c.card,
   },
   chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   chip: {
@@ -2423,8 +2428,8 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    backgroundColor: "rgba(255,255,255,0.03)",
+    borderColor: c.border,
+    backgroundColor: c.card,
   },
   chipOn: { backgroundColor: c.text, borderColor: c.text },
   chipTxt: { fontSize: 11, fontWeight: "700", color: c.muted },
@@ -2434,18 +2439,18 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: c.border,
   },
   tagChipTxt: { fontSize: 10, fontWeight: "700", color: c.muted },
   selTag: {
     paddingHorizontal: 8,
     paddingVertical: 5,
     borderRadius: 8,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: c.card,
     borderWidth: 1,
     borderColor: c.border,
   },
-  selTagTxt: { fontSize: 9, fontWeight: "700", color: "rgba(255,255,255,0.6)" },
+  selTagTxt: { fontSize: 9, fontWeight: "700", color: c.muted },
   dtRow: { flexDirection: "row", gap: 10, marginBottom: 12, alignItems: "flex-start" },
   dtDot: {
     width: 10,
@@ -2453,13 +2458,13 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     borderRadius: 5,
     marginTop: 22,
     borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.3)",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    borderColor: c.border,
+    backgroundColor: c.card,
   },
   dtDotFilled: {
     borderWidth: 0,
-    backgroundColor: "#fff",
-    shadowColor: "#fff",
+    backgroundColor: c.text,
+    shadowColor: c.text,
     shadowOpacity: 0.4,
     shadowRadius: 8,
   },
@@ -2470,9 +2475,9 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: c.border,
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: c.card,
   },
-  dtChipTxt: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.7)" },
+  dtChipTxt: { fontSize: 12, fontWeight: "700", color: c.text },
   dtEndRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
   tzBtn: {
     paddingHorizontal: 10,
@@ -2500,14 +2505,14 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: c.border,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: c.card,
     alignItems: "center",
     justifyContent: "center",
   },
   locErrorText: { fontSize: 11, color: c.warn, marginTop: 4, lineHeight: 16 },
   locGpsBtnTxt: { fontSize: 18 },
   suggestRow: { paddingHorizontal: 12, paddingVertical: 10 },
-  suggestText: { fontSize: 12, color: "rgba(255,255,255,0.75)" },
+  suggestText: { fontSize: 12, color: c.text },
   mapPlaceholder: {
     marginTop: 12,
     minHeight: 200,
@@ -2522,7 +2527,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     height: 160,
     borderRadius: 12,
     marginBottom: 8,
-    backgroundColor: "#0a0a0a",
+    backgroundColor: c.surface,
   },
   mapPhTitle: { fontWeight: "700", color: c.muted, marginBottom: 6 },
   coordLine: { fontSize: 11, color: c.emerald, marginTop: 6 },
@@ -2535,7 +2540,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     borderColor: c.border,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: c.card,
   },
   stepBtnTxt: { fontSize: 20, color: c.muted, fontWeight: "700" },
   stepInput: {
@@ -2554,7 +2559,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: c.border,
     alignItems: "center",
   },
   freePaidOn: { backgroundColor: c.text, borderColor: c.text },
@@ -2575,23 +2580,23 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     marginTop: 16,
     paddingTop: 14,
     borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.05)",
+    borderTopColor: c.border,
   },
-  approvalTitle: { fontSize: 14, fontWeight: "700", color: "rgba(255,255,255,0.85)" },
+  approvalTitle: { fontSize: 14, fontWeight: "700", color: c.text },
   textarea: {
     minHeight: 120,
     borderWidth: 0,
-    color: "rgba(255,255,255,0.8)",
+    color: c.text,
     fontSize: 14,
     lineHeight: 22,
   },
   textareaSm: {
     minHeight: 90,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderColor: c.border,
     borderRadius: 12,
     padding: 12,
-    color: "rgba(255,255,255,0.7)",
+    color: c.text,
     fontSize: 12,
   },
   couponGrid: { flexDirection: "row", gap: 10, marginBottom: 10 },
@@ -2602,8 +2607,8 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     padding: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
-    backgroundColor: "rgba(255,255,255,0.08)",
+    borderColor: c.border,
+    backgroundColor: c.card,
     marginBottom: 10,
   },
   couponCodeTxt: {
@@ -2622,7 +2627,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderColor: c.border,
   },
   outlineBtnTxt: { fontSize: 12, fontWeight: "700", color: c.muted },
   attachBtn: { backgroundColor: c.text, borderColor: c.text },
@@ -2635,7 +2640,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     borderWidth: 1,
     borderColor: c.border,
     marginTop: 8,
-    backgroundColor: "rgba(255,255,255,0.03)",
+    backgroundColor: c.card,
   },
   couponCardCode: { fontWeight: "800", letterSpacing: 1 },
   privateBox: {
@@ -2651,7 +2656,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 8,
   },
-  privateTitle: { fontSize: 14, fontWeight: "800", color: "rgba(255,255,255,0.85)" },
+  privateTitle: { fontSize: 14, fontWeight: "800", color: c.text },
   inviteCount: { fontSize: 12, fontWeight: "800", color: c.warn },
   inviteRow: { flexDirection: "row", gap: 8, marginTop: 10 },
   addInvBtn: {
@@ -2668,10 +2673,10 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     padding: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderColor: c.border,
     marginTop: 8,
   },
-  inviteVal: { flex: 1, color: "rgba(255,255,255,0.85)", fontSize: 13 },
+  inviteVal: { flex: 1, color: c.text, fontSize: 13 },
   previewCard: { padding: 16, marginBottom: 16 },
   previewRow: {
     flexDirection: "row",
@@ -2680,7 +2685,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     gap: 12,
   },
   previewK: { fontSize: 12, color: c.muted },
-  previewV: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.85)", flex: 1, textAlign: "right" },
+  previewV: { fontSize: 12, fontWeight: "700", color: c.text, flex: 1, textAlign: "right" },
   privacyRow: { marginBottom: 12 },
   privacyChips: { flexDirection: "row", gap: 10, marginTop: 8, marginBottom: 6 },
   privacyChip: {
@@ -2690,7 +2695,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     borderWidth: 1,
     borderColor: c.border,
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: c.card,
   },
   privacyChipOn: { backgroundColor: c.text, borderColor: c.text },
   privacyChipTxt: { fontSize: 13, fontWeight: "700", color: c.muted },
@@ -2702,7 +2707,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     borderColor: c.border,
     alignItems: "center",
     marginBottom: 12,
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: c.card,
   },
   saveDraftBottomTxt: { color: c.muted, fontWeight: "700", fontSize: 14 },
   publishBtn: {
@@ -2716,7 +2721,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
   footnote: {
     textAlign: "center",
     fontSize: 10,
-    color: "rgba(255,255,255,0.2)",
+    color: c.muted,
     letterSpacing: 2,
     textTransform: "uppercase",
     marginBottom: 24,
@@ -2729,20 +2734,20 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.65)",
   },
   optSheetCentered: {
-    backgroundColor: "#111",
+    backgroundColor: c.surface,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: c.border,
     padding: 12,
     maxHeight: "80%",
   },
-  optTitle: { ...typography.label, marginBottom: 8, textAlign: "center" },
-  optRow: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
+  optTitle: { ...typography.label, marginBottom: 8, textAlign: "center", color: c.muted },
+  optRow: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: c.border },
   optRowText: { color: c.text, fontSize: 14 },
   iosPickerWrap: { flex: 1, justifyContent: "flex-end" },
   iosBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.55)" },
   iosPickerSheet: {
-    backgroundColor: "#111",
+    backgroundColor: c.surface,
     paddingBottom: 28,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
@@ -2757,7 +2762,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.7)",
   },
   tzSheet: {
-    backgroundColor: "#111",
+    backgroundColor: c.surface,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: c.border,
@@ -2768,7 +2773,7 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) => StyleSheet.create({
     justifyContent: "space-between",
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.06)",
+    borderBottomColor: c.border,
   },
   tzCity: { fontSize: 14, fontWeight: "600", color: c.text },
   tzLab: { fontSize: 10, color: c.muted2, marginTop: 2 },

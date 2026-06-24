@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet, ScrollView } from "react-native";
 import { MediaThumbnail } from "./MediaThumbnail";
 import type { UploadResult, EntityType } from "../hooks/useR2Upload";
 import { colors } from "../theme";
+import { useAppTheme } from "../context/ThemeContext";
 
 interface MediaItem extends UploadResult {
   key?: string; // R2 object key, for deletion
@@ -26,28 +27,32 @@ export function MediaPickerGrid({
   uploading = false,
   uploadProgress = 0,
 }: MediaPickerGridProps) {
+  const { colors } = useAppTheme();
   const canAdd = items.length < maxFiles;
+  const emptyStateBg = colors.surface;
+  const emptyStateBorder = colors.border;
+  const addBtnBg = colors.card;
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.count}>
+        <Text style={[styles.count, { color: colors.muted }]}>
           {items.length}/{maxFiles} files
         </Text>
       </View>
 
       {uploading && (
-        <View style={styles.progressBar}>
-          <View style={[styles.progressFill, { width: `${uploadProgress}%` }]} />
+        <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
+          <View style={[styles.progressFill, { backgroundColor: colors.text, width: `${uploadProgress}%` }]} />
         </View>
       )}
 
       {items.length === 0 && !uploading ? (
-        <Pressable style={styles.emptyState} onPress={onAdd} disabled={!canAdd}>
-          <Text style={styles.emptyTitle}>
+        <Pressable style={[styles.emptyState, { backgroundColor: emptyStateBg, borderColor: emptyStateBorder }]} onPress={onAdd} disabled={!canAdd}>
+          <Text style={[styles.emptyTitle, { color: colors.muted }]}>
             {uploading ? "Uploading..." : "+ Add"}
           </Text>
-          <Text style={styles.emptySub}>Tap to add media</Text>
+          <Text style={[styles.emptySub, { color: colors.muted }]}>Tap to add media</Text>
         </Pressable>
       ) : (
         <ScrollView
@@ -67,9 +72,9 @@ export function MediaPickerGrid({
             />
           ))}
           {canAdd && (
-            <Pressable style={styles.addBtn} onPress={onAdd}>
-              <Text style={styles.addBtnText}>+</Text>
-              <Text style={styles.addBtnLabel}>Add</Text>
+            <Pressable style={[styles.addBtn, { backgroundColor: addBtnBg, borderColor: emptyStateBorder }]} onPress={onAdd}>
+              <Text style={[styles.addBtnText, { color: colors.muted }]}>+</Text>
+              <Text style={[styles.addBtnLabel, { color: colors.muted }]}>Add</Text>
             </Pressable>
           )}
         </ScrollView>
@@ -90,7 +95,7 @@ const styles = StyleSheet.create({
   count: {
     fontSize: 11,
     fontWeight: "600",
-    color: colors.muted2,
+    color: colors.muted,
   },
   progressBar: {
     height: 3,
@@ -121,7 +126,7 @@ const styles = StyleSheet.create({
   },
   emptySub: {
     fontSize: 10,
-    color: colors.muted2,
+    color: colors.muted,
     marginTop: 4,
   },
   scrollContent: {
@@ -146,7 +151,7 @@ const styles = StyleSheet.create({
   },
   addBtnLabel: {
     fontSize: 10,
-    color: colors.muted2,
+    color: colors.muted,
     marginTop: 2,
   },
 });
