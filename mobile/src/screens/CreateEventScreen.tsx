@@ -386,6 +386,7 @@ export function CreateEventScreen({ navigation }: Props) {
             description?: string | null;
             lat?: number;
             lng?: number;
+            media?: Array<{ url: string; type: string; thumbnailUrl?: string | null }> | null;
             images?: string[] | null;
           }>;
           const mapped = (Array.isArray(rows) ? rows : []).map((r) => ({
@@ -394,6 +395,7 @@ export function CreateEventScreen({ navigation }: Props) {
             description: r.description ?? null,
             lat: Number(r.lat) || 0,
             lng: Number(r.lng) || 0,
+            media: r.media ?? null,
             images: r.images ?? null,
           }));
           setCommunitySuggestions(mapped.filter((x) => x.id));

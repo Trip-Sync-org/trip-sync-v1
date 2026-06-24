@@ -66,7 +66,16 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const loadTrip = useCallback(async () => {
     try {
       const res = await apiFetch(`/api/trips/${id}`);
-      if (res.ok) setTrip(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        console.log('[TripDetail] full trip response:', JSON.stringify(data, null, 2));
+        console.log('[TripDetail] banner_url field:', data.banner_url);
+        console.log('[TripDetail] gallery field:', data.gallery);
+        console.log('[TripDetail] gallery type:', typeof data.gallery);
+        console.log('[TripDetail] gallery isArray:', Array.isArray(data.gallery));
+        console.log('[TripDetail] gallery stringified:', JSON.stringify(data.gallery));
+        setTrip(data);
+      }
     } finally {
       setLoading(false);
     }
@@ -218,7 +227,18 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const free = price <= 0;
   const payablePreview = Math.max(0, Math.round(price - appliedDiscountAmount));
   const tripTags = (Array.isArray(trip.tags) ? trip.tags : []) as string[];
-  const tripGallery = (Array.isArray(trip.gallery) ? trip.gallery : []) as Array<{url: string; type: string; thumbnailUrl?: string}>;
+  const tripGallery = (() => {
+    const g = trip.gallery;
+    if (Array.isArray(g)) return g as Array<{url: string; type: string; thumbnailUrl?: string}>;
+    if (typeof g === 'string') {
+      try {
+        const parsed = JSON.parse(g);
+        if (Array.isArray(parsed)) return parsed as Array<{url: string; type: string; thumbnailUrl?: string}>;
+      } catch {}
+    }
+    return [];
+  })();
+  console.log('[TripDetail] rendering, tripGallery.length:', tripGallery.length, 'galleryExpanded:', galleryOpen, 'gallery vvv IS SHOWN:', tripGallery.length > 0);
 
   return (
     <>

@@ -191,7 +191,7 @@ export function registerTripCheckpointRoutes(app: Express, ctx: TripCheckpointRo
 
   app.post("/api/trips/:tripId/nearby-attractions", async (req, res) => {
     const tripId = Number(req.params.tripId);
-    const { user_id, name, description, latitude, longitude, lat, lng, images, trip_id } =
+    const { user_id, name, description, latitude, longitude, lat, lng, images, media, trip_id } =
       req.body ?? {};
     const userId = toFiniteNumber(user_id);
     if (!Number.isFinite(tripId) || userId === null) {
@@ -210,8 +210,15 @@ export function registerTripCheckpointRoutes(app: Express, ctx: TripCheckpointRo
       return res.status(400).json({ error: "valid latitude and longitude are required" });
     }
 
-    const imgs = Array.isArray(images) ? images.filter((x: unknown) => typeof x === "string").slice(0, 5) : [];
-    console.log("POST nearby-attractions: saving with images count:", imgs.length, "tripId:", tripId);
+    // Accept media JSONB array [{url, type, thumbnailUrl?}] — extract image URLs for backward compat
+    let mediaArr = Array.isArray(media) ? media.slice(0, 5) : [];
+    let imgs: string[] = [];
+    if (mediaArr.length > 0) {
+      imgs = mediaArr.map((m: any) => String(m.url ?? "")).filter(Boolean).slice(0, 5);
+    } else {
+      imgs = Array.isArray(images) ? images.filter((x: unknown) => typeof x === "string").slice(0, 5) : [];
+    }
+    console.log("POST nearby-attractions: saving with media count:", mediaArr.length, "images fallback:", imgs.length, "tripId:", tripId);
 
     const row: Record<string, unknown> = {
       name: nameTrim,
@@ -219,6 +226,7 @@ export function registerTripCheckpointRoutes(app: Express, ctx: TripCheckpointRo
       lat: latNum,
       lng: lngNum,
       created_by: userId,
+      media: mediaArr.length > 0 ? mediaArr : undefined,
       images: imgs,
       trip_id: toFiniteNumber(trip_id) ?? tripId,
     };
@@ -264,7 +272,7 @@ export function registerTripCheckpointRoutes(app: Express, ctx: TripCheckpointRo
 
     const { data: rows, error } = await supabase
       .from("nearby_attractions")
-      .select("id, name, description, lat, lng, images, created_at")
+      .select("id, name, description, lat, lng, media, images, created_at")
       .limit(2000);
 
     if (error) {
@@ -343,7 +351,7 @@ export function registerTripCheckpointRoutes(app: Express, ctx: TripCheckpointRo
 
     const { data: rows, error } = await supabase
       .from("nearby_attractions")
-      .select("id, name, description, lat, lng, images, created_at")
+      .select("id, name, description, lat, lng, media, images, created_at")
       .limit(2000);
 
     if (error) {

@@ -39,6 +39,7 @@ import {
 import { supabase } from "../lib/supabase";
 import { useConvoyVoice } from "../hooks/useConvoyVoice";
 import { useWaitingRoomVoice } from "../voice/useWaitingRoomVoice";
+import { useR2Upload } from "../hooks/useR2Upload";
 
 type Props = NativeStackScreenProps<RootStackParamList, "LiveTrip">;
 
@@ -204,12 +205,14 @@ function uint8ArrayFromBase64(b64: string): Uint8Array {
   return out;
 }
 
-async function uploadAttractionImagesToStorage(
-  client: SupabaseClient,
+async function uploadAttractionImagesToR2(
   tripIdNum: number,
   assets: ImagePicker.ImagePickerAsset[],
-): Promise<string[]> {
-  const urls: string[] = [];
+): Promise<Array<{ url: string; type: "image" | "video"; thumbnailUrl?: string }>> {
+  const results: Array<{ url: string; type: "image" | "video"; thumbnailUrl?: string }> = [];
+  const EDGE_FUNCTION_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.replace(/\/+$/, "");
+  const R2_UPLOAD_URL = `${EDGE_FUNCTION_URL}/functions/v1/r2-upload`;
+
   for (let i = 0; i < Math.min(5, assets.length); i++) {
     const asset = assets[i];
     const extGuess =
@@ -217,46 +220,68 @@ async function uploadAttractionImagesToStorage(
       asset.uri.split(".").pop()?.split("?")[0]?.toLowerCase() ||
       "jpg";
     const safeExt = ["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(extGuess) ? extGuess : "jpg";
-    const filePath = `attractions/attr-${tripIdNum}-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 10)}.${safeExt}`;
     const contentType =
       asset.mimeType ||
       (safeExt === "png" ? "image/png" : safeExt === "webp" ? "image/webp" : "image/jpeg");
+    const filename = `attr-${tripIdNum}-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 10)}.${safeExt}`;
 
     try {
-      let uploadBody: Blob | Uint8Array;
-      if (asset.base64 && asset.base64.length > 0) {
-        uploadBody = uint8ArrayFromBase64(asset.base64);
-        if (__DEV__) console.log("[attraction] upload", i, "via base64", filePath);
-      } else {
-        if (__DEV__) console.log("[attraction] upload", i, "via fetch", asset.uri?.slice(0, 48));
-        const imgRes = await fetch(asset.uri);
-        if (!imgRes.ok) continue;
-        uploadBody = await imgRes.blob();
-      }
-
-      const { data, error } = await client.storage.from("attraction-images").upload(filePath, uploadBody, {
-        contentType,
-        upsert: false,
-      });
-
-      if (__DEV__) console.log("[attraction] upload result:", { path: data?.path, error: error?.message });
-
-      if (error) {
-        console.warn("[attraction] storage upload failed:", error.message);
+      // Use supabase session token for edge function auth
+      const { supabase: sb } = await import("../lib/supabase");
+      if (!sb) {
+        console.warn("[attraction] Supabase not available for auth");
         continue;
       }
-      if (data?.path) {
-        const { data: pub } = client.storage.from("attraction-images").getPublicUrl(data.path);
-        if (pub?.publicUrl) {
-          urls.push(pub.publicUrl);
-          if (__DEV__) console.log("[attraction] public URL:", pub.publicUrl);
-        }
+      const { data: sessionData } = await sb.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) {
+        console.warn("[attraction] No auth token available");
+        continue;
       }
+
+      // Get presigned URL from edge function
+      const presignedRes = await fetch(R2_UPLOAD_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          filename,
+          contentType,
+          entityType: "attraction",
+          entityId: String(tripIdNum),
+        }),
+      });
+
+      if (!presignedRes.ok) {
+        const errText = await presignedRes.text().catch(() => "");
+        console.warn("[attraction] presigned URL failed:", presignedRes.status, errText);
+        continue;
+      }
+
+      const { uploadUrl, publicUrl } = await presignedRes.json() as { uploadUrl: string; publicUrl: string; key: string };
+
+      // Upload file directly to R2 via presigned URL
+      const uploadRes = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": contentType },
+        body: await fetch(asset.uri).then((r) => r.blob()),
+      });
+
+      if (!uploadRes.ok) {
+        const errText = await uploadRes.text().catch(() => "");
+        console.warn("[attraction] R2 upload failed:", uploadRes.status, errText);
+        continue;
+      }
+
+      if (__DEV__) console.log("[attraction] R2 upload success:", publicUrl);
+      results.push({ url: publicUrl, type: "image" });
     } catch (e) {
       console.warn("[attraction] upload error:", e);
     }
   }
-  return urls;
+  return results;
 }
 
 /** Public.users id for API + Socket.IO (`user.id` is string; must never be NaN or live-state/rooms break). */
@@ -2739,18 +2764,12 @@ export function LiveTripScreen({ route, navigation }: Props) {
     }
     setAttrSaving(true);
     try {
-      let imageUrls: string[] = [];
+      let media: Array<{ url: string; type: "image" | "video"; thumbnailUrl?: string }> = [];
       if (attrImages.length > 0) {
-        if (!supabase) {
-          Alert.alert(
-            "Photos",
-            "Supabase is not configured in mobile (.env). Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to upload photos.",
-          );
-        } else {
-          if (__DEV__) console.log("[attraction] uploading", attrImages.length, "image(s)");
-          imageUrls = await uploadAttractionImagesToStorage(supabase, tripIdNum, attrImages);
-          if (__DEV__) console.log("[attraction] uploaded URLs:", imageUrls);
-        }
+        if (__DEV__) console.log("[attraction] uploading to R2", attrImages.length, "image(s)");
+        const r2Results = await uploadAttractionImagesToR2(tripIdNum, attrImages);
+        media = r2Results;
+        if (__DEV__) console.log("[attraction] uploaded media:", media);
       }
 
       const body = {
@@ -2758,11 +2777,11 @@ export function LiveTripScreen({ route, navigation }: Props) {
         description: attrDesc.trim(),
         latitude: lat,
         longitude: lng,
-        images: imageUrls,
+        media,
         user_id: uid,
         trip_id: tripIdNum,
       };
-      if (__DEV__) console.log("[attraction] API body:", { ...body, images: imageUrls });
+      if (__DEV__) console.log("[attraction] API body:", { ...body, media });
 
       const res = await apiFetch(`/api/trips/${tripIdNum}/nearby-attractions`, {
         method: "POST",
@@ -2774,7 +2793,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
         return;
       }
       closeAttractionModal();
-      const n = imageUrls.length;
+      const n = media.length;
       Alert.alert(
         "Saved!",
         n > 0
