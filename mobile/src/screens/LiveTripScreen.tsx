@@ -2895,6 +2895,104 @@ export function LiveTripScreen({ route, navigation }: Props) {
   // Keep camera stable: avoid continuous auto-recenter / auto-fit loops.
   // Camera actions stay user-driven (locate/fit/zoom) plus initial one-time fit.
 
+  // ── Navigation state (Features 2-6) — MUST be before any early return ─────────
+  const [currentInstruction, setCurrentInstruction] = useState<{ text: string; type: string; distanceToStep: number } | null>(null);
+  const [isRerouting, setIsRerouting] = useState(false);
+  const [remainingNavDistance, setRemainingNavDistance] = useState(0);
+  const [routeProgress, setRouteProgress] = useState(0);
+  const [navSpeedKmh, setNavSpeedKmh] = useState(0);
+  const [rerouteTick, setRerouteTick] = useState(0);
+  const [rerouteCoords, setRerouteCoords] = useState<MapPoint[] | null>(null);
+  const lastRerouteTimeRef = useRef(0);
+  const isReroutingRef = useRef(false);
+
+  // Extract steps from drivingRoute
+  const routeSteps = useMemo(() => {
+    return (drivingRoute as any)?.steps ?? [];
+  }, [drivingRoute]);
+
+  // Waypoints for map (same as remainingWaypoints but with correct format)
+  const mapWaypoints = useMemo(() => {
+    return remainingWaypoints.map(wp => ({ lat: wp.lat, lng: wp.lng, name: wp.name, type: wp.type, id: wp.id }));
+  }, [remainingWaypoints]);
+
+  // Handle off-route detection from WebView
+  const handleOffRoute = useCallback((pos: { lat: number; lng: number }) => {
+    const now = Date.now();
+    if (now - lastRerouteTimeRef.current < 10000) return;
+    if (isReroutingRef.current) return;
+    lastRerouteTimeRef.current = now;
+    setIsRerouting(true);
+    isReroutingRef.current = true;
+    console.log('[LiveTrip] off-route detected, requesting reroute from backend');
+    (async () => {
+      try {
+        const res = await apiFetch(`/api/trips/${id}/driving-route`);
+        const j = (await res.json()) as DrivingRoutePayload;
+        if (j.coordinates && j.coordinates.length >= 2) {
+          setDrivingRoute(j);
+          const coords = j.coordinates.map(c => ({ lat: c.latitude, lng: c.longitude }));
+          setRerouteCoords(coords);
+          setRerouteTick(t => t + 1);
+        }
+      } catch {
+        // keep current route
+      } finally {
+        setIsRerouting(false);
+        isReroutingRef.current = false;
+      }
+    })();
+  }, [id]);
+
+  // Handle waypoint passed from WebView
+  const handleWaypointPassed = useCallback((waypointId: string) => {
+    console.log('[LiveTrip] waypoint passed from WebView:', waypointId);
+    passedWaypointIdsRef.current.add(waypointId);
+    const sliced = remainingWaypoints.filter(wp => wp.id !== waypointId);
+    setRemainingWaypoints(sliced);
+    setCurrentWaypointIndex(i => i + 1);
+  }, [remainingWaypoints]);
+
+  // Handle instruction update from WebView
+  const handleInstructionUpdate = useCallback((instruction: { text: string; type: string; distanceToStep: number } | null) => {
+    setCurrentInstruction(instruction);
+  }, []);
+
+  // Handle progress update from WebView
+  const handleProgressUpdate = useCallback((_remainingDist: number, _remainingDur: number, _progressPct: number) => {
+    setRemainingNavDistance(_remainingDist);
+    setRouteProgress(_progressPct);
+  }, []);
+
+  // Maneuver icon helper
+  const getManeuverIcon = (type: string): string => {
+    const icons: Record<string, string> = {
+      'turn': '↱',
+      'depart': '▶',
+      'arrive': '🏁',
+      'merge': '⤴',
+      'on ramp': '↗',
+      'off ramp': '↘',
+      'fork': '⑂',
+      'end of road': '⊣',
+      'continue': '↑',
+      'roundabout': '↻',
+      'rotary': '↻',
+      'roundabout turn': '↻',
+      'straight': '↑',
+    };
+    return icons[type] ?? '↑';
+  };
+
+  // Format ETA
+  const formatETA = (seconds: number): string => {
+    if (seconds <= 0) return '';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m} min`;
+  };
+
   if (accessChecking) {
     return (
       <View style={[styles.centered, { paddingTop: insets.top }]}>
@@ -3476,107 +3574,6 @@ export function LiveTripScreen({ route, navigation }: Props) {
           speedMps: null,
         }
       : null);
-
-  // ── Navigation state (Features 2-6) ──────────────────────────────────────────
-  const [currentInstruction, setCurrentInstruction] = useState<{ text: string; type: string; distanceToStep: number } | null>(null);
-  const [isRerouting, setIsRerouting] = useState(false);
-  const [remainingNavDistance, setRemainingNavDistance] = useState(0);
-  const [routeProgress, setRouteProgress] = useState(0);
-  const [navSpeedKmh, setNavSpeedKmh] = useState(0);
-  const [rerouteTick, setRerouteTick] = useState(0);
-  const [rerouteCoords, setRerouteCoords] = useState<MapPoint[] | null>(null);
-  const lastRerouteTimeRef = useRef(0);
-  const isReroutingRef = useRef(false);
-
-  // Extract steps from drivingRoute
-  const routeSteps = useMemo(() => {
-    return (drivingRoute as any)?.steps ?? [];
-  }, [drivingRoute]);
-
-  // Waypoints for map (same as remainingWaypoints but with correct format)
-  const mapWaypoints = useMemo(() => {
-    return remainingWaypoints.map(wp => ({ lat: wp.lat, lng: wp.lng, name: wp.name, type: wp.type, id: wp.id }));
-  }, [remainingWaypoints]);
-
-  // Handle off-route detection from WebView
-  const handleOffRoute = useCallback((pos: { lat: number; lng: number }) => {
-    const now = Date.now();
-    if (now - lastRerouteTimeRef.current < 10000) return;
-    if (isReroutingRef.current) return;
-    lastRerouteTimeRef.current = now;
-    setIsRerouting(true);
-    isReroutingRef.current = true;
-    console.log('[LiveTrip] off-route detected, requesting reroute from backend');
-    (async () => {
-      try {
-        // Build new waypoints from current position + remaining
-        const newWps: RouteWaypoint[] = [{ lat: pos.lat, lng: pos.lng, name: "Current", type: "reroute", id: "reroute-pos" }, ...remainingWaypoints];
-        const coordStr = newWps.map(w => `${w.lng},${w.lat}`).join(';');
-        const res = await apiFetch(`/api/trips/${id}/driving-route`);
-        const j = (await res.json()) as DrivingRoutePayload;
-        if (j.coordinates && j.coordinates.length >= 2) {
-          setDrivingRoute(j);
-          const coords = j.coordinates.map(c => ({ lat: c.latitude, lng: c.longitude }));
-          setRerouteCoords(coords);
-          setRerouteTick(t => t + 1);
-        }
-      } catch {
-        // keep current route
-      } finally {
-        setIsRerouting(false);
-        isReroutingRef.current = false;
-      }
-    })();
-  }, [id, remainingWaypoints]);
-
-  // Handle waypoint passed from WebView
-  const handleWaypointPassed = useCallback((waypointId: string) => {
-    console.log('[LiveTrip] waypoint passed from WebView:', waypointId);
-    passedWaypointIdsRef.current.add(waypointId);
-    const sliced = remainingWaypoints.filter(wp => wp.id !== waypointId);
-    setRemainingWaypoints(sliced);
-    setCurrentWaypointIndex(i => i + 1);
-  }, [remainingWaypoints]);
-
-  // Handle instruction update from WebView
-  const handleInstructionUpdate = useCallback((instruction: { text: string; type: string; distanceToStep: number } | null) => {
-    setCurrentInstruction(instruction);
-  }, []);
-
-  // Handle progress update from WebView
-  const handleProgressUpdate = useCallback((remainingDist: number, _remainingDur: number, progressPct: number) => {
-    setRemainingNavDistance(remainingDist);
-    setRouteProgress(progressPct);
-  }, []);
-
-  // Maneuver icon helper
-  const getManeuverIcon = (type: string): string => {
-    const icons: Record<string, string> = {
-      'turn': '↱',
-      'depart': '▶',
-      'arrive': '🏁',
-      'merge': '⤴',
-      'on ramp': '↗',
-      'off ramp': '↘',
-      'fork': '⑂',
-      'end of road': '⊣',
-      'continue': '↑',
-      'roundabout': '↻',
-      'rotary': '↻',
-      'roundabout turn': '↻',
-      'straight': '↑',
-    };
-    return icons[type] ?? '↑';
-  };
-
-  // Format ETA
-  const formatETA = (seconds: number): string => {
-    if (seconds <= 0) return '';
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    if (h > 0) return `${h}h ${m}m`;
-    return `${m} min`;
-  };
 
   return (
     <View style={styles.liveRoot}>
