@@ -89,6 +89,8 @@ export type LiveMapViewRef = {
   togglePitch: () => void;
   zoomBy: (delta: number) => void;
   resetNorth: () => void;
+  /** Send a raw message to the WebView's Mapbox GL JS instance */
+  postMessage: (msg: object) => void;
 };
 
 // ─── WebView HTML ─────────────────────────────────────────────────────────────
@@ -653,6 +655,22 @@ function onRNMessage(raw) {
         waypointList = msg.waypoints.map(w => ({ lng: w.lng, lat: w.lat, id: w.id, name: w.name, type: w.type }));
         nextWaypointIdx = 0;
       }
+    } else if (msg.type === "SET_ROUTE" && msg.payload) {
+      // Handle SET_ROUTE with payload wrapper (from LiveTripScreen.handleOffRoute)
+      const { coordinates, steps, waypoints } = msg.payload;
+      console.log('[WebView] SET_ROUTE received, coords:', coordinates?.length);
+      if (coordinates && coordinates.length >= 2) {
+        upsertRouteLayers(coordinates);
+        sourceRouteCoords = coordinates;
+        if (steps) routeSteps = steps;
+        if (waypoints) {
+          waypointList = waypoints.map(w => ({ lng: w.lng, lat: w.lat, id: w.id, name: w.name, type: w.type }));
+          nextWaypointIdx = 0;
+        }
+        console.log('[WebView] SET_ROUTE processed, segments:', coordinates.length);
+      }
+      // Send back confirmation to RN
+      post({ type: 'DEBUG', msg: 'SET_ROUTE received, coords: ' + (coordinates?.length ?? 'undefined') });
     }
   } catch {}
 }
@@ -820,6 +838,9 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
       resetNorth: () => {
         post({ type: "reset-north" });
       },
+      postMessage: (msg: object) => {
+        post(msg);
+      },
     }),
     [route, start, end, members, pins, activeRouteSegment, userGeo, recenterPoint],
   );
@@ -872,6 +893,8 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
               // handled via userGeo already
             } else if (msg?.type === "waypoint-info") {
               // available via remainingWaypoints state
+            } else if (msg?.type === "DEBUG") {
+              console.log('[WebView→RN DEBUG]', msg.msg);
             }
           } catch { /* ignore */ }
         }}

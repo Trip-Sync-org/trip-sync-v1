@@ -964,7 +964,7 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
    * Builds route = start → checkpoint_1 → checkpoint_2 → ... → map_pin_1 → ... → end
    * Fetches checkpoints (ordered) and approved map pins as intermediate waypoints.
    */
-  app.get("/api/trips/:id/driving-route", async (req, res) => {
+  app.post("/api/trips/:id/driving-route", async (req, res) => {
     const tripId = Number(req.params.id);
     if (!Number.isFinite(tripId)) {
       return res.status(400).json({ error: "Invalid trip id" });
@@ -978,8 +978,10 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       return res.status(404).json({ error: "Trip not found" });
     }
     const row = trip as Record<string, unknown>;
-    const sLat = toFiniteNumber(row.meetup_lat) ?? toFiniteNumber(row.start_lat);
-    const sLng = toFiniteNumber(row.meetup_lng) ?? toFiniteNumber(row.start_lng);
+    // Accept current position override from request body (for rerouting)
+    const { currentLat, currentLng } = req.body ?? {};
+    const sLat = toFiniteNumber(currentLat) ?? toFiniteNumber(row.meetup_lat) ?? toFiniteNumber(row.start_lat);
+    const sLng = toFiniteNumber(currentLng) ?? toFiniteNumber(row.meetup_lng) ?? toFiniteNumber(row.start_lng);
     const eLat = toFiniteNumber(row.end_lat);
     const eLng = toFiniteNumber(row.end_lng);
 

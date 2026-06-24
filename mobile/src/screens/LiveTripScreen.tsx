@@ -2459,7 +2459,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const fetchDrivingRoute = useCallback(async () => {
     if (!id) return;
     try {
-      const res = await apiFetch(`/api/trips/${id}/driving-route`);
+      const res = await apiFetch(`/api/trips/${id}/driving-route`, { method: 'POST' });
       const j = (await res.json()) as DrivingRoutePayload;
       setDrivingRoute(j);
       // Store the waypoint list from the backend response
@@ -2485,6 +2485,19 @@ export function LiveTripScreen({ route, navigation }: Props) {
           console.log('[LiveTrip] remaining waypoints:', remaining.length);
           console.log('[LiveTrip] current waypoint index:', currentWaypointIndex);
         }
+      }
+      // ✅ Send initial route to WebView (handles race where MAP_READY fires before route arrives)
+      if (j.coordinates && j.coordinates.length >= 2) {
+        const coords = j.coordinates.map(c => [c.longitude, c.latitude]);
+        liveMapRef.current?.postMessage({
+          type: 'SET_ROUTE',
+          payload: {
+            coordinates: coords,
+            steps: (j as any).steps ?? [],
+            waypoints: j.waypoints ?? [],
+          }
+        });
+        console.log('[LiveTrip] initial route sent to WebView, coords:', coords.length);
       }
     } catch {
       if (__DEV__) console.log('[LiveTrip] failed to fetch driving route');
@@ -2919,21 +2932,47 @@ export function LiveTripScreen({ route, navigation }: Props) {
   // Handle off-route detection from WebView
   const handleOffRoute = useCallback((pos: { lat: number; lng: number }) => {
     const now = Date.now();
-    if (now - lastRerouteTimeRef.current < 10000) return;
+    if (!__DEV__ && now - lastRerouteTimeRef.current < 10000) return;
     if (isReroutingRef.current) return;
     lastRerouteTimeRef.current = now;
     setIsRerouting(true);
     isReroutingRef.current = true;
     console.log('[LiveTrip] off-route detected, requesting reroute from backend');
+    console.log('[LiveTrip] rerouting from position:', pos);
     (async () => {
       try {
-        const res = await apiFetch(`/api/trips/${id}/driving-route`);
+        const res = await apiFetch(`/api/trips/${id}/driving-route`, {
+          method: 'POST',
+          body: JSON.stringify({ currentLat: pos.lat, currentLng: pos.lng }),
+        });
         const j = (await res.json()) as DrivingRoutePayload;
         if (j.coordinates && j.coordinates.length >= 2) {
           setDrivingRoute(j);
           const coords = j.coordinates.map(c => ({ lat: c.latitude, lng: c.longitude }));
           setRerouteCoords(coords);
           setRerouteTick(t => t + 1);
+          // Build new waypoints: current position → remaining waypoints
+          const newWaypoints = [
+            { lng: pos.lng, lat: pos.lat },
+            ...remainingWaypoints.map(w => ({ lng: w.lng, lat: w.lat }))
+          ];
+          const routeCoordsForWebView = j.coordinates.map(c => [c.longitude, c.latitude]);
+          console.log('[LiveTrip] SET_ROUTE posted to WebView, coords count:',
+            routeCoordsForWebView.length,
+            'first coord:', routeCoordsForWebView[0],
+            'last coord:', routeCoordsForWebView[routeCoordsForWebView.length - 1]
+          );
+          console.log('[LiveTrip] liveMapRef.current exists:', !!liveMapRef.current,
+            'has postMessage:', typeof liveMapRef.current?.postMessage);
+          // ✅ CRITICAL: Send new route to WebView to redraw the blue line
+          liveMapRef.current?.postMessage({
+            type: 'SET_ROUTE',
+            payload: {
+              coordinates: routeCoordsForWebView,
+              steps: (j as any).steps ?? [],
+              waypoints: remainingWaypoints,
+            }
+          });
         }
       } catch {
         // keep current route
@@ -2942,7 +2981,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
         isReroutingRef.current = false;
       }
     })();
-  }, [id]);
+  }, [id, remainingWaypoints]);
 
   // Handle waypoint passed from WebView
   const handleWaypointPassed = useCallback((waypointId: string) => {
@@ -3624,6 +3663,15 @@ export function LiveTripScreen({ route, navigation }: Props) {
           <ActivityIndicator size="small" color="#fff" />
           <Text style={navStyles.reroutingText}>Rerouting...</Text>
         </View>
+      )}
+
+      {__DEV__ && userGeo && (
+        <Pressable
+          style={{ position: 'absolute', top: 100, right: 10, backgroundColor: '#ef4444', padding: 8, borderRadius: 8, zIndex: 999 }}
+          onPress={() => handleOffRoute({ lat: userGeo.lat + 0.001, lng: userGeo.lng + 0.001 })}
+        >
+          <Text style={{ color: 'white', fontSize: 12, fontWeight: '700' }}>Test Reroute</Text>
+        </Pressable>
       )}
 
       {/* ── Feature 6: Speedometer ────────────────────────────────────────────── */}
