@@ -31,7 +31,7 @@ import { useAuth } from "../context/AuthContext";
 import { normalizeTripFromApi, type Trip } from "../lib/tripNormalize";
 import { fetchWeatherNow, type WeatherNow } from "../lib/weather";
 import { useAppTheme } from "../context/ThemeContext";
-import { LiveMapView, type LiveMapViewRef, type MapMember, type MapPoint, type UserGeo } from "../components/LiveMapView";
+import { LiveMapView, type LiveMapViewRef, type MapMember, type MapPoint, type UserGeo, type RouteStep } from "../components/LiveMapView";
 import {
   formatDistance,
   haversineDistance,
@@ -528,9 +528,19 @@ type DrivingRoutePayload = {
   coordinates: { latitude: number; longitude: number }[];
   start: { lat: number; lng: number } | null;
   end: { lat: number; lng: number } | null;
+  waypoints?: Array<{ lat: number; lng: number; name: string; type: string; id: string }>;
   distanceMeters?: number | null;
   durationSeconds?: number | null;
   message?: string;
+};
+
+/** Single waypoint in the multi-stop route (start → cp1 → cp2 → pin1 → end). */
+type RouteWaypoint = {
+  lat: number;
+  lng: number;
+  name: string;
+  type: string;
+  id: string;
 };
 
 export function LiveTripScreen({ route, navigation }: Props) {
@@ -551,6 +561,13 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
   const [mapPins, setMapPins] = useState<MapPin[]>([]);
   const [drivingRoute, setDrivingRoute] = useState<DrivingRoutePayload | null>(null);
+  /** Remaining waypoints for progressive routing (start → cp1 → cp2 → ... → end). */
+  const [remainingWaypoints, setRemainingWaypoints] = useState<RouteWaypoint[]>([]);
+  /** Index into the original waypoint list tracking which waypoint the convoy is approaching. */
+  const [currentWaypointIndex, setCurrentWaypointIndex] = useState(1);
+  /** The full ordered waypoint list as returned by the backend. */
+  const allWaypointsRef = useRef<RouteWaypoint[]>([]);
+  const passedWaypointIdsRef = useRef<Set<string>>(new Set());
 
   const [attendanceTab, setAttendanceTab] = useState<"all" | "arrived" | "pending">("all");
 
@@ -2438,22 +2455,83 @@ export function LiveTripScreen({ route, navigation }: Props) {
     if (phase === "waiting") convoyFitDoneRef.current = false;
   }, [phase]);
 
+  /** Fetch the multi-waypoint driving route from backend. */
+  const fetchDrivingRoute = useCallback(async () => {
+    if (!id) return;
+    try {
+      const res = await apiFetch(`/api/trips/${id}/driving-route`);
+      const j = (await res.json()) as DrivingRoutePayload;
+      setDrivingRoute(j);
+      // Store the waypoint list from the backend response
+      if (j.waypoints && j.waypoints.length > 0) {
+        // Build full waypoint list: start + waypoints + end
+        const fullWps: RouteWaypoint[] = [];
+        if (j.start) {
+          fullWps.push({ lat: j.start.lat, lng: j.start.lng, name: "Start", type: "start", id: "start" });
+        }
+        for (const wp of j.waypoints) {
+          fullWps.push(wp);
+        }
+        if (j.end) {
+          fullWps.push({ lat: j.end.lat, lng: j.end.lng, name: "End", type: "end", id: "end" });
+        }
+        allWaypointsRef.current = fullWps;
+        // Keep any previously passed waypoints marked
+        const remaining = fullWps.filter((wp) => !passedWaypointIdsRef.current.has(wp.id));
+        setRemainingWaypoints(remaining);
+        setCurrentWaypointIndex(fullWps.length - remaining.length);
+        if (__DEV__) {
+          console.log('[LiveTrip] waypoints loaded:', allWaypointsRef.current.length);
+          console.log('[LiveTrip] remaining waypoints:', remaining.length);
+          console.log('[LiveTrip] current waypoint index:', currentWaypointIndex);
+        }
+      }
+    } catch {
+      if (__DEV__) console.log('[LiveTrip] failed to fetch driving route');
+      setDrivingRoute(null);
+    }
+  }, [id]);
+  const currentWaypointIndexRef = useRef(currentWaypointIndex);
+  currentWaypointIndexRef.current = currentWaypointIndex;
+
   useEffect(() => {
     if (phase !== "live" || !id) return;
     let cancelled = false;
     (async () => {
-      try {
-        const res = await apiFetch(`/api/trips/${id}/driving-route`);
-        const j = (await res.json()) as DrivingRoutePayload;
-        if (!cancelled) setDrivingRoute(j);
-      } catch {
-        if (!cancelled) setDrivingRoute(null);
-      }
+      await fetchDrivingRoute();
     })();
     return () => {
       cancelled = true;
     };
-  }, [id, phase]);
+  }, [id, phase, fetchDrivingRoute]);
+
+  /** Progressive waypoint detection: on each location tick, check if user passed a waypoint. */
+  useEffect(() => {
+    if (phase !== "live" || remainingWaypoints.length === 0) return;
+    const pos = currentPositionRef.current;
+    if (!pos) return;
+    const next = remainingWaypoints[0];
+    if (!next) return;
+
+    // Distance in meters to the next waypoint
+    const distM = haversineDistance(pos.lat, pos.lng, next.lat, next.lng);
+
+    // If within 100m of the waypoint, mark as passed
+    if (distM < 100) {
+      passedWaypointIdsRef.current.add(next.id);
+      const sliced = remainingWaypoints.slice(1);
+      setRemainingWaypoints(sliced);
+      setCurrentWaypointIndex((i) => i + 1);
+
+      // If there are still remaining waypoints, refetch route from current pos to remaining
+      if (sliced.length >= 2) {
+        // Schedule a route refresh (debounced)
+        setTimeout(() => {
+          void fetchDrivingRoute();
+        }, 500);
+      }
+    }
+  }, [posTick, phase, remainingWaypoints, fetchDrivingRoute]);
 
   useEffect(() => {
     if (phase !== "live" || convoyFitDoneRef.current) return;
@@ -3399,6 +3477,107 @@ export function LiveTripScreen({ route, navigation }: Props) {
         }
       : null);
 
+  // ── Navigation state (Features 2-6) ──────────────────────────────────────────
+  const [currentInstruction, setCurrentInstruction] = useState<{ text: string; type: string; distanceToStep: number } | null>(null);
+  const [isRerouting, setIsRerouting] = useState(false);
+  const [remainingNavDistance, setRemainingNavDistance] = useState(0);
+  const [routeProgress, setRouteProgress] = useState(0);
+  const [navSpeedKmh, setNavSpeedKmh] = useState(0);
+  const [rerouteTick, setRerouteTick] = useState(0);
+  const [rerouteCoords, setRerouteCoords] = useState<MapPoint[] | null>(null);
+  const lastRerouteTimeRef = useRef(0);
+  const isReroutingRef = useRef(false);
+
+  // Extract steps from drivingRoute
+  const routeSteps = useMemo(() => {
+    return (drivingRoute as any)?.steps ?? [];
+  }, [drivingRoute]);
+
+  // Waypoints for map (same as remainingWaypoints but with correct format)
+  const mapWaypoints = useMemo(() => {
+    return remainingWaypoints.map(wp => ({ lat: wp.lat, lng: wp.lng, name: wp.name, type: wp.type, id: wp.id }));
+  }, [remainingWaypoints]);
+
+  // Handle off-route detection from WebView
+  const handleOffRoute = useCallback((pos: { lat: number; lng: number }) => {
+    const now = Date.now();
+    if (now - lastRerouteTimeRef.current < 10000) return;
+    if (isReroutingRef.current) return;
+    lastRerouteTimeRef.current = now;
+    setIsRerouting(true);
+    isReroutingRef.current = true;
+    console.log('[LiveTrip] off-route detected, requesting reroute from backend');
+    (async () => {
+      try {
+        // Build new waypoints from current position + remaining
+        const newWps: RouteWaypoint[] = [{ lat: pos.lat, lng: pos.lng, name: "Current", type: "reroute", id: "reroute-pos" }, ...remainingWaypoints];
+        const coordStr = newWps.map(w => `${w.lng},${w.lat}`).join(';');
+        const res = await apiFetch(`/api/trips/${id}/driving-route`);
+        const j = (await res.json()) as DrivingRoutePayload;
+        if (j.coordinates && j.coordinates.length >= 2) {
+          setDrivingRoute(j);
+          const coords = j.coordinates.map(c => ({ lat: c.latitude, lng: c.longitude }));
+          setRerouteCoords(coords);
+          setRerouteTick(t => t + 1);
+        }
+      } catch {
+        // keep current route
+      } finally {
+        setIsRerouting(false);
+        isReroutingRef.current = false;
+      }
+    })();
+  }, [id, remainingWaypoints]);
+
+  // Handle waypoint passed from WebView
+  const handleWaypointPassed = useCallback((waypointId: string) => {
+    console.log('[LiveTrip] waypoint passed from WebView:', waypointId);
+    passedWaypointIdsRef.current.add(waypointId);
+    const sliced = remainingWaypoints.filter(wp => wp.id !== waypointId);
+    setRemainingWaypoints(sliced);
+    setCurrentWaypointIndex(i => i + 1);
+  }, [remainingWaypoints]);
+
+  // Handle instruction update from WebView
+  const handleInstructionUpdate = useCallback((instruction: { text: string; type: string; distanceToStep: number } | null) => {
+    setCurrentInstruction(instruction);
+  }, []);
+
+  // Handle progress update from WebView
+  const handleProgressUpdate = useCallback((remainingDist: number, _remainingDur: number, progressPct: number) => {
+    setRemainingNavDistance(remainingDist);
+    setRouteProgress(progressPct);
+  }, []);
+
+  // Maneuver icon helper
+  const getManeuverIcon = (type: string): string => {
+    const icons: Record<string, string> = {
+      'turn': '↱',
+      'depart': '▶',
+      'arrive': '🏁',
+      'merge': '⤴',
+      'on ramp': '↗',
+      'off ramp': '↘',
+      'fork': '⑂',
+      'end of road': '⊣',
+      'continue': '↑',
+      'roundabout': '↻',
+      'rotary': '↻',
+      'roundabout turn': '↻',
+      'straight': '↑',
+    };
+    return icons[type] ?? '↑';
+  };
+
+  // Format ETA
+  const formatETA = (seconds: number): string => {
+    if (seconds <= 0) return '';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m} min`;
+  };
+
   return (
     <View style={styles.liveRoot}>
       <LiveMapView
@@ -3413,8 +3592,58 @@ export function LiveTripScreen({ route, navigation }: Props) {
         fitTick={mapFitTick}
         recenterPoint={mapRecenterPoint}
         userGeo={effectiveUserGeo}
+        steps={routeSteps}
+        waypoints={mapWaypoints}
+        rerouteCoords={rerouteCoords}
+        rerouteTick={rerouteTick}
         onMapError={(msg) => setMapDiag(msg)}
+        onOffRoute={handleOffRoute}
+        onWaypointPassed={handleWaypointPassed}
+        onInstructionUpdate={handleInstructionUpdate}
+        onProgressUpdate={handleProgressUpdate}
       />
+
+      {/* ── Feature 4: Turn-by-turn instruction banner ─────────────────────────── */}
+      {currentInstruction && (
+        <View style={[navStyles.instructionBanner, { top: insets.top + 60 }]} pointerEvents="box-none">
+          <Text style={navStyles.maneuverIcon}>{getManeuverIcon(currentInstruction.type)}</Text>
+          <View style={navStyles.instructionContent}>
+            <Text style={navStyles.instructionDistance}>
+              {currentInstruction.distanceToStep > 0 ? formatDistance(currentInstruction.distanceToStep) : ''}
+            </Text>
+            <Text style={navStyles.instructionText} numberOfLines={2}>{currentInstruction.text}</Text>
+          </View>
+        </View>
+      )}
+
+      {/* ── Feature 2: Rerouting overlay ─────────────────────────────────────── */}
+      {isRerouting && (
+        <View style={navStyles.reroutingBanner}>
+          <ActivityIndicator size="small" color="#fff" />
+          <Text style={navStyles.reroutingText}>Rerouting...</Text>
+        </View>
+      )}
+
+      {/* ── Feature 6: Speedometer ────────────────────────────────────────────── */}
+      <View style={navStyles.speedometer}>
+        <Text style={navStyles.speedValue}>{Math.round(navSpeedKmh)}</Text>
+        <Text style={navStyles.speedUnit}>km/h</Text>
+      </View>
+
+      {/* ── Feature 5: ETA bar ────────────────────────────────────────────────── */}
+      <View style={navStyles.etaBar}>
+        <View style={navStyles.progressTrack}>
+          <View style={[navStyles.progressFill, { width: `${routeProgress}%` }]} />
+        </View>
+        <View style={navStyles.etaRow}>
+          <Text style={navStyles.etaText}>
+            {remainingNavDistance > 0 ? formatDistance(remainingNavDistance) : ''}
+          </Text>
+          <Text style={navStyles.etaText}>
+            {drivingRoute?.durationSeconds != null ? formatETA(Math.round(drivingRoute.durationSeconds * (1 - routeProgress / 100))) : ''}
+          </Text>
+        </View>
+      </View>
 
       {mapPinCrosshair ? (
         <View style={styles.crosshairWrap} pointerEvents="box-none">
@@ -5283,5 +5512,123 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     borderWidth: 2,
     borderColor: "#000",
+  },
+});
+
+const navStyles = StyleSheet.create({
+  instructionBanner: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    zIndex: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  maneuverIcon: {
+    fontSize: 24,
+    marginRight: 10,
+    color: '#fff',
+  },
+  instructionContent: {
+    flex: 1,
+  },
+  instructionDistance: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.5)',
+    fontWeight: '600',
+  },
+  instructionText: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '700',
+    lineHeight: 20,
+  },
+  reroutingBanner: {
+    position: 'absolute',
+    top: 120,
+    left: 12,
+    right: 12,
+    zIndex: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(234, 179, 8, 0.9)',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  reroutingText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  speedometer: {
+    position: 'absolute',
+    bottom: 140,
+    right: 12,
+    zIndex: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderRadius: 50,
+    width: 72,
+    height: 72,
+    borderWidth: 2,
+    borderColor: 'rgba(66, 133, 244, 0.5)',
+  },
+  speedValue: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#fff',
+    lineHeight: 26,
+  },
+  speedUnit: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.5)',
+  },
+  etaBar: {
+    position: 'absolute',
+    bottom: 110,
+    left: 12,
+    right: 80,
+    zIndex: 50,
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  progressTrack: {
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 2,
+    marginBottom: 6,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#4285F4',
+    borderRadius: 2,
+  },
+  etaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  etaText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.85)',
   },
 });

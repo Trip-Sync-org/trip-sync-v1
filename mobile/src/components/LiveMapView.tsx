@@ -6,6 +6,12 @@
  *
  * Token: EXPO_PUBLIC_MAPBOX_PUBLIC_TOKEN (from mobile/.env)
  * ─────────────────────────────────────────────────────────────────────────────
+ * Navigation features (Features 2-6):
+ * - Camera follow with heading-up + 3D pitch (Feature 3)
+ * - Off-route detection via haversine segment distance (Feature 2)
+ * - Turn-by-turn current step detection + instruction posting (Feature 4)
+ * - Waypoint-passed detection (Feature 2)
+ * - Route progress calculation (Feature 5)
  */
 
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
@@ -34,6 +40,18 @@ export type UserGeo   = {
   speedMps?: number | null;
 };
 
+export type RouteStep = {
+  instruction: string;
+  type: string;
+  modifier: string;
+  distance: number;
+  duration: number;
+  bannerInstructions: Array<{
+    primary: { text: string; type: string; components: Array<{ text: string; type: string }> };
+  }>;
+  geometry: { coordinates: [number, number][] };
+};
+
 type Props = {
   dark:           boolean;
   route:          MapPoint[];
@@ -46,8 +64,23 @@ type Props = {
   fitTick?:       number;
   recenterPoint?: MapPoint | null;
   userGeo?:       UserGeo | null;
+  /** Steps from Mapbox Directions API for turn-by-turn */
+  steps?:         RouteStep[];
+  /** All waypoints for progressive detection */
+  waypoints?:     Array<{ lat: number; lng: number; name: string; type: string; id: string }>;
   onMapError?:    (message: string) => void;
   onReady?:       () => void;
+  /** Called when WebView detects off-route condition */
+  onOffRoute?:    (pos: { lat: number; lng: number }) => void;
+  /** Called when WebView detects next waypoint passed */
+  onWaypointPassed?: (waypointId: string) => void;
+  /** Called when WebView finds current step instruction */
+  onInstructionUpdate?: (instruction: { text: string; type: string; distanceToStep: number } | null) => void;
+  /** Called with route progress info */
+  onProgressUpdate?: (remainingDistance: number, remainingDuration: number, progressPct: number) => void;
+  /** Reroute coords to send to WebView */
+  rerouteCoords?: MapPoint[] | null;
+  rerouteTick?: number;
 };
 
 export type LiveMapViewRef = {
@@ -135,6 +168,49 @@ let pinMarkers = [];
 let startMarker = null;
 let endMarker = null;
 
+// ── Navigation state ──────────────────────────────────────────────────────────
+let routeSteps = [];           // steps from backend (Mapbox Directions)
+let waypointList = [];         // { lng, lat, id, name, type }
+let nextWaypointIdx = 0;
+let lastRerouteTime = 0;
+let lastInstructionText = "";
+let lastInstructionType = "";
+
+// ── Haversine helpers ─────────────────────────────────────────────────────────
+function toRad(d) { return d * Math.PI / 180; }
+function haversineMeters(a, b) {
+  const R = 6371000;
+  const dLat = toRad(b[1] - a[1]);
+  const dLng = toRad(b[0] - a[0]);
+  const la = toRad(a[1]), lb = toRad(b[1]);
+  const h = Math.sin(dLat/2)**2 + Math.cos(la)*Math.cos(lb)*Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+function distToSegment(p, a, b) {
+  const d = haversineMeters(a, b);
+  if (d < 1) return haversineMeters(p, a);
+  const t = Math.max(0, Math.min(1, (
+    (p[0]-a[0])*(b[0]-a[0]) + (p[1]-a[1])*(b[1]-a[1])
+  ) / (d*d)));
+  const proj = [a[0] + t*(b[0]-a[0]), a[1] + t*(b[1]-a[1])];
+  return haversineMeters(p, proj);
+}
+function distToPolyline(point, coords) {
+  let min = Infinity;
+  for (let i = 0; i < coords.length - 1; i++) {
+    min = Math.min(min, distToSegment(point, coords[i], coords[i+1]));
+  }
+  return min;
+}
+/** Sum haversine distance from index i to end of coord array */
+function remainingDistanceAlongRoute(coords, fromIdx) {
+  let total = 0;
+  for (let i = Math.max(0, fromIdx); i < coords.length - 1; i++) {
+    total += haversineMeters(coords[i], coords[i+1]);
+  }
+  return total;
+}
+
 function mkDot(color) {
   const el = document.createElement("div");
   el.className = "mb-pin";
@@ -211,6 +287,66 @@ function updateRouteProgress(lng, lat) {
     map.getSource("route-traveled").setData(gj);
   }
   traveledLayerReady = true;
+
+  // Calculate remaining distance and duration, post progress
+  const remDist = remainingDistanceAlongRoute(sourceRouteCoords, idx);
+  const totalDist = sourceRouteCoords && sourceRouteCoords.length > 1
+    ? remainingDistanceAlongRoute(sourceRouteCoords, 0) : 1;
+  const progressPct = totalDist > 0 ? Math.min(100, ((totalDist - remDist) / totalDist) * 100) : 0;
+  post({ type:"progress-update", remainingDistance: remDist, remainingDuration: 0, progressPct: Math.round(progressPct) });
+}
+
+/** Find the current step the user is on based on position */
+function findCurrentStep(lng, lat) {
+  if (!routeSteps || routeSteps.length === 0) return null;
+  const point = [lng, lat];
+  let bestStep = null;
+  let bestDist = 50; // within 50m threshold
+  for (const step of routeSteps) {
+    const coords = step.geometry && step.geometry.coordinates;
+    if (!coords || coords.length < 2) continue;
+    const d = distToPolyline(point, coords);
+    if (d < bestDist) {
+      bestDist = d;
+      bestStep = step;
+    }
+  }
+  return bestStep;
+}
+
+/** Check if user is off-route */
+function checkOffRoute(lng, lat) {
+  if (sourceRouteCoords.length < 2) return false;
+  const point = [lng, lat];
+  const dist = distToPolyline(point, sourceRouteCoords);
+  const OFF_ROUTE_THRESHOLD = 50; // meters
+  const REROUTE_COOLDOWN = 10000; // ms
+  const now = Date.now();
+  if (dist > OFF_ROUTE_THRESHOLD && now - lastRerouteTime > REROUTE_COOLDOWN) {
+    lastRerouteTime = now;
+    return true;
+  }
+  return false;
+}
+
+/** Check if user passed the next waypoint */
+function checkWaypointPassed(lng, lat) {
+  if (!waypointList || waypointList.length === 0) return null;
+  if (nextWaypointIdx >= waypointList.length) return null;
+  const wp = waypointList[nextWaypointIdx];
+  const dist = haversineMeters([lng, lat], [wp.lng, wp.lat]);
+  if (dist < 100) {
+    nextWaypointIdx++;
+    return wp;
+  }
+  return null;
+}
+
+/** Get next waypoint for UI display */
+function getNextWaypoint() {
+  if (!waypointList || waypointList.length === 0) return null;
+  if (nextWaypointIdx >= waypointList.length) return null;
+  return waypointList[nextWaypointIdx];
 }
 
 function apply(data) {
@@ -221,6 +357,24 @@ function apply(data) {
     return Number.isFinite(la) && Number.isFinite(ln);
   }).map(p => [Number(p.lng), Number(p.lat)]);
   upsertRouteLayers(routeCoords);
+
+  // Store steps and waypoints
+  if (data.steps && Array.isArray(data.steps)) {
+    routeSteps = data.steps;
+    // Post instruction for first step
+    if (routeSteps.length > 0) {
+      const first = routeSteps[0];
+      post({ type:"instruction-update", text: first.instruction, maneuverType: first.type, distanceToStep: first.distance });
+    }
+  }
+  if (data.waypoints && Array.isArray(data.waypoints)) {
+    waypointList = data.waypoints.map(w => ({ lng: w.lng, lat: w.lat, id: w.id, name: w.name, type: w.type }));
+    nextWaypointIdx = 0;
+    // Post first waypoint info
+    if (waypointList.length > 0) {
+      post({ type:"waypoint-info", waypoint: waypointList[0] });
+    }
+  }
 
   const activeSeg = (data.activeRouteSegment || []).filter(p => {
     const la = Number(p?.lat); const ln = Number(p?.lng);
@@ -281,7 +435,6 @@ function apply(data) {
     const col = (p && p.color) ? String(p.color) : "#a78bfa";
     pinMarkers.push(new mapboxgl.Marker({ element: mkDot(col), anchor: "bottom" }).setLngLat([ln, la]).addTo(map));
   });
-
 }
 
 function fitAll(data) {
@@ -379,6 +532,8 @@ function applyUserGeoPayload(ug) {
   const lat = Number(ug.lat); const lng = Number(ug.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
   const headingDeg = ug.headingDeg;
+  
+  // Update user marker
   if (!userMarker) {
     userMarker = new mapboxgl.Marker({ element: mkUserDot(headingDeg != null ? headingDeg : 0), anchor: "center" })
       .setLngLat([lng, lat])
@@ -397,7 +552,69 @@ function applyUserGeoPayload(ug) {
     } catch {}
   }
   updateRouteProgress(lng, lat);
+
+  // ── Feature 3: Camera follow (heading-up with pitch) ────────────────────────
+  const bearing = headingDeg != null && Number.isFinite(headingDeg) ? headingDeg : map.getBearing() || 0;
+  map.easeTo({
+    center: [lng, lat],
+    bearing: bearing,
+    pitch: 45,
+    zoom: 17,
+    duration: 300,
+  });
+
+  // ── Feature 2: Off-route detection ──────────────────────────────────────────
+  if (sourceRouteCoords.length >= 2) {
+    const isOffRoute = checkOffRoute(lng, lat);
+    if (isOffRoute) {
+      post({ type:"reroute-needed", payload: { lat, lng } });
+    }
+  }
+
+  // ── Feature 4: Current step detection ──────────────────────────────────────
+  const currentStep = findCurrentStep(lng, lat);
+  if (currentStep) {
+    const text = currentStep.instruction || currentStep.bannerInstructions?.[0]?.primary?.text || "";
+    if (text !== lastInstructionText) {
+      lastInstructionText = text;
+      lastInstructionType = currentStep.type;
+      // Find distance from current position to next step geometry's start
+      const stepCoords = currentStep.geometry?.coordinates;
+      let distToStep = currentStep.distance || 0;
+      if (stepCoords && stepCoords.length > 0) {
+        distToStep = haversineMeters([lng, lat], stepCoords[0]);
+      }
+      post({
+        type:"instruction-update",
+        text: text,
+        maneuverType: currentStep.type,
+        distanceToStep: Math.round(distToStep),
+      });
+    }
+  } else {
+    if (lastInstructionText) {
+      lastInstructionText = "";
+      post({ type:"instruction-update", text: null, maneuverType: null, distanceToStep: 0 });
+    }
+  }
+
+  // ── Feature 2: Waypoint detection ──────────────────────────────────────────
+  const passedWp = checkWaypointPassed(lng, lat);
+  if (passedWp) {
+    post({ type:"waypoint-passed", waypointId: passedWp.id, name: passedWp.name });
+    // Send next waypoint info
+    const next = getNextWaypoint();
+    if (next) {
+      post({ type:"waypoint-info", waypoint: next });
+    }
+  }
+
+  // Post speed from userGeo for speedometer
+  if (ug.speedMps != null) {
+    post({ type:"speed-update", speedKmh: Math.round(ug.speedMps * 3.6) });
+  }
 }
+
 function onRNMessage(raw) {
   try {
     const msg = JSON.parse(raw || "{}");
@@ -405,6 +622,13 @@ function onRNMessage(raw) {
       applySetDataPayload(msg);
     } else if (msg.type === "update-user-geo" && msg.userGeo) {
       applyUserGeoPayload(msg.userGeo);
+    } else if (msg.type === "set-steps") {
+      if (msg.steps) routeSteps = msg.steps;
+    } else if (msg.type === "set-waypoints") {
+      if (msg.waypoints) {
+        waypointList = msg.waypoints.map(w => ({ lng: w.lng, lat: w.lat, id: w.id, name: w.name, type: w.type }));
+        nextWaypointIdx = 0;
+      }
     } else if (msg.type === "fit") {
       fitAll(msg);
     } else if (msg.type === "recenter" && msg.point) {
@@ -420,6 +644,15 @@ function onRNMessage(raw) {
     } else if (msg.type === "reset-north") {
       if (!map) return;
       map.easeTo({ bearing: 0, duration: 350 });
+    } else if (msg.type === "set-route" && msg.coordinates) {
+      // Re-route: set new route coordinates
+      upsertRouteLayers(msg.coordinates);
+      sourceRouteCoords = msg.coordinates;
+      if (msg.steps) routeSteps = msg.steps;
+      if (msg.waypoints) {
+        waypointList = msg.waypoints.map(w => ({ lng: w.lng, lat: w.lat, id: w.id, name: w.name, type: w.type }));
+        nextWaypointIdx = 0;
+      }
     }
   } catch {}
 }
@@ -451,8 +684,16 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
   fitTick      = 0,
   recenterPoint = null,
   userGeo       = null,
+  steps         = [],
+  waypoints     = [],
   onMapError,
   onReady,
+  onOffRoute,
+  onWaypointPassed,
+  onInstructionUpdate,
+  onProgressUpdate,
+  rerouteCoords = null,
+  rerouteTick   = 0,
 }: Props, ref) {
   const webRef             = useRef<WebView>(null);
   const [ready, setReady]  = useState(false);
@@ -513,16 +754,37 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
       members,
       pins,
       activeRouteSegment: activeRouteSegment ?? [],
+      steps,
+      waypoints,
     };
     latestRef.current = payload;
     post(payload);
     injectSetData(payload);
-  }, [route, start, end, members, pins, activeRouteSegment, ready, injectSetData]);
+  }, [route, start, end, members, pins, activeRouteSegment, steps, waypoints, ready, injectSetData]);
 
+  // Send userGeo updates to WebView
   useEffect(() => {
     if (!ready || !userGeo) return;
     post({ type: "update-user-geo", userGeo });
   }, [userGeo, ready]);
+
+  // Steps / waypoints updates
+  useEffect(() => {
+    if (!ready) return;
+    if (steps && steps.length > 0) post({ type: "set-steps", steps });
+  }, [steps, ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    if (waypoints && waypoints.length > 0) post({ type: "set-waypoints", waypoints });
+  }, [waypoints, ready]);
+
+  // Reroute coords
+  useEffect(() => {
+    if (!ready || !rerouteCoords || rerouteCoords.length < 2) return;
+    const coords = rerouteCoords.map(p => [p.lng, p.lat]);
+    post({ type: "set-route", coordinates: coords, steps, waypoints });
+  }, [rerouteTick, ready]);
 
   // Fit bounds
   useEffect(() => {
@@ -594,6 +856,22 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
               onReady?.();
             } else if (msg?.type === "map-error") {
               onMapError?.(String(msg?.message || "Map error"));
+            } else if (msg?.type === "reroute-needed") {
+              onOffRoute?.(msg.payload);
+            } else if (msg?.type === "waypoint-passed") {
+              onWaypointPassed?.(msg.waypointId);
+            } else if (msg?.type === "instruction-update") {
+              if (msg.text) {
+                onInstructionUpdate?.({ text: msg.text, type: msg.maneuverType, distanceToStep: msg.distanceToStep });
+              } else {
+                onInstructionUpdate?.(null);
+              }
+            } else if (msg?.type === "progress-update") {
+              onProgressUpdate?.(msg.remainingDistance, msg.remainingDuration, msg.progressPct);
+            } else if (msg?.type === "speed-update") {
+              // handled via userGeo already
+            } else if (msg?.type === "waypoint-info") {
+              // available via remainingWaypoints state
             }
           } catch { /* ignore */ }
         }}

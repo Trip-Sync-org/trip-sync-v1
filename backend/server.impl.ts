@@ -959,6 +959,11 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
    * Turn-by-turn style driving polyline (meetup/start → end) via OSRM public demo.
    * For production, swap to a managed directions provider, Valhalla, or self-hosted OSRM.
    */
+  /**
+   * Multi-waypoint driving route:
+   * Builds route = start → checkpoint_1 → checkpoint_2 → ... → map_pin_1 → ... → end
+   * Fetches checkpoints (ordered) and approved map pins as intermediate waypoints.
+   */
   app.get("/api/trips/:id/driving-route", async (req, res) => {
     const tripId = Number(req.params.id);
     if (!Number.isFinite(tripId)) {
@@ -986,49 +991,216 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
         coordinates: [] as { latitude: number; longitude: number }[],
         start,
         end,
+        waypoints: [] as Array<{ lat: number; lng: number; name: string; type: string; id: string }>,
         distanceMeters: null as number | null,
         durationSeconds: null as number | null,
         message: "Add meetup and end locations to the trip to compute the convoy route.",
       });
     }
 
-    try {
-      const url = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`;
-      const r = await fetch(url);
-      if (!r.ok) {
-        return res.json({
-          coordinates: [],
-          start,
-          end,
-          distanceMeters: null,
-          durationSeconds: null,
-          message: "Routing service returned an error.",
-        });
+    // ── Build ordered waypoint list ──────────────────────────────────────────
+    const MAX_WAYPOINTS = 25; // OSRM public instance limit (~100, but we stay safe)
+
+    // 1. Fetch checkpoints ordered by order_index
+    const { data: checkpoints, error: cpErr } = await supabase
+      .from("trip_checkpoints")
+      .select("id, name, latitude, longitude, order_index")
+      .eq("trip_id", tripId)
+      .order("order_index", { ascending: true });
+
+    if (cpErr) {
+      console.error("driving-route checkpoints:", cpErr.message);
+    }
+
+    // 2. Fetch approved map pins
+    const { data: pins, error: pinsErr } = await supabase
+      .from("trip_map_pins")
+      .select("id, label, lat, lng, type")
+      .eq("trip_id", tripId)
+      .eq("status", "approved");
+
+    if (pinsErr) {
+      console.error("driving-route pins:", pinsErr.message);
+    }
+
+    // 3. Collect all intermediate waypoints (checkpoints + pins)
+    const intermediates: Array<{ lat: number; lng: number; name: string; type: string; id: string }> = [];
+
+    // Add checkpoints
+    if (Array.isArray(checkpoints)) {
+      for (const cp of checkpoints) {
+        const cpLat = toFiniteNumber(cp.latitude) ?? toFiniteNumber(cp.lat);
+        const cpLng = toFiniteNumber(cp.longitude) ?? toFiniteNumber(cp.lng);
+        if (cpLat != null && cpLng != null && isValidLatLng(cpLat, cpLng)) {
+          intermediates.push({
+            lat: cpLat,
+            lng: cpLng,
+            name: String(cp.name || "Checkpoint"),
+            type: "checkpoint",
+            id: String(cp.id),
+          });
+        }
       }
-      const j = (await r.json()) as {
-        routes?: Array<{
-          distance?: number;
-          duration?: number;
-          geometry?: { coordinates?: [number, number][] };
-        }>;
-      };
-      const route = j.routes?.[0];
-      const rawCoords = route?.geometry?.coordinates;
-      const coordinates = Array.isArray(rawCoords)
-        ? rawCoords.map(([lng, lat]) => ({ latitude: lat, longitude: lng }))
-        : [];
+    }
+
+    // Add approved map pins
+    if (Array.isArray(pins)) {
+      for (const pin of pins) {
+        const pinLat = toFiniteNumber(pin.lat);
+        const pinLng = toFiniteNumber(pin.lng);
+        if (pinLat != null && pinLng != null && isValidLatLng(pinLat, pinLng)) {
+          intermediates.push({
+            lat: pinLat,
+            lng: pinLng,
+            name: String(pin.label || "Map pin"),
+            type: String(pin.type || "pin"),
+            id: String(pin.id),
+          });
+        }
+      }
+    }
+
+    // 4. Sort intermediates by dot-product projection along start→end vector
+    //    This gives geographically correct ordering even when pins were added out of order.
+    const dx = end.lng - start.lng;
+    const dy = end.lat - start.lat;
+    const dotProduct = (p: { lat: number; lng: number }) => (p.lng - start.lng) * dx + (p.lat - start.lat) * dy;
+    intermediates.sort((a, b) => dotProduct(a) - dotProduct(b));
+
+    // 5. Cap at MAX_WAYPOINTS (including start + end)
+    const cappedIntermediates = intermediates.slice(0, MAX_WAYPOINTS - 2);
+
+    // 6. Build final waypoints array
+    const waypoints: Array<{ lat: number; lng: number; name: string; type: string; id: string }> = [];
+    waypoints.push({ lat: start.lat, lng: start.lng, name: "Start", type: "start", id: "start" });
+    for (const wp of cappedIntermediates) {
+      waypoints.push(wp);
+    }
+    waypoints.push({ lat: end.lat, lng: end.lng, name: "End", type: "end", id: "end" });
+
+    console.log(`[driving-route] trip=${tripId} waypoints=${waypoints.length} (capped from ${intermediates.length + 2})`);
+
+    // Helper: fetch route from Mapbox Directions API
+    const MAPBOX_TOKEN = process.env.MAPBOX_SECRET_TOKEN || process.env.VITE_MAPBOX_PUBLIC_TOKEN || "";
+    async function fetchMapboxRoute(coordStr: string): Promise<{
+      coordinates: { latitude: number; longitude: number }[];
+      distanceMeters: number | null;
+      durationSeconds: number | null;
+      steps: Array<{
+        instruction: string;
+        type: string;
+        modifier: string;
+        distance: number;
+        duration: number;
+        bannerInstructions: Array<{ primary: { text: string; type: string; components: Array<{ text: string; type: string }> } }>;
+        geometry: { coordinates: [number, number][] };
+      }>;
+    } | null> {
+      try {
+        const url = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coordStr}` +
+          `?alternatives=false` +
+          `&geometries=geojson` +
+          `&overview=full` +
+          `&steps=true` +
+          `&banner_instructions=true` +
+          `&voice_instructions=true` +
+          `&roundabout_exits=true` +
+          `&annotations=duration,distance,speed` +
+          `&access_token=${MAPBOX_TOKEN}`;
+        const r = await fetch(url);
+        if (!r.ok) {
+          const body = await r.text().catch(() => "");
+          console.warn(`[driving-route] Mapbox Directions returned ${r.status}: ${body.slice(0, 200)}`);
+          return null;
+        }
+        const j = (await r.json()) as {
+          code?: string;
+          routes?: Array<{
+            distance?: number;
+            duration?: number;
+            geometry?: { coordinates?: [number, number][] };
+            legs?: Array<{
+              steps?: Array<{
+                maneuver?: { instruction?: string; type?: string; modifier?: string };
+                distance?: number;
+                duration?: number;
+                bannerInstructions?: Array<{ primary?: { text?: string; type?: string; components?: Array<{ text?: string; type?: string }> } }>;
+                geometry?: { coordinates?: [number, number][] };
+              }>;
+            }>;
+          }>;
+        };
+        if (j.code !== "Ok" || !j.routes?.length) {
+          console.warn("[driving-route] Mapbox Directions returned non-Ok:", j.code);
+          return null;
+        }
+        const route = j.routes[0];
+        const rawCoords = route?.geometry?.coordinates;
+        const coordinates = Array.isArray(rawCoords)
+          ? rawCoords.map(([lng, lat]) => ({ latitude: lat, longitude: lng }))
+          : [];
+        const steps = (route.legs || []).flatMap(leg =>
+          (leg.steps || []).map(step => ({
+            instruction: step.maneuver?.instruction || "",
+            type: step.maneuver?.type || "",
+            modifier: step.maneuver?.modifier || "",
+            distance: step.distance || 0,
+            duration: step.duration || 0,
+            bannerInstructions: (step.bannerInstructions || []).map(bi => ({
+              primary: {
+                text: bi.primary?.text || "",
+                type: bi.primary?.type || "",
+                components: (bi.primary?.components || []).map(c => ({ text: c.text || "", type: c.type || "" })),
+              },
+            })),
+            geometry: step.geometry || { coordinates: [] },
+          }))
+        );
+        return {
+          coordinates,
+          distanceMeters: route?.distance ?? null,
+          durationSeconds: route?.duration != null ? Math.round(route.duration) : null,
+          steps,
+        };
+      } catch (e) {
+        console.warn("[driving-route] Mapbox Directions fetch error:", e);
+        return null;
+      }
+    }
+
+    // 7. Fetch route from Mapbox Directions API
+    const coordString = waypoints.map(w => `${w.lng},${w.lat}`).join(";");
+    let result = await fetchMapboxRoute(coordString);
+
+    if (!result) {
+      console.warn("[driving-route] Mapbox multi-waypoint failed, falling back to simple start→end");
+      const simpleCoord = `${start.lng},${start.lat};${end.lng},${end.lat}`;
+      result = await fetchMapboxRoute(simpleCoord);
+    }
+
+    if (!result) {
       return res.json({
-        coordinates,
+        coordinates: [],
         start,
         end,
-        distanceMeters: route?.distance ?? null,
-        durationSeconds: route?.duration != null ? Math.round(route.duration) : null,
-        provider: "osrm",
+        waypoints: cappedIntermediates,
+        steps: [],
+        distanceMeters: null,
+        durationSeconds: null,
+        message: "Routing service returned an error.",
       });
-    } catch (e) {
-      console.error("driving-route:", e);
-      return res.status(500).json({ error: "Failed to compute route" });
     }
+
+    return res.json({
+      coordinates: result.coordinates,
+      start,
+      end,
+      waypoints: cappedIntermediates,
+      steps: result.steps,
+      distanceMeters: result.distanceMeters,
+      durationSeconds: result.durationSeconds,
+      provider: "mapbox",
+    });
   });
 
   app.post("/api/trips", async (req, res) => {
