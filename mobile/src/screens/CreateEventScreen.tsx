@@ -69,6 +69,17 @@ type InviteRow = { type: "email" | "phone"; value: string };
 
 const CREATE_EVENT_DRAFT_KEY = "tripsync_create_event_draft_v1";
 
+/** Haversine distance in meters between two lat/lng points. */
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function MapboxCreatePreview({
   start,
   end,
@@ -300,6 +311,18 @@ export function CreateEventScreen({ navigation }: Props) {
   const [fullscreenImage, setFullscreenImage] = useState<string[] | null>(null);
   const [fullscreenIndex, setFullscreenIndex] = useState(0);
 
+  // Previous trip checkpoints for same route
+  type PrevTripCp = {
+    id: string;
+    name: string;
+    description?: string | null;
+    lat: number;
+    lng: number;
+    tripName: string;
+  };
+  const [prevTripCheckpoints, setPrevTripCheckpoints] = useState<PrevTripCp[]>([]);
+  const [prevTripCpLoading, setPrevTripCpLoading] = useState(false);
+
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const cpSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -411,6 +434,97 @@ export function CreateEventScreen({ navigation }: Props) {
     }, 500);
     return () => clearTimeout(t);
   }, [routePolyline, startCoords, endCoords, user?.id, user?.activeRole]);
+
+  // ── Fetch checkpoints from previous trips with same route ──────────────
+  useEffect(() => {
+    if (!user?.id || !startCoords || !endCoords) {
+      setPrevTripCheckpoints([]);
+      setPrevTripCpLoading(false);
+      return;
+    }
+    const uid = Number(user.id);
+    if (!Number.isFinite(uid)) return;
+
+    const t = setTimeout(async () => {
+      setPrevTripCpLoading(true);
+      try {
+        if (!supabase) {
+          setPrevTripCheckpoints([]);
+          setPrevTripCpLoading(false);
+          return;
+        }
+        // Query trips created by this organizer
+        const { data: trips, error: tripsErr } = await supabase
+          .from("trips")
+          .select("id, name, start_lat, start_lng, end_lat, end_lng")
+          .eq("organizer_id", uid)
+          .in("status", ["completed", "upcoming", "active", "live", "started", "ongoing"])
+          .order("created_at", { ascending: false })
+          .limit(20);
+
+        if (tripsErr || !trips?.length) {
+          setPrevTripCheckpoints([]);
+          return;
+        }
+
+        const MATCH_M = 20000; // 20 km
+        const matchingTrips: Array<{ id: number; name: string }> = [];
+
+        for (const trip of trips) {
+          const slat = Number(trip.start_lat);
+          const slng = Number(trip.start_lng);
+          const elat = Number(trip.end_lat);
+          const elng = Number(trip.end_lng);
+
+          if (!Number.isFinite(slat) || !Number.isFinite(slng) || !Number.isFinite(elat) || !Number.isFinite(elng)) continue;
+
+          const startDist = haversineMeters(slat, slng, startCoords.lat, startCoords.lng);
+          const endDist = haversineMeters(elat, elng, endCoords.lat, endCoords.lng);
+
+          if (startDist <= MATCH_M && endDist <= MATCH_M) {
+            matchingTrips.push({ id: Number(trip.id), name: String(trip.name || `Trip #${trip.id}`) });
+          }
+        }
+
+        if (!matchingTrips.length) {
+          setPrevTripCheckpoints([]);
+          return;
+        }
+
+        // Fetch checkpoints for all matching trips
+        const allCp: PrevTripCp[] = [];
+        for (const mt of matchingTrips) {
+          const { data: cps, error: cpErr } = await supabase
+            .from("trip_checkpoints")
+            .select("id, name, description, latitude, longitude")
+            .eq("trip_id", mt.id)
+            .order("order_index", { ascending: true });
+
+          if (cpErr || !cps?.length) continue;
+
+          for (const cp of cps) {
+            const lat = Number(cp.latitude);
+            const lng = Number(cp.longitude);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+            allCp.push({
+              id: String(cp.id),
+              name: String(cp.name || "Checkpoint"),
+              description: cp.description ?? null,
+              lat, lng,
+              tripName: mt.name,
+            });
+          }
+        }
+
+        setPrevTripCheckpoints(allCp);
+      } catch {
+        setPrevTripCheckpoints([]);
+      } finally {
+        setPrevTripCpLoading(false);
+      }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [startCoords, endCoords, user?.id]);
 
   useEffect(() => {
     const q = cpSearch.trim();
