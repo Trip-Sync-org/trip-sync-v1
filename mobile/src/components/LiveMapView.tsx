@@ -657,7 +657,7 @@ function onRNMessage(raw) {
       }
     } else if (msg.type === "SET_ROUTE" && msg.payload) {
       // Handle SET_ROUTE with payload wrapper (from LiveTripScreen.handleOffRoute)
-      const { coordinates, steps, waypoints } = msg.payload;
+      const { coordinates, steps, waypoints, checkpoints } = msg.payload;
       console.log('[WebView] SET_ROUTE received, coords:', coordinates?.length);
       if (coordinates && coordinates.length >= 2) {
         upsertRouteLayers(coordinates);
@@ -668,6 +668,38 @@ function onRNMessage(raw) {
           nextWaypointIdx = 0;
         }
         console.log('[WebView] SET_ROUTE processed, segments:', coordinates.length);
+      }
+      // Render checkpoint markers
+      if (window.checkpointMarkers) {
+        window.checkpointMarkers.forEach(function(m) { try { m.remove(); } catch(e) {} });
+      }
+      window.checkpointMarkers = [];
+      if (checkpoints && checkpoints.length > 0) {
+        checkpoints.forEach(function(cp, i) {
+          if (!cp.lat || !cp.lng) return;
+          var el = document.createElement('div');
+          el.style.cssText = 'width:32px;height:32px;background:#10b981;border:3px solid white;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 2px 8px rgba(0,0,0,0.4);cursor:pointer;';
+          var label = document.createElement('div');
+          label.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(45deg);color:white;font-weight:bold;font-size:12px;';
+          label.textContent = String(i + 1);
+          el.appendChild(label);
+          var marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
+            .setLngLat([cp.lng, cp.lat])
+            .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML('<strong>' + (cp.name || 'Checkpoint ' + (i+1)) + '</strong>'))
+            .addTo(map);
+          marker._passed = false;
+          window.checkpointMarkers.push(marker);
+        });
+      }
+      // Render destination marker
+      if (waypoints && waypoints.length > 0) {
+        var dest = waypoints[waypoints.length - 1];
+        if (dest) {
+          if (window._destMarker) { try { window._destMarker.remove(); } catch(e) {} }
+          var destEl = document.createElement('div');
+          destEl.style.cssText = 'width:20px;height:20px;background:#ef4444;border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.4);';
+          window._destMarker = new mapboxgl.Marker({ element: destEl }).setLngLat([dest.lng, dest.lat]).addTo(map);
+        }
       }
       // Send back confirmation to RN
       post({ type: 'DEBUG', msg: 'SET_ROUTE received, coords: ' + (coordinates?.length ?? 'undefined') });

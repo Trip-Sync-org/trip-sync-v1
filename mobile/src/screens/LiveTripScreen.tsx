@@ -2489,15 +2489,18 @@ export function LiveTripScreen({ route, navigation }: Props) {
       // ✅ Send initial route to WebView (handles race where MAP_READY fires before route arrives)
       if (j.coordinates && j.coordinates.length >= 2) {
         const coords = j.coordinates.map(c => [c.longitude, c.latitude]);
+        const allWps = allWaypointsRef.current;
         liveMapRef.current?.postMessage({
           type: 'SET_ROUTE',
           payload: {
             coordinates: coords,
             steps: (j as any).steps ?? [],
             waypoints: j.waypoints ?? [],
+            checkpoints: allWps.filter(w => w.type === 'checkpoint'),
           }
         });
-        console.log('[LiveTrip] initial route sent to WebView, coords:', coords.length);
+        console.log('[LiveTrip] initial route sent to WebView, coords:', coords.length,
+          'waypoints:', allWps.map(w => `${w.type}:${w.name}`).join(', '));
       }
     } catch {
       if (__DEV__) console.log('[LiveTrip] failed to fetch driving route');
@@ -2964,13 +2967,14 @@ export function LiveTripScreen({ route, navigation }: Props) {
           );
           console.log('[LiveTrip] liveMapRef.current exists:', !!liveMapRef.current,
             'has postMessage:', typeof liveMapRef.current?.postMessage);
-          // ✅ CRITICAL: Send new route to WebView to redraw the blue line
+          // ✅ CRITICAL: Send new route to WebView to redraw the blue line + checkpoints
           liveMapRef.current?.postMessage({
             type: 'SET_ROUTE',
             payload: {
               coordinates: routeCoordsForWebView,
               steps: (j as any).steps ?? [],
               waypoints: remainingWaypoints,
+              checkpoints: remainingWaypoints.filter(w => w.type === 'checkpoint'),
             }
           });
         }
