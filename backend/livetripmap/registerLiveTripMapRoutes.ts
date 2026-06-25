@@ -408,7 +408,7 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
     if (hasPinsTable !== false) {
       const { data: pinsRaw, error: pinsErr } = await ctx.supabase
         .from("trip_map_pins")
-        .select("id, type, lat, lng, label, added_by")
+        .select("id, pin_type, lat, lng, label, created_by, reason, status")
         .eq("trip_id", tripId)
         .order("created_at", { ascending: true });
 
@@ -422,11 +422,11 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
         ctx.setHasTripMapPinsTable(true);
         mapPins = (pinsRaw ?? []).map((p: any) => ({
           id: String(p.id),
-          type: ctx.toPinType(p.type),
+          type: ctx.toPinType(p.pin_type),
           lat: Number(p.lat) || 0,
           lng: Number(p.lng) || 0,
           label: String(p.label || "Map pin"),
-          addedBy: String(p.added_by || "Rider"),
+          addedBy: String(p.reason || "Rider"),
         }));
       }
     }
@@ -529,17 +529,16 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
       if (!hasAccessFromBookingRow(booking)) return res.status(403).json({ error: "Only participants can add pins" });
     }
 
-    const row = {
+    const { data, error } = await ctx.supabase.from("trip_map_pins").insert({
       trip_id: tripId,
-      user_id: userId,
-      type: ctx.toPinType(type),
+      created_by: userId,
+      pin_type: ctx.toPinType(type),
       label: String(label).trim(),
       lat: latNum,
       lng: lngNum,
-      added_by: req.body?.added_by ? String(req.body.added_by) : undefined,
-    };
+      reason: req.body?.added_by ? String(req.body.added_by) : undefined,
+    }).select("*").single();
 
-    const { data, error } = await ctx.supabase.from("trip_map_pins").insert(row).select("*").single();
     if (error || !data) {
       if (error && ctx.isMissingTableError(error.message)) {
         ctx.setHasTripMapPinsTable(false);
@@ -554,11 +553,11 @@ export function registerLiveTripMapRoutes(app: Express, ctx: LiveTripMapRoutesCo
     ctx.setHasTripMapPinsTable(true);
     return res.json({
       id: String(data.id),
-      type: ctx.toPinType(data.type),
+      type: String(data.pin_type || data.type || ctx.toPinType(type)),
       lat: Number(data.lat) || 0,
       lng: Number(data.lng) || 0,
       label: String(data.label || "Map pin"),
-      addedBy: String(data.added_by || req.body?.added_by || "Rider"),
+      addedBy: String(data.reason || req.body?.added_by || "Rider"),
     });
   });
 

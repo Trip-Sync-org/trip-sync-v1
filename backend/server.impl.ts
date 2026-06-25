@@ -1014,10 +1014,10 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       console.error("driving-route checkpoints:", cpErr.message);
     }
 
-    // 2. Fetch approved map pins
+    // 2. Fetch approved map pins (status defaults to 'approved' in DB)
     const { data: pins, error: pinsErr } = await supabase
       .from("trip_map_pins")
-      .select("id, label, lat, lng, type")
+      .select("id, label, lat, lng, pin_type")
       .eq("trip_id", tripId)
       .eq("status", "approved");
 

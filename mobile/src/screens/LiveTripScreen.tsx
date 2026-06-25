@@ -584,6 +584,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const [showSosModal, setShowSosModal] = useState(false);
   const [sosOtherReason, setSosOtherReason] = useState("");
   const [showPinModal, setShowPinModal] = useState(false);
+  const [pinLocation, setPinLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [mapPinCrosshair, setMapPinCrosshair] = useState(false);
   const [showMapPinRequestModal, setShowMapPinRequestModal] = useState(false);
   const [mapPinReason, setMapPinReason] = useState("");
@@ -2497,6 +2498,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
             steps: (j as any).steps ?? [],
             waypoints: j.waypoints ?? [],
             checkpoints: allWps.filter(w => w.type === 'checkpoint'),
+            mapPins: mapPins.map(p => ({ id: p.id, type: p.type, lat: p.lat, lng: p.lng, label: p.label })),
           }
         });
         console.log('[LiveTrip] initial route sent to WebView, coords:', coords.length,
@@ -2624,9 +2626,9 @@ export function LiveTripScreen({ route, navigation }: Props) {
       Alert.alert("Map pin", "Enter a label.");
       return;
     }
-    const pos = lastPosRef.current;
+    const pos = pinLocation ?? lastPosRef.current;
     if (!pos) {
-      Alert.alert("Location", "Wait for a GPS fix, then try again.");
+      Alert.alert("Location", "Move the map crosshair or wait for GPS, then try again.");
       return;
     }
     try {
@@ -2647,26 +2649,43 @@ export function LiveTripScreen({ route, navigation }: Props) {
         Alert.alert("Map pin", (body as { error?: string }).error ?? (await readApiErrorMessage(res)));
         return;
       }
-      setMapPins((p) => [
-        ...p,
-        {
-          id: String(body.id ?? Date.now()),
-          type: String(body.type ?? pinType),
-          lat: Number(body.lat ?? pos.lat),
-          lng: Number(body.lng ?? pos.lng),
-          label: String(body.label ?? pinLabel.trim()),
-          addedBy: String(body.addedBy ?? user.name),
-        },
-      ]);
+      const newPinId = String(body.id ?? Date.now());
+      const newPin = {
+        id: newPinId,
+        type: String(body.type ?? pinType),
+        lat: Number(body.lat ?? pos.lat),
+        lng: Number(body.lng ?? pos.lng),
+        label: String(body.label ?? pinLabel.trim()),
+        addedBy: String(body.addedBy ?? user.name),
+      };
+      setMapPins((p) => [...p, newPin]);
       emitConvoy("map-pin-added", { details: pinLabel.trim() });
+      // Auto-insert into remainingWaypoints + trigger reroute
+      const newWaypoint: RouteWaypoint = {
+        lat: newPin.lat,
+        lng: newPin.lng,
+        name: newPin.label,
+        type: 'map_pin',
+        id: newPinId,
+      };
+      setRemainingWaypoints((prev) => {
+        // Insert after the current position (index 0 is start/current), before everything else
+        const insertAt = Math.min(1, prev.length);
+        return [...prev.slice(0, insertAt), newWaypoint, ...prev.slice(insertAt)];
+      });
+      // Trigger a reroute after a short delay to include the new pin
+      setTimeout(() => {
+        void fetchDrivingRoute();
+      }, 800);
       setPinLabel("");
+      setPinLocation(null);
       setShowPinModal(false);
       Alert.alert("Map pin", "Pin added for the convoy.");
     } catch (e: unknown) {
       if (isAbortLikeError(e)) return;
       Alert.alert("Map pin", "Could not add pin.");
     }
-  }, [id, pinLabel, pinType, user]);
+  }, [id, pinLabel, pinType, user, pinLocation]);
 
   const submitMapPinRequest = useCallback(async () => {
     if (!user?.id || mapPinSubmitting) return;
@@ -3646,6 +3665,10 @@ export function LiveTripScreen({ route, navigation }: Props) {
         onWaypointPassed={handleWaypointPassed}
         onInstructionUpdate={handleInstructionUpdate}
         onProgressUpdate={handleProgressUpdate}
+        onMapCenter={(center) => {
+          setPinLocation(center);
+          setShowPinModal(true);
+        }}
       />
 
       {/* ── Feature 4: Turn-by-turn instruction banner ─────────────────────────── */}
@@ -3704,12 +3727,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
           <Pressable
             delayLongPress={500}
             onLongPress={() => {
-              const pos = lastPosRef.current;
-              if (!pos) {
-                Alert.alert("Location", "Wait for GPS or use Re-centre.");
-                return;
-              }
-              setShowMapPinRequestModal(true);
+              // Request map center from WebView instead of using GPS
+              liveMapRef.current?.postMessage({ type: 'GET_MAP_CENTER' });
             }}
             style={styles.crosshairHit}
           >
@@ -3718,8 +3737,25 @@ export function LiveTripScreen({ route, navigation }: Props) {
             <View style={styles.crosshairV} />
           </Pressable>
           <Text style={styles.crosshairHint}>
-            Move map to your desired location, then long-press the crosshair (uses your GPS for this build).
+            Move map to your desired location, then long-press the crosshair.
           </Text>
+          <Pressable
+            style={{
+              backgroundColor: '#c084fc',
+              paddingHorizontal: 20,
+              paddingVertical: 10,
+              borderRadius: 24,
+              alignSelf: 'center',
+              marginTop: 12,
+            }}
+            onPress={() => {
+              liveMapRef.current?.postMessage({ type: 'GET_MAP_CENTER' });
+            }}
+          >
+            <Text style={{ color: '#000', fontWeight: '700', fontSize: 14 }}>
+              Place Pin Here 📍
+            </Text>
+          </Pressable>
         </View>
       ) : null}
 

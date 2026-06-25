@@ -81,6 +81,8 @@ type Props = {
   /** Reroute coords to send to WebView */
   rerouteCoords?: MapPoint[] | null;
   rerouteTick?: number;
+  /** Called when WebView responds with MAP_CENTER (map center lat/lng) */
+  onMapCenter?: (center: { lat: number; lng: number }) => void;
 };
 
 export type LiveMapViewRef = {
@@ -522,6 +524,29 @@ if (!bootstrap()) {
   }, 200);
 }
 
+// ── Map pin markers (yellow with icons) ──────────────────────────────────────
+let mapPinMarkers = [];
+
+function renderMapPins(pins) {
+  if (mapPinMarkers) {
+    mapPinMarkers.forEach(function(m) { try { m.remove(); } catch(e) {} });
+  }
+  mapPinMarkers = [];
+  if (!map || !pins || !pins.length) return;
+  var pinIcons = { fuel: '\u26FD', parking: 'P', hazard: '\u26A0', 'road-damage': '\u26A0' };
+  pins.forEach(function(pin) {
+    if (!pin.lat || !pin.lng) return;
+    var el = document.createElement('div');
+    el.style.cssText = 'width:28px;height:28px;background:#f59e0b;border:2px solid white;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;color:white;box-shadow:0 2px 6px rgba(0,0,0,0.4);';
+    el.textContent = pinIcons[pin.type] || '\uD83D\uDCCD';
+    var marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
+      .setLngLat([pin.lng, pin.lat])
+      .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML('<strong>' + (pin.label || 'Map pin') + '</strong>'))
+      .addTo(map);
+    mapPinMarkers.push(marker);
+  });
+}
+
 // ── message handler (RN → WebView) ───────────────────────────────────────────
 
 function applySetDataPayload(msg) {
@@ -646,6 +671,10 @@ function onRNMessage(raw) {
     } else if (msg.type === "reset-north") {
       if (!map) return;
       map.easeTo({ bearing: 0, duration: 350 });
+    } else if (msg.type === "GET_MAP_CENTER") {
+      if (map) {
+        post({ type: "MAP_CENTER", payload: { lat: map.getCenter().lat, lng: map.getCenter().lng } });
+      }
     } else if (msg.type === "set-route" && msg.coordinates) {
       // Re-route: set new route coordinates
       upsertRouteLayers(msg.coordinates);
@@ -657,7 +686,7 @@ function onRNMessage(raw) {
       }
     } else if (msg.type === "SET_ROUTE" && msg.payload) {
       // Handle SET_ROUTE with payload wrapper (from LiveTripScreen.handleOffRoute)
-      const { coordinates, steps, waypoints, checkpoints } = msg.payload;
+      const { coordinates, steps, waypoints, checkpoints, mapPins } = msg.payload;
       console.log('[WebView] SET_ROUTE received, coords:', coordinates?.length);
       if (coordinates && coordinates.length >= 2) {
         upsertRouteLayers(coordinates);
@@ -669,7 +698,7 @@ function onRNMessage(raw) {
         }
         console.log('[WebView] SET_ROUTE processed, segments:', coordinates.length);
       }
-      // Render checkpoint markers
+      // Render checkpoint markers (green teardrops with numbers)
       if (window.checkpointMarkers) {
         window.checkpointMarkers.forEach(function(m) { try { m.remove(); } catch(e) {} });
       }
@@ -691,7 +720,7 @@ function onRNMessage(raw) {
           window.checkpointMarkers.push(marker);
         });
       }
-      // Render destination marker
+      // Render destination marker (red dot at last waypoint)
       if (waypoints && waypoints.length > 0) {
         var dest = waypoints[waypoints.length - 1];
         if (dest) {
@@ -699,6 +728,16 @@ function onRNMessage(raw) {
           var destEl = document.createElement('div');
           destEl.style.cssText = 'width:20px;height:20px;background:#ef4444;border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.4);';
           window._destMarker = new mapboxgl.Marker({ element: destEl }).setLngLat([dest.lng, dest.lat]).addTo(map);
+        }
+      }
+      // Render map pin markers (yellow with icons for fuel/parking/hazard)
+      if (mapPins && mapPins.length > 0) {
+        renderMapPins(mapPins);
+      } else {
+        // Clear map pins if none provided
+        if (mapPinMarkers) {
+          mapPinMarkers.forEach(function(m) { try { m.remove(); } catch(e) {} });
+          mapPinMarkers = [];
         }
       }
       // Send back confirmation to RN
@@ -744,8 +783,9 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
   onProgressUpdate,
   rerouteCoords = null,
   rerouteTick   = 0,
+  onMapCenter,
 }: Props, ref) {
-  const webRef             = useRef<WebView>(null);
+  const webRef             = useRef<any>(null);
   const [ready, setReady]  = useState(false);
   const latestRef           = useRef<object | null>(null);
   const memberVersionRef    = useRef(0);
@@ -896,7 +936,7 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
         domStorageEnabled
         mixedContentMode="always"
         allowsInlineMediaPlayback
-        onMessage={(e) => {
+        onMessage={(e: any) => {
           try {
             const msg = JSON.parse(e.nativeEvent.data);
             if (msg?.type === "map-ready") {
@@ -925,6 +965,8 @@ export const LiveMapView = forwardRef<LiveMapViewRef, Props>(function LiveMapVie
               // handled via userGeo already
             } else if (msg?.type === "waypoint-info") {
               // available via remainingWaypoints state
+            } else if (msg?.type === "MAP_CENTER") {
+              onMapCenter?.(msg.payload);
             } else if (msg?.type === "DEBUG") {
               console.log('[WebView→RN DEBUG]', msg.msg);
             }
