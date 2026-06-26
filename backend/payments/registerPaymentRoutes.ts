@@ -62,10 +62,18 @@ function getCashfreeSignature(): string | null {
     const dataToEncrypt = `${clientId}.${timestamp}`;
     const buffer = Buffer.from(dataToEncrypt);
 
+    // Strip all whitespace/newlines from the raw key first
+    const cleanedKey = rawPublicKey.replace(/\s+/g, "");
+
     // Normalize the public key: ensure it has proper PEM headers
-    let pemKey = rawPublicKey;
-    if (!pemKey.includes("-----BEGIN PUBLIC KEY-----")) {
-      pemKey = `-----BEGIN PUBLIC KEY-----\n${pemKey}\n-----END PUBLIC KEY-----`;
+    let pemKey: string;
+    if (cleanedKey.includes("-----BEGINPUBLICKEY-----")) {
+      // PEM format with headers, just use as-is but ensure line breaks
+      pemKey = cleanedKey.replace(/-----BEGINPUBLICKEY-----/g, "-----BEGIN PUBLIC KEY-----\n")
+                        .replace(/-----ENDPUBLICKEY-----/g, "\n-----END PUBLIC KEY-----");
+    } else {
+      // Raw Base64 key — wrap in PEM headers
+      pemKey = `-----BEGIN PUBLIC KEY-----\n${cleanedKey}\n-----END PUBLIC KEY-----`;
     }
 
     const encrypted = crypto.publicEncrypt(
