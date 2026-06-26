@@ -97,55 +97,39 @@ function getCashfreeSignature(): string | null {
  * Flow: POST /payout/v1/authorize with x-cf-signature → returns token → v1/directTransfer
  * Note: v1 API still works in production for test credentials
  */
-async function getCashfreePayoutToken(): Promise<string | null> {
-  const cashfreeAppId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || process.env.CASHFREE_APP_ID || "").trim();
-  const cashfreeSecretKey = String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY || "").trim();
-  const payoutBase = "https://payout-gamma.cashfree.com";
-
-  if (!cashfreeAppId || !cashfreeSecretKey) return null;
-
-  if (CASHFREE_PAYOUT_TOKEN_CACHE.token && Date.now() < CASHFREE_PAYOUT_TOKEN_CACHE.expiresAt) {
-    return CASHFREE_PAYOUT_TOKEN_CACHE.token;
-  }
-
-  try {
-    const sig = getCashfreeSignature();
-    const headers: Record<string, string> = {"x-client-id": cashfreeAppId, "x-client-secret": cashfreeSecretKey, "Content-Type": "application/json"};
-    if (sig) headers["x-cf-signature"] = sig;
-
-    const res = await fetch(`${payoutBase}/payout/v1/authorize`, {method: "POST", headers});
-    const data = await res.json();
-    const token = String(data?.data?.token || "").trim();
-
-    if (token && token.length > 10) {
-      CASHFREE_PAYOUT_TOKEN_CACHE.token = token;
-      CASHFREE_PAYOUT_TOKEN_CACHE.expiresAt = Date.now() + 25 * 60 * 1000;
-      console.log("[cashfree-payout] token OK, len=" + token.length);
-      return token;
-    }
-    console.warn("[cashfree-payout] authorize failed:", data?.message);
-    return null;
-  } catch(e) {
-    console.warn("[cashfree-payout] authorize error:", e);
-    return null;
-  }
-}
-
 async function initiateCashfreeBankTransfer(opts: {
   transferId: string; amount: number; accountNumber: string; ifsc: string; accountHolderName: string; remarks: string;
 }): Promise<{ success: boolean; referenceId?: string; error?: string }> {
-  const token = await getCashfreePayoutToken();
-  if (!token) return { success: false, error: "Cashfree auth failed" };
+  const clientId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || process.env.CASHFREE_APP_ID || "").trim();
+  const clientSecret = String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY || "").trim();
+  if (!clientId || !clientSecret) return { success: false, error: "Cashfree credentials not configured" };
   
+  // Always generate fresh signature for each transfer call
+  const sig = getCashfreeSignature();
+  if (!sig) return { success: false, error: "Cashfree signature generation failed - check CASHFREE_PUBLIC_KEY" };
+  
+  const headers: Record<string, string> = {
+    "x-client-id": clientId,
+    "x-client-secret": clientSecret,
+    "x-cf-signature": sig,
+    "x-api-version": "2025-01-01",
+    "Content-Type": "application/json",
+  };
+
+  // Use production API URL - test credentials work on production endpoints
+  const url = "https://api.cashfree.com/payout/v1/directTransfer";
+
   try {
-    const res = await fetch("https://payout-gamma.cashfree.com/payout/v1/directTransfer", {
+    console.log("[cashfree-payout] Sending transfer request to", url, "for amount", opts.amount);
+    const res = await fetch(url, {
       method: "POST",
-      headers: {"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+      headers,
       body: JSON.stringify({transferId: opts.transferId, amount: opts.amount, currency: "INR",
         purpose: "Organizer Payout", beneficiary: {name: opts.accountHolderName, email: "org@t.app",
           phone: "9999999999", bankAccount: opts.accountNumber, ifsc: opts.ifsc}, remarks: opts.remarks}),
     });
     const text = await res.text();
+    console.log("[cashfree-payout] Transfer response status:", res.status, "body:", text.slice(0, 300));
     let data: Record<string, unknown> = {};
     try { data = JSON.parse(text); } catch {}
     const s = String(data?.status || data?.subCode || "").toUpperCase();
@@ -155,6 +139,7 @@ async function initiateCashfreeBankTransfer(opts: {
     }
     return { success: false, error: String(data?.message || data?.subCode || text || "Payout failed") };
   } catch(e) {
+    console.error("[cashfree-payout] transfer fetch error:", e);
     return { success: false, error: String(e) };
   }
 }
