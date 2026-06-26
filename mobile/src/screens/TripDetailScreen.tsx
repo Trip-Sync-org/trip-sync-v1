@@ -28,7 +28,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 export function TripDetailScreen({ route, navigation }: Props) {
-  const { id } = route.params;
+  const { id, prefillCoupon } = route.params;
   const { user } = useAuth();
   const c = useThemeColors();
   const [trip, setTrip] = useState<Record<string, unknown> | null>(null);
@@ -41,6 +41,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const [booking, setBooking] = useState(false);
 
   const [showPaymentWebView, setShowPaymentWebView] = useState(false);
+  const [suggestedCoupon, setSuggestedCoupon] = useState<{ code: string; discount_pct: number; description: string } | null>(null);
   const [isPaymentLoading, setIsPaymentLoading] = useState(false);
   const [paymentHtml, setPaymentHtml] = useState<string | null>(null);
   const [cashfreeOrderId, setCashfreeOrderId] = useState<string | null>(null);
@@ -95,6 +96,44 @@ export function TripDetailScreen({ route, navigation }: Props) {
   useEffect(() => {
     void loadTrip();
   }, [loadTrip]);
+
+  // Fetch suggested coupon for this trip
+  useEffect(() => {
+    if (!user?.id || !id) return;
+    void (async () => {
+      try {
+        const res = await apiFetch(`/api/trips/${id}/suggested-coupon?user_id=${encodeURIComponent(String(user.id))}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.code) {
+            setSuggestedCoupon(data);
+          }
+        }
+      } catch {}
+    })();
+  }, [id, user?.id]);
+
+  // Auto-apply prefillCoupon if provided
+  useEffect(() => {
+    if (prefillCoupon && !loading && trip) {
+      setCoupon(prefillCoupon);
+      // Auto-trigger applyCoupon after trip loads
+      const timer = setTimeout(() => {
+        void (async () => {
+          const res = await apiFetch(`/api/trips/${id}/coupons/validate`, {
+            method: "POST",
+            body: JSON.stringify({ code: prefillCoupon, participants: 1 }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (res.ok && body?.valid === true) {
+            setAppliedPct(Number(body.discount_pct) || 0);
+            setAppliedDiscountAmount(Number(body.discount_amount) || 0);
+          }
+        })();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [prefillCoupon, loading, trip, id]);
 
   const pollPaymentStatus = useCallback(
     async (orderId: string) => {
@@ -269,6 +308,23 @@ export function TripDetailScreen({ route, navigation }: Props) {
           <Text style={s.row}>
             {free ? "FREE" : `₹${price.toLocaleString()}`} · {joined}/{max || "—"} joined
           </Text>
+
+          {!free && suggestedCoupon && appliedPct == null && (
+            <View style={s.suggestBanner}>
+              <Text style={s.suggestBannerText}>
+                🎟 Use code <Text style={{ fontWeight: "800" }}>{suggestedCoupon.code}</Text> for {suggestedCoupon.discount_pct}% off
+              </Text>
+              <Pressable
+                style={s.suggestBannerBtn}
+                onPress={() => {
+                  setCoupon(suggestedCoupon.code);
+                  setTimeout(() => void applyCoupon(), 100);
+                }}
+              >
+                <Text style={s.suggestBannerBtnText}>Apply</Text>
+              </Pressable>
+            </View>
+          )}
 
           {!free && (
             <View style={s.couponBox}>
@@ -592,4 +648,23 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
     payClose: { color: c.text, fontWeight: "700", fontSize: 15 },
     payTitle: { color: c.text, fontWeight: "800", fontSize: 15 },
     wvLoading: { ...StyleSheet.absoluteFillObject, justifyContent: "center", alignItems: "center" },
+    suggestBanner: {
+      marginTop: 16,
+      padding: 14,
+      borderRadius: 12,
+      backgroundColor: "rgba(0,229,176,0.1)",
+      borderWidth: 1,
+      borderColor: "rgba(0,229,176,0.3)",
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    suggestBannerText: { color: c.text, fontSize: 13, flex: 1, marginRight: 8 },
+    suggestBannerBtn: {
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 10,
+      backgroundColor: c.text,
+    },
+    suggestBannerBtnText: { color: c.bg, fontWeight: "700", fontSize: 12 },
   });

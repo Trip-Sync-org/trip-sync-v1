@@ -251,6 +251,9 @@ export function CreateEventScreen({ navigation }: Props) {
   const [couponCode, setCouponCode] = useState("");
   const [couponAttachLoading, setCouponAttachLoading] = useState(false);
   const [coupons, setCoupons] = useState<CouponRow[]>([]);
+  const [bindToTrip, setBindToTrip] = useState(true);
+  const couponIdsRef = useRef<number[]>([]);
+  const createdTripIdRef = useRef<number | null>(null);
 
   const [inviteInput, setInviteInput] = useState("");
   const [invites, setInvites] = useState<InviteRow[]>([]);

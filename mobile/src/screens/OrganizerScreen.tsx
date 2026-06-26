@@ -31,6 +31,7 @@ import { buildRevenueSummaryHtml, shareRevenuePdf } from "../lib/revenuePdf";
 import { useAuth } from "../context/AuthContext";
 import { typography, useThemeColors } from "../theme";
 import { Card, Badge, PrimaryButton, OutlineButton } from "../components/ui";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { MonthlyRevenueChart } from "../components/MonthlyRevenueChart";
 import { parseDateOnlyLocal } from "../lib/tripNormalize";
 
@@ -191,6 +192,23 @@ export function OrganizerScreen() {
   const [genCode, setGenCode] = useState("");
 
   const [manageSearch, setManageSearch] = useState("");
+
+  const [pushCouponModal, setPushCouponModal] = useState<{
+    visible: boolean;
+    couponId: string;
+    couponCode: string;
+  }>({ visible: false, couponId: "", couponCode: "" });
+  const [pushUserIds, setPushUserIds] = useState("");
+  const [pushTripId, setPushTripId] = useState<number | undefined>(undefined);
+  const [pushLoading, setPushLoading] = useState(false);
+
+  const [alertState, setAlertState] = useState<{
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    onConfirm?: () => void;
+    singleButton?: boolean;
+  } | null>(null);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -645,7 +663,7 @@ export function OrganizerScreen() {
             {formatRangeLabel(periodPreset, activeRange)}
           </Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-            {(["all", "week", "month", "year", "custom"] as const).map((p) => {
+                  {(["all", "week", "month", "year", "custom"] as const).map((p) => {
               const on = periodPreset === p;
               return (
                 <Pressable
@@ -658,7 +676,7 @@ export function OrganizerScreen() {
                 >
                   <Text style={[s.periodChipText, on && s.periodChipTextOn]}>
                     {p === "all"
-                      ? "All"
+                      ? "All time"
                       : p === "week"
                         ? "Week"
                         : p === "month"
@@ -757,28 +775,30 @@ export function OrganizerScreen() {
               </Card>
 
               <View style={{ flexDirection: "row", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-                {(["all", "real", "coupon", "free"] as const).map((f) => (
-                  <Pressable
-                    key={f}
-                    onPress={() => setTxnFilter(f)}
-                    style={{
-                      paddingHorizontal: 12,
-                      paddingVertical: 8,
-                      borderRadius: 10,
-                      backgroundColor: txnFilter === f ? c.text : "rgba(255,255,255,0.06)",
-                    }}
-                  >
-                    <Text
+                  {(["all", "real", "coupon", "free"] as const).map((f) => (
+                    <Pressable
+                      key={f}
+                      onPress={() => setTxnFilter(f)}
                       style={{
-                        color: txnFilter === f ? c.bg : c.text,
-                        fontWeight: "700",
-                        textTransform: "capitalize",
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                        borderRadius: 10,
+                        backgroundColor: txnFilter === f ? c.text : c.surface,
+                        borderWidth: 1,
+                        borderColor: c.border,
                       }}
                     >
-                      {f === "all" ? "All" : f}
-                    </Text>
-                  </Pressable>
-                ))}
+                      <Text
+                        style={{
+                          color: txnFilter === f ? c.bg : c.text,
+                          fontWeight: "700",
+                          textTransform: "capitalize",
+                        }}
+                      >
+                        {f === "all" ? "All" : f}
+                      </Text>
+                    </Pressable>
+                  ))}
               </View>
 
               <Text style={s.sectionTitleCaps}>Transactions</Text>
@@ -861,6 +881,10 @@ export function OrganizerScreen() {
     }
 
     if (activeTab === "Coupons") {
+      const activeCount = coupons.filter((c) => c.active).length;
+      const pausedCount = coupons.filter((c) => !c.active).length;
+      const totalUsed = coupons.reduce((sum, c) => sum + c.used, 0);
+
       return (
         <View style={s.tabBody}>
           {couponsFetchError ? (
@@ -868,6 +892,28 @@ export function OrganizerScreen() {
               <Text style={{ color: c.danger }}>{couponsFetchError}</Text>
             </Card>
           ) : null}
+
+          {/* Stats Row */}
+          <View style={s.statGrid}>
+            <Card style={{ padding: 10, width: "48%" }}>
+              <Text style={s.statVal}>{activeCount}</Text>
+              <Text style={s.mutedSmall}>Active</Text>
+            </Card>
+            <Card style={{ padding: 10, width: "48%" }}>
+              <Text style={s.statVal}>{pausedCount}</Text>
+              <Text style={s.mutedSmall}>Paused</Text>
+            </Card>
+            <Card style={{ padding: 10, width: "48%" }}>
+              <Text style={s.statVal}>{totalUsed}</Text>
+              <Text style={s.mutedSmall}>Total Used</Text>
+            </Card>
+            <Card style={{ padding: 10, width: "48%" }}>
+              <Text style={s.statVal}>{coupons.length}</Text>
+              <Text style={s.mutedSmall}>Total Coupons</Text>
+            </Card>
+          </View>
+
+          {/* Generate Coupon Form */}
           <Card style={{ padding: 16, marginBottom: 16 }}>
             <Text style={s.sectionTitle}>Generate New Coupon</Text>
             <View style={s.fieldGrid}>
@@ -929,16 +975,70 @@ export function OrganizerScreen() {
               {genCode ? <PrimaryButton title="Save Coupon" onPress={() => void saveCoupon()} /> : null}
             </View>
           </Card>
+
+          {/* Coupon List */}
           <Text style={typography.label}>All Coupons ({coupons.length})</Text>
-          {coupons.map((c) => (
-            <Card key={c.id} style={{ padding: 14, marginBottom: 8 }}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                <Text style={s.codeSmall}>{c.code}</Text>
-                <Badge variant={c.active ? "success" : "default"}>{c.active ? "Active" : "Paused"}</Badge>
+          {coupons.map((couponItem) => (
+            <Card key={couponItem.id} style={{ padding: 14, marginBottom: 8 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={s.codeSmall}>{couponItem.code}</Text>
+                    <Badge variant={couponItem.active ? "success" : "default"}>
+                      {couponItem.active ? "Active ●" : "Paused"}
+                    </Badge>
+                  </View>
+                  <Text style={s.mutedSmall}>
+                    {couponItem.discount}% off · {couponItem.used}/{couponItem.limit} used · {couponItem.expiry}
+                  </Text>
+                </View>
               </View>
-              <Text style={s.mutedSmall}>
-                {c.discount}% off · {c.used}/{c.limit} used · {c.expiry}
-              </Text>
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <Pressable
+                  style={s.btnOutlineSm}
+                  onPress={async () => {
+                    if (!user?.id) return;
+                    const res = await apiFetch(`/api/organizers/${user.id}/coupons/${couponItem.id}`, {
+                      method: "PATCH",
+                      body: JSON.stringify({ active: !couponItem.active }),
+                    });
+                    if (res.ok) {
+                      setCoupons((prev) =>
+                        prev.map((x) => (x.id === couponItem.id ? { ...x, active: !x.active } : x)),
+                      );
+                    }
+                  }}
+                >
+                  <Text style={s.btnOutlineSmText}>{couponItem.active ? "Pause" : "Resume"}</Text>
+                </Pressable>
+                <Pressable
+                  style={s.btnOutlineSm}
+                  onPress={() => {
+                    setPushCouponModal({ visible: true, couponId: couponItem.id, couponCode: couponItem.code });
+                  }}
+                >
+                  <Text style={s.btnOutlineSmText}>Push to Users</Text>
+                </Pressable>
+                <Pressable
+                  style={[s.btnOutlineSm, { borderColor: c.danger }]}
+                  onPress={() => {
+                    setAlertState({
+                      title: "Delete Coupon",
+                      message: `Delete ${couponItem.code}? This cannot be undone.`,
+                      confirmLabel: "Delete",
+                      singleButton: false,
+                      onConfirm: async () => {
+                        if (!user?.id) return;
+                        await apiFetch(`/api/organizers/${user.id}/coupons/${couponItem.id}`, { method: "DELETE" });
+                        setCoupons((prev) => prev.filter((x) => x.id !== couponItem.id));
+                        setAlertState(null);
+                      },
+                    });
+                  }}
+                >
+                  <Text style={[s.btnOutlineSmText, { color: c.danger }]}>Delete</Text>
+                </Pressable>
+              </View>
             </Card>
           ))}
         </View>
@@ -1072,6 +1172,84 @@ export function OrganizerScreen() {
         />
       ) : null}
 
+      {/* Push Coupon Modal */}
+      <Modal visible={pushCouponModal.visible} animationType="slide" transparent>
+        <View style={s.modalWrap}>
+          <Pressable style={s.modalOverlay} onPress={() => setPushCouponModal({ visible: false, couponId: "", couponCode: "" })} />
+          <View style={[s.modalSheet, { paddingBottom: 28 }]}>
+            <Text style={s.sectionTitle}>Push Coupon: {pushCouponModal.couponCode}</Text>
+            <View style={{ marginBottom: 12 }}>
+              <Text style={typography.label}>User IDs / Emails</Text>
+              <TextInput
+                style={s.input}
+                placeholder="Comma-separated user IDs or emails"
+                placeholderTextColor={c.muted}
+                value={pushUserIds}
+                onChangeText={setPushUserIds}
+                multiline
+              />
+            </View>
+            <View style={{ flexDirection: "row", gap: 12, marginTop: 20 }}>
+              <OutlineButton
+                title="Cancel"
+                onPress={() => {
+                  setPushCouponModal({ visible: false, couponId: "", couponCode: "" });
+                  setPushUserIds("");
+                }}
+              />
+              <PrimaryButton
+                title={pushLoading ? "Pushing..." : "Push Coupon →"}
+                disabled={pushLoading || !pushUserIds.trim()}
+                onPress={async () => {
+                  if (!user?.id || !pushCouponModal.couponId) return;
+                  setPushLoading(true);
+                  try {
+                    const userIds = pushUserIds.split(",").map((s) => s.trim()).filter(Boolean);
+                    const res = await apiFetch(`/api/organizers/${user.id}/coupons/${pushCouponModal.couponId}/push`, {
+                      method: "POST",
+                      body: JSON.stringify({
+                        user_ids: userIds,
+                        trip_id: pushTripId || undefined,
+                      }),
+                    });
+                    if (res.ok) {
+                      const body = await res.json();
+                      setAlertState({
+                        title: "Success",
+                        message: `Pushed to ${body.pushed} users`,
+                        singleButton: true,
+                      });
+                      setPushCouponModal({ visible: false, couponId: "", couponCode: "" });
+                      setPushUserIds("");
+                    } else {
+                      const msg = await readApiErrorMessage(res);
+                      setAlertState({ title: "Error", message: msg, singleButton: true });
+                    }
+                  } catch {
+                    setAlertState({ title: "Error", message: "Could not reach server.", singleButton: true });
+                  } finally {
+                    setPushLoading(false);
+                  }
+                }}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <ConfirmModal
+        visible={alertState !== null}
+        onClose={() => { if (alertState?.singleButton !== false) setAlertState(null); }}
+        onConfirm={() => {
+          if (alertState?.onConfirm) alertState.onConfirm();
+          setAlertState(null);
+        }}
+        title={alertState?.title ?? ""}
+        message={alertState?.message ?? ""}
+        confirmLabel={alertState?.confirmLabel}
+        singleButton={alertState?.singleButton ?? true}
+      />
+
       <Modal visible={tabMenuOpen} animationType="slide" transparent>
         <View style={s.modalWrap}>
           <Pressable style={s.modalOverlay} onPress={() => setTabMenuOpen(false)} />
@@ -1162,12 +1340,12 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
     thumbSm: { width: 56, height: 56, borderRadius: 10 },
     progressBg: {
       height: 4,
-      backgroundColor: "rgba(255,255,255,0.06)",
+      backgroundColor: c.border,
       borderRadius: 4,
       marginTop: 8,
       overflow: "hidden",
     },
-    progressFg: { height: "100%", backgroundColor: "rgba(255,255,255,0.5)" },
+    progressFg: { height: "100%", backgroundColor: c.text },
     search: {
       borderWidth: 1,
       borderColor: c.border,
@@ -1260,8 +1438,8 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
       marginBottom: 8,
       backgroundColor: c.surface,
     },
-    splitReal: { backgroundColor: "#000000" },
-    splitCoupon: { backgroundColor: "rgba(255,255,255,0.2)" },
+    splitReal: { backgroundColor: c.text },
+    splitCoupon: { backgroundColor: c.muted },
     periodChip: {
       paddingHorizontal: 14,
       paddingVertical: 8,
@@ -1271,11 +1449,11 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
       borderColor: c.border,
     },
     periodChipOn: {
-      backgroundColor: c.surface,
+      backgroundColor: c.text,
       borderColor: c.text,
     },
     periodChipText: { color: c.text, fontWeight: "700", fontSize: 13 },
-    periodChipTextOn: { color: c.text },
+    periodChipTextOn: { color: c.bg },
     datePickRow: {
       padding: 14,
       borderRadius: 12,

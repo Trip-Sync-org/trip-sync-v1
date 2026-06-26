@@ -20,12 +20,12 @@ export function ReferFriendsScreen({ navigation }: Props) {
         </View>
         <Text style={[styles.title, { color: c.textPrimary }]}>Refer to Friends</Text>
         <Text style={[styles.subtitle, { color: c.textSecondary }]}>
-          Get $10 Coupon Code when someone sign up using your refer link
+          Get ₹250 Coupon Code when someone signs up using your refer link
         </Text>
       </View>
 
       <View style={[styles.linkBox, { backgroundColor: isDark ? "#1C1C1C" : "#F0F7F5", borderColor: isDark ? "#2A2A2A" : "#D0EAE4" }]}>
-        <Text style={{ color: c.textPrimary }}>https://ui8.net/76738b</Text>
+        <Text style={{ color: c.textPrimary }}>https://www.tripsync.live/refer/</Text>
       </View>
 
       <View style={[styles.comingSoon, { borderColor: isDark ? "#333333" : "#CCCCCC" }]}>

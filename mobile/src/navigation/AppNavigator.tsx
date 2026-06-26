@@ -127,7 +127,7 @@ export type RootStackParamList = {
   ResetEmailSent: undefined;
   SetNewPassword: { token?: string } | undefined;
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
-  TripDetail: { id: string };
+  TripDetail: { id: string; prefillCoupon?: string };
   CreateEvent: undefined;
   LiveTrip: { id: string };
   Payout: undefined;

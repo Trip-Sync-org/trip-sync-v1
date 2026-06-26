@@ -29,12 +29,10 @@ const TABS = [
   { id: "past", label: "Past" },
   { id: "explore", label: "Explore" },
   { id: "invites", label: "Invites" },
-  { id: "rewards", label: "Rewards" },
-  { id: "profile", label: "Profile" },
 ] as const;
 
 export function UserDashboardScreen() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const navigation = useNavigation<NavigationProp<Record<string, object | undefined>>>();
   const c = useThemeColors();
   const goStack = (route: keyof RootStackParamList, params?: RootStackParamList[keyof RootStackParamList]) => {
@@ -47,6 +45,7 @@ export function UserDashboardScreen() {
   const [bookingsLoading, setBookingsLoading] = useState(true);
   const [exploreTrips, setExploreTrips] = useState<Trip[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [couponCount, setCouponCount] = useState(0);
 
   const loadBookings = useCallback(async () => {
     if (!user) return;
@@ -86,6 +85,15 @@ export function UserDashboardScreen() {
     void loadExplore();
   }, [loadExplore]);
 
+  useEffect(() => {
+    if (!user) return;
+    const key = user.id && /^\d+$/.test(String(user.id).trim()) ? String(user.id).trim() : user.email || user.id;
+    apiFetch(`/api/organizers/${encodeURIComponent(key)}/coupons`)
+      .then(res => res.ok ? res.json() : [])
+      .then((data: unknown[]) => setCouponCount(Array.isArray(data) ? data.length : 0))
+      .catch(() => setCouponCount(0));
+  }, [user]);
+
   const refresh = async () => {
     setRefreshing(true);
     await Promise.all([loadBookings(), loadExplore()]);
@@ -108,8 +116,6 @@ export function UserDashboardScreen() {
       isPrivateTrip(t),
   );
 
-  const xpPct = ((user?.xp || 0) % 1000) / 10;
-
   const s = useMemo(() => makeStyles(c), [c]);
 
   const renderContent = () => {
@@ -119,9 +125,9 @@ export function UserDashboardScreen() {
           {bookingsLoading ? (
             <Text style={s.muted}>Loading your booked trips…</Text>
           ) : upcomingList.length === 0 ? (
-            <Card style={{ padding: 32, alignItems: "center" }}>
-              <Calendar color={c.muted} size={40} strokeWidth={2} style={{ marginBottom: 8 }} />
-              <Text style={[s.muted, { marginBottom: 16 }]}>No upcoming trips</Text>
+            <Card style={{ padding: 20, alignItems: "center" }}>
+              <Calendar color={c.muted} size={32} strokeWidth={2} style={{ marginBottom: 8 }} />
+              <Text style={[s.muted, { marginBottom: 12 }]}>No upcoming trips</Text>
               <PrimaryButton title="Explore Trips" onPress={goExploreTab} />
             </Card>
           ) : (
@@ -161,7 +167,7 @@ export function UserDashboardScreen() {
           {bookingsLoading ? (
             <Text style={s.muted}>Loading…</Text>
           ) : pastList.length === 0 ? (
-            <Card style={{ padding: 32, alignItems: "center" }}>
+            <Card style={{ padding: 20, alignItems: "center" }}>
               <Text style={s.muted}>No past trips yet</Text>
             </Card>
           ) : (
@@ -209,7 +215,7 @@ export function UserDashboardScreen() {
       return (
         <View style={s.section}>
           {invitesList.length === 0 ? (
-            <Card style={{ padding: 32, alignItems: "center" }}>
+            <Card style={{ padding: 20, alignItems: "center" }}>
               <Text style={s.muted}>No private invites yet</Text>
             </Card>
           ) : (
@@ -227,54 +233,6 @@ export function UserDashboardScreen() {
         </View>
       );
     }
-    if (activeTab === "rewards") {
-      return (
-        <View style={s.section}>
-          <Card style={{ padding: 20 }}>
-            <Text style={s.cardTitle}>Level {user?.level ?? 1}</Text>
-            <Text style={s.mutedSmall}>Explorer</Text>
-            <Text style={s.mutedSmall}>
-              {user?.xp ?? 0} XP → next level
-            </Text>
-            <View style={s.xpBar}>
-              <View style={[s.xpFill, { width: `${xpPct}%` }]} />
-            </View>
-          </Card>
-          <Card style={{ padding: 20, marginTop: 12 }}>
-            <Text style={s.cardTitle}>Rewards Wallet</Text>
-            <Text style={[s.statVal, { color: c.text }]}>₹420</Text>
-            <Text style={s.mutedSmall}>Available cashback (demo)</Text>
-          </Card>
-        </View>
-      );
-    }
-    if (activeTab === "profile") {
-      return (
-        <View style={s.section}>
-          <Card style={{ padding: 20 }}>
-            <View style={{ flexDirection: "row", gap: 14 }}>
-              <Image
-                source={{
-                  uri: `https://api.dicebear.com/7.x/avataaars/png?seed=${encodeURIComponent(user?.name || "u")}`,
-                }}
-                style={{ width: 72, height: 72, borderRadius: 16 }}
-              />
-              <View>
-                <Text style={s.cardTitle}>{user?.name}</Text>
-                <Text style={s.mutedSmall}>{user?.email}</Text>
-                <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-                  <Badge variant="success">Level {user?.level ?? 1}</Badge>
-                  <Badge variant="default">{user?.xp ?? 0} XP</Badge>
-                </View>
-              </View>
-            </View>
-          </Card>
-          <Pressable style={s.signOut} onPress={() => void logout()}>
-            <Text style={s.signOutText}>Sign out</Text>
-          </Pressable>
-        </View>
-      );
-    }
     return null;
   };
 
@@ -282,21 +240,21 @@ export function UserDashboardScreen() {
     <ScrollView
       style={s.root}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.text} />}
-      contentContainerStyle={{ paddingBottom: 100, flexGrow: 1 }}
+      contentContainerStyle={{ paddingBottom: 100 }}
     >
-      <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+      <View style={{ paddingHorizontal: 16, paddingTop: 4 }}>
         <Text style={s.welcome}>Welcome back,</Text>
         <Text style={s.heroName}>{user?.name} 👋</Text>
         <View style={s.quickStats}>
           {[
             { l: "Trips", v: "—" },
             { l: "XP", v: String(user?.xp ?? 0) },
-            { l: "Wallet", v: "₹420" },
+            { l: "Coupons", v: String(couponCount) },
             { l: "Invites", v: String(invitesList.length) },
           ].map((stat) => (
             <Card key={stat.l} style={{ padding: 12, width: "47%" }}>
               <Text style={s.statVal}>{stat.v}</Text>
-              <Text style={typography.label}>{stat.l}</Text>
+              <Text style={s.statLabel}>{stat.l}</Text>
             </Card>
           ))}
         </View>
@@ -328,22 +286,22 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
     root: { flex: 1, backgroundColor: c.bg },
     welcome: { color: c.muted, fontSize: 14 },
     heroName: { ...typography.hero, color: c.text, marginBottom: 16 },
-    quickStats: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between", marginBottom: 8 },
+    quickStats: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between", marginBottom: 16 },
     statVal: { fontSize: 20, fontWeight: "800", color: c.text },
-    tabStrip: { paddingHorizontal: 16, paddingVertical: 12, gap: 8, flexDirection: "row" },
+    statLabel: { ...typography.label, color: c.muted },
+    tabStrip: { paddingHorizontal: 16, gap: 8, flexDirection: "row", alignItems: "center", marginTop: -4, paddingTop: 4 },
     tabChip: {
       paddingHorizontal: 16,
-      paddingVertical: 10,
+      paddingVertical: 8,
       borderRadius: 999,
       backgroundColor: c.surface,
       borderWidth: 1,
       borderColor: c.border,
-      marginRight: 8,
     },
     tabChipOn: { backgroundColor: c.text, borderColor: c.text },
     tabChipText: { color: c.muted, fontWeight: "700", fontSize: 13 },
     tabChipTextOn: { color: c.bg },
-    section: { paddingTop: 8 },
+    section: { paddingTop: 16 },
     cardTitle: { color: c.text, fontWeight: "800", fontSize: 17, marginTop: 8 },
     muted: { color: c.muted },
     mutedSmall: { color: c.muted, fontSize: 12, marginTop: 4 },
@@ -363,21 +321,4 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
       borderRadius: 999,
     },
     btnOutlineSmText: { color: c.text, fontWeight: "700", fontSize: 13 },
-    xpBar: {
-      height: 8,
-      backgroundColor: "rgba(255,255,255,0.08)",
-      borderRadius: 4,
-      marginTop: 12,
-      overflow: "hidden",
-    },
-    xpFill: { height: "100%", backgroundColor: "#fbbf24" },
-    signOut: {
-      marginTop: 20,
-      padding: 16,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: "rgba(248,113,113,0.35)",
-      alignItems: "center",
-    },
-    signOutText: { color: c.danger, fontWeight: "800" },
   });
