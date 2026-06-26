@@ -96,6 +96,7 @@ function getCashfreeSignature(): string | null {
  */
 async function initiateCashfreeBankTransfer(opts: {
   transferId: string; amount: number; accountNumber: string; ifsc: string; accountHolderName: string; remarks: string;
+  organizerEmail?: string; organizerPhone?: string;
 }): Promise<{ success: boolean; referenceId?: string; error?: string }> {
   const clientId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || "").trim();
   const clientSecret = String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET || "").trim();
@@ -116,8 +117,10 @@ async function initiateCashfreeBankTransfer(opts: {
         bank_ifsc: opts.ifsc,
       },
       beneficiary_contact_details: {
-        beneficiary_email: "org@tripsync.app",
-        beneficiary_phone: "9999999999",
+        beneficiary_email: opts.organizerEmail || "organizer@tripsync.app",
+        beneficiary_phone: opts.organizerPhone
+          ? opts.organizerPhone.replace(/\D/g, "").slice(-10)
+          : "9999999999",
       },
     },
   };
@@ -284,6 +287,10 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
   const cashfreePayoutEnabled = Boolean(
     String(process.env.CASHFREE_PAYOUT_CLIENT_ID ?? "").trim() &&
     String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET ?? "").trim()
+  );
+
+  console.log(
+    `[cashfree-payout] Mode: ${cashfreeBaseUrl.includes("sandbox") ? "SANDBOX" : "PRODUCTION"} | URL: ${cashfreeBaseUrl}/payout/transfers`
   );
 
   const cashfree = new Cashfree(
@@ -1115,18 +1122,31 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
 
     const payoutId = String(inserted.id);
 
+    // Fetch organizer contact details for Cashfree transfer
+    const { data: organizerUser } = await supabase
+      .from("users")
+      .select("email, phone, name")
+      .eq("id", String(uid))
+      .maybeSingle();
+
     // Try Cashfree Payouts if configured (uses outer cashfreePayoutEnabled from function scope)
     if (cashfreePayoutEnabled) {
       const shortUuid = payoutId.replace(/-/g, "").slice(-12);
       const tsSuffix = String(Date.now()).slice(-6);
       const transferId = `PAYOUT_${shortUuid}_${tsSuffix}`;
+      const sanitizedName = (organizerUser as Record<string, unknown>)?.name
+        ? String((organizerUser as Record<string, unknown>).name).replace(/[^a-zA-Z0-9 ]/g, "").trim().slice(0, 30)
+        : "organizer";
+      const remarks = `TripSync payout ${sanitizedName}`.slice(0, 70);
       const transferResult = await initiateCashfreeBankTransfer({
         transferId,
         amount,
         accountNumber: String(bankAccount.account_number),
         ifsc: String(bankAccount.ifsc),
         accountHolderName: String(bankAccount.account_holder_name),
-        remarks: `TripSync payout organizer ${uid}`,
+        remarks,
+        organizerEmail: String((organizerUser as Record<string, unknown>)?.email || "").trim() || undefined,
+        organizerPhone: String((organizerUser as Record<string, unknown>)?.phone || "").trim() || undefined,
       });
 
       if (transferResult.success) {
@@ -1644,6 +1664,13 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
       return res.status(400).json({ error: "Bank account details incomplete for payout" });
     }
 
+    // Fetch organizer contact details
+    const { data: adminOrgUser } = await supabase
+      .from("users")
+      .select("email, phone")
+      .eq("id", String((requestRow as { organizer_id?: unknown }).organizer_id))
+      .maybeSingle();
+
     const tsSuffix = String(Date.now()).slice(-6);
     const transferResult = await initiateCashfreeBankTransfer({
       transferId: `PAYOUT_admin_${requestId}_${tsSuffix}`,
@@ -1651,7 +1678,9 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
       accountNumber: bankAccountNumber,
       ifsc: bankIfsc,
       accountHolderName: bankAccountName,
-      remarks: `TripSync admin payout organizer ${String((requestRow as { organizer_id?: unknown }).organizer_id)}`,
+      remarks: `TripSync admin payout ${bankAccountName.slice(0, 20)}`,
+      organizerEmail: String((adminOrgUser as Record<string, unknown>)?.email || "").trim() || undefined,
+      organizerPhone: String((adminOrgUser as Record<string, unknown>)?.phone || "").trim() || undefined,
     });
 
     const ok = transferResult.success;
