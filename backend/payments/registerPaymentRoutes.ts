@@ -24,8 +24,6 @@ export type PaymentRoutesContext = {
   resolveOrganizerId: (input: unknown) => Promise<number | null>;
 };
 
-const CASHFREE_PAYOUT_TOKEN_CACHE: { token: string | null; expiresAt: number } = { token: null, expiresAt: 0 };
-
 function parseBookingIdFromOrderId(orderId: string): number | null {
   const m = String(orderId || "").match(/^TS_\d+_(\d+)_\d+$/);
   if (!m) return null;
@@ -44,47 +42,39 @@ function maskFullAccountNumber(acct: string): string {
   return `••••••${s.slice(-4)}`;
 }
 
-/**
- * Generates the mandatory 2FA signature for Cashfree Payouts.
- * Encrypts "clientId.timestamp" using RSA OAEP with the public key.
- */
-function getCashfreeSignature(): string | null {
-  const clientId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || process.env.CASHFREE_APP_ID || "").trim();
-  const rawPublicKey = String(process.env.CASHFREE_PUBLIC_KEY || "").trim();
+function sanitizeTransferId(raw: string): string {
+  // Strip all hyphens/special chars and truncate to 40 chars
+  return raw.replace(/[^a-zA-Z0-9_]/g, "").slice(0, 40);
+}
 
+function sanitizeBeneficiaryName(raw: string): string {
+  // Strip any non-alpha/non-space characters
+  return String(raw || "").replace(/[^a-zA-Z ]/g, "").slice(0, 100);
+}
+
+function getCashfreeSignature(): string | null {
+  const clientId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || "").trim();
+  const rawPublicKey = String(process.env.CASHFREE_PUBLIC_KEY || "").trim();
   if (!clientId || !rawPublicKey) {
-    console.warn("[cashfree-payout] Missing CASHFREE_PAYOUT_CLIENT_ID or CASHFREE_PUBLIC_KEY for 2FA signature");
+    console.warn("[cashfree-payout] Missing CASHFREE_PAYOUT_CLIENT_ID or CASHFREE_PUBLIC_KEY for 2FA");
     return null;
   }
-
   try {
     const timestamp = Math.floor(Date.now() / 1000);
     const dataToEncrypt = `${clientId}.${timestamp}`;
-    const buffer = Buffer.from(dataToEncrypt);
-
-    // Strip all whitespace/newlines from the raw key first
     const cleanedKey = rawPublicKey.replace(/\s+/g, "");
-
-    // Normalize the public key: ensure it has proper PEM headers
     let pemKey: string;
     if (cleanedKey.includes("-----BEGINPUBLICKEY-----")) {
-      // PEM format with headers, just use as-is but ensure line breaks
-      pemKey = cleanedKey.replace(/-----BEGINPUBLICKEY-----/g, "-----BEGIN PUBLIC KEY-----\n")
-                        .replace(/-----ENDPUBLICKEY-----/g, "\n-----END PUBLIC KEY-----");
+      pemKey = cleanedKey
+        .replace(/-----BEGINPUBLICKEY-----/g, "-----BEGIN PUBLIC KEY-----\n")
+        .replace(/-----ENDPUBLICKEY-----/g, "\n-----END PUBLIC KEY-----");
     } else {
-      // Raw Base64 key — wrap in PEM headers
       pemKey = `-----BEGIN PUBLIC KEY-----\n${cleanedKey}\n-----END PUBLIC KEY-----`;
     }
-
     const encrypted = crypto.publicEncrypt(
-      {
-        key: pemKey,
-        padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-        oaepHash: "sha1",
-      },
-      buffer,
+      { key: pemKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: "sha1" },
+      Buffer.from(dataToEncrypt)
     );
-
     return encrypted.toString("base64");
   } catch (e) {
     console.warn("[cashfree-payout] signature generation error:", e);
@@ -93,53 +83,77 @@ function getCashfreeSignature(): string | null {
 }
 
 /**
- * Get Cashfree Payouts authorization token using 2FA public key signature.
- * Flow: POST /payout/v1/authorize with x-cf-signature → returns token → v1/directTransfer
- * Note: v1 API still works in production for test credentials
+ * Cashfree Payouts v2 API: POST /payout/transfers
+ * Uses x-client-id / x-client-secret + optional x-cf-signature auth.
  */
 async function initiateCashfreeBankTransfer(opts: {
   transferId: string; amount: number; accountNumber: string; ifsc: string; accountHolderName: string; remarks: string;
 }): Promise<{ success: boolean; referenceId?: string; error?: string }> {
-  const clientId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || process.env.CASHFREE_APP_ID || "").trim();
-  const clientSecret = String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY || "").trim();
-  if (!clientId || !clientSecret) return { success: false, error: "Cashfree credentials not configured" };
-  
-  // Always generate fresh signature for each transfer call
-  const sig = getCashfreeSignature();
-  if (!sig) return { success: false, error: "Cashfree signature generation failed - check CASHFREE_PUBLIC_KEY" };
-  
+  const clientId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || "").trim();
+  const clientSecret = String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET || "").trim();
+  if (!clientId || !clientSecret) return { success: false, error: "Cashfree payout credentials not configured" };
+
+  const cashfreeBaseUrl = String(process.env.CASHFREE_BASE_URL ?? "https://sandbox.cashfree.com").trim();
+  const url = `${cashfreeBaseUrl.replace(/\/$/, "")}/payout/transfers`;
+
+  const body = {
+    transfer_id: sanitizeTransferId(opts.transferId),
+    transfer_amount: opts.amount,
+    transfer_mode: "banktransfer",
+    transfer_remarks: opts.remarks || "TripSync payout",
+    beneficiary_details: {
+      beneficiary_name: sanitizeBeneficiaryName(opts.accountHolderName),
+      beneficiary_instrument_details: {
+        bank_account_number: opts.accountNumber,
+        bank_ifsc: opts.ifsc,
+      },
+      beneficiary_contact_details: {
+        beneficiary_email: "org@tripsync.app",
+        beneficiary_phone: "9999999999",
+      },
+    },
+  };
+
   const headers: Record<string, string> = {
     "x-client-id": clientId,
     "x-client-secret": clientSecret,
-    "x-cf-signature": sig,
-    "x-api-version": "2025-01-01",
+    "x-api-version": "2024-01-01",
     "Content-Type": "application/json",
   };
 
-  // Use production API URL - test credentials work on production endpoints
-  const url = "https://api.cashfree.com/payout/v1/directTransfer";
+  const sig = getCashfreeSignature();
+  if (sig) {
+    headers["x-cf-signature"] = sig;
+  } else {
+    console.warn("[cashfree-payout] No 2FA signature generated — request may be rejected if Public Key 2FA is enabled");
+  }
 
   try {
-    console.log("[cashfree-payout] Sending transfer request to", url, "for amount", opts.amount);
+    console.log("[cashfree-payout] signature present:", !!sig, "url:", url, "transferId:", body.transfer_id);
+    console.log("[cashfree-payout] Sending v2 transfer request to", url, "for amount", opts.amount, "transferId", body.transfer_id);
     const res = await fetch(url, {
       method: "POST",
       headers,
-      body: JSON.stringify({transferId: opts.transferId, amount: opts.amount, currency: "INR",
-        purpose: "Organizer Payout", beneficiary: {name: opts.accountHolderName, email: "org@t.app",
-          phone: "9999999999", bankAccount: opts.accountNumber, ifsc: opts.ifsc}, remarks: opts.remarks}),
+      body: JSON.stringify(body),
     });
     const text = await res.text();
-    console.log("[cashfree-payout] Transfer response status:", res.status, "body:", text.slice(0, 300));
+    console.log("[cashfree-payout] v2 Transfer response status:", res.status, "body:", text.slice(0, 500));
+
     let data: Record<string, unknown> = {};
-    try { data = JSON.parse(text); } catch {}
-    const s = String(data?.status || data?.subCode || "").toUpperCase();
-    if (s === "SUCCESS" || s === "200") {
-      const d = data?.data as Record<string, unknown> | undefined;
-      return { success: true, referenceId: String(d?.referenceId || data?.referenceId || opts.transferId) };
+    try { data = JSON.parse(text); } catch {
+      return { success: false, error: `Non-JSON response: ${text.slice(0, 200)}` };
     }
-    return { success: false, error: String(data?.message || data?.subCode || text || "Payout failed") };
-  } catch(e) {
-    console.error("[cashfree-payout] transfer fetch error:", e);
+
+    const responseStatus = String(data?.status || "").toUpperCase();
+    if (responseStatus === "RECEIVED" || responseStatus === "SUCCESS") {
+      // Extract cf_transfer_id as the reference ID
+      const cfTransferId = String((data as any)?.data?.cf_transfer_id || data?.cf_transfer_id || "");
+      return { success: true, referenceId: cfTransferId || body.transfer_id };
+    }
+
+    return { success: false, error: String(data?.message || data?.sub_code || text || "Payout failed") };
+  } catch (e) {
+    console.error("[cashfree-payout] v2 transfer fetch error:", e);
     return { success: false, error: String(e) };
   }
 }
@@ -250,7 +264,10 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
   const cashfreeBaseUrl = String(process.env.CASHFREE_BASE_URL ?? "https://sandbox.cashfree.com").trim();
   const cashfreeApiVersion = String(process.env.CASHFREE_API_VERSION ?? "2025-01-01").trim();
   const cashfreeEnabled = Boolean(cashfreeAppId && cashfreeSecretKey);
-  const payoutBaseUrl = `${cashfreeBaseUrl.replace(/\/$/, "")}/payout`;
+  const cashfreePayoutEnabled = Boolean(
+    String(process.env.CASHFREE_PAYOUT_CLIENT_ID ?? "").trim() &&
+    String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET ?? "").trim()
+  );
 
   const cashfree = new Cashfree(
     cashfreeBaseUrl.includes("sandbox") ? CFEnvironment.SANDBOX : CFEnvironment.PRODUCTION,
@@ -1081,10 +1098,7 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
 
     const payoutId = String(inserted.id);
 
-    // Try Cashfree Payouts if configured
-    const cashfreePayoutEnabled = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || process.env.CASHFREE_APP_ID || "").trim()
-      && String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY || "").trim();
-
+    // Try Cashfree Payouts if configured (uses outer cashfreePayoutEnabled from function scope)
     if (cashfreePayoutEnabled) {
       const transferResult = await initiateCashfreeBankTransfer({
         transferId: `PAYOUT_${payoutId}_${Date.now()}`,
@@ -1273,8 +1287,8 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
 
       if (!transferId) return res.status(200).json({ ok: true });
 
-      // Extract payoutId from transferId (format: PAYOUT_<id>_<timestamp>)
-      const m = transferId.match(/^PAYOUT_([a-f0-9-]+)_\d+$/);
+      // Extract payoutId from transferId (format: PAYOUT_<id>_<timestamp>) — note: no hyphens in sanitized IDs
+      const m = transferId.match(/^PAYOUT_([a-f0-9]+)_\d+$/);
       if (!m) return res.status(200).json({ ok: true });
       const payoutId = m[1];
 
@@ -1579,7 +1593,7 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
     if (!adminSecretKey || adminKey !== adminSecretKey) return res.status(403).json({ error: "Unauthorized" });
     const requestId = Number(req.params.requestId);
     if (!Number.isFinite(requestId)) return res.status(400).json({ error: "Invalid request" });
-    if (!cashfreeEnabled) return res.status(503).json({ error: "Cashfree is not configured" });
+    if (!cashfreePayoutEnabled) return res.status(503).json({ error: "Cashfree payouts not configured" });
 
     const { data: requestRow } = await supabase
       .from("payout_requests")
@@ -1597,53 +1611,36 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
       return res.status(400).json({ error: "Organizer payout details missing" });
     }
 
-    const transferId = `PAYOUT_${requestId}_${Date.now()}`;
     const amount = Number((requestRow as { net_amount?: unknown }).net_amount ?? 0);
     if (!Number.isFinite(amount) || amount <= 0) {
       return res.status(400).json({ error: "Invalid payout amount" });
     }
-    const method = String((payoutDetails as { payout_method?: unknown }).payout_method ?? "upi");
 
-    const payoutResponse = await fetch(`${payoutBaseUrl}/v1/directTransfer`, {
-      method: "POST",
-      headers: {
-        "X-Client-Id": cashfreeAppId,
-        "X-Client-Secret": cashfreeSecretKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        transferId,
-        amount,
-        currency: "INR",
-        purpose: "Trip-Sync Organizer Payout",
-        beneficiary:
-          method === "upi"
-            ? {
-                name: String((payoutDetails as { bank_account_name?: unknown }).bank_account_name || "Organizer"),
-                email: "organizer@tripsync.app",
-                phone: "9999999999",
-                vpa: String((payoutDetails as { upi_id?: unknown }).upi_id || ""),
-              }
-            : {
-                name: String((payoutDetails as { bank_account_name?: unknown }).bank_account_name || "Organizer"),
-                email: "organizer@tripsync.app",
-                phone: "9999999999",
-                bankAccount: String((payoutDetails as { bank_account_number?: unknown }).bank_account_number || ""),
-                ifsc: String((payoutDetails as { bank_ifsc?: unknown }).bank_ifsc || ""),
-              },
-        remarks: `TripSync payout for organizer ${String((requestRow as { organizer_id?: unknown }).organizer_id)}`,
-      }),
+    const bankAccountName = String((payoutDetails as { bank_account_name?: unknown }).bank_account_name || "Organizer");
+    const bankAccountNumber = String((payoutDetails as { bank_account_number?: unknown }).bank_account_number || "");
+    const bankIfsc = String((payoutDetails as { bank_ifsc?: unknown }).bank_ifsc || "");
+
+    if (!bankAccountNumber || !bankIfsc) {
+      return res.status(400).json({ error: "Bank account details incomplete for payout" });
+    }
+
+    const transferResult = await initiateCashfreeBankTransfer({
+      transferId: `PAYOUT_${requestId}_${Date.now()}`,
+      amount,
+      accountNumber: bankAccountNumber,
+      ifsc: bankIfsc,
+      accountHolderName: bankAccountName,
+      remarks: `TripSync admin payout for organizer #${String((requestRow as { organizer_id?: unknown }).organizer_id)}`,
     });
-    const result = (await payoutResponse.json().catch(() => ({}))) as { status?: string; message?: string };
 
-    const ok = String(result?.status ?? "").toUpperCase() === "SUCCESS";
+    const ok = transferResult.success;
     const payload: Record<string, unknown> = {
       status: ok ? "processing" : "failed",
       processed_at: new Date().toISOString(),
-      failure_reason: ok ? null : String(result?.message ?? "Payout failed"),
+      failure_reason: ok ? null : String(transferResult.error ?? "Payout failed"),
     };
     if (ok && (await hasPayoutTransferColumn())) {
-      payload.cashfree_transfer_id = transferId;
+      payload.cashfree_transfer_id = transferResult.referenceId || null;
     }
     const { error: updateErr } = await supabase.from("payout_requests").update(payload).eq("id", requestId);
     if (updateErr) return res.status(500).json({ error: updateErr.message });
@@ -1654,10 +1651,10 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
     }
 
     if (!ok) {
-      console.error("Cashfree payout failed:", result);
-      return res.status(400).json({ error: String(result?.message ?? "Payout failed") });
+      console.error("Cashfree payout failed:", transferResult.error);
+      return res.status(400).json({ error: String(transferResult.error ?? "Payout failed") });
     }
 
-    return res.json({ ok: true, transferId, status: "processing" });
+    return res.json({ ok: true, transferId: transferResult.referenceId, status: "processing" });
   });
 }
