@@ -1051,13 +1051,12 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
     const { data: inserted, error: insErr } = await supabase
       .from("payout_requests")
       .insert({
-        organizer_id: uid,
+        organizer_id: String(uid),
         amount,
         status: "pending",
         net_amount: amount,
         bank_account_id: bankAccountId,
         account_label: accountLabel,
-        payout_method_snapshot: accountLabel,
       })
       .select("id")
       .single();
