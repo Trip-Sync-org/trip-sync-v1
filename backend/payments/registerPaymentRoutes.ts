@@ -52,6 +52,14 @@ function sanitizeBeneficiaryName(raw: string): string {
   return String(raw || "").replace(/[^a-zA-Z ]/g, "").slice(0, 100);
 }
 
+function sanitizeRemarks(raw: string): string {
+  return String(raw || "")
+    .replace(/[^a-zA-Z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 70);
+}
+
 function getCashfreeSignature(): string | null {
   const clientId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || "").trim();
   const rawPublicKey = String(process.env.CASHFREE_PUBLIC_KEY || "").trim();
@@ -100,7 +108,7 @@ async function initiateCashfreeBankTransfer(opts: {
     transfer_id: sanitizeTransferId(opts.transferId),
     transfer_amount: opts.amount,
     transfer_mode: "banktransfer",
-    transfer_remarks: opts.remarks || "TripSync payout",
+    transfer_remarks: sanitizeRemarks(opts.remarks || "TripSync payout"),
     beneficiary_details: {
       beneficiary_name: sanitizeBeneficiaryName(opts.accountHolderName),
       beneficiary_instrument_details: {
@@ -1118,7 +1126,7 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
         accountNumber: String(bankAccount.account_number),
         ifsc: String(bankAccount.ifsc),
         accountHolderName: String(bankAccount.account_holder_name),
-        remarks: `TripSync payout for organizer #${uid}`,
+        remarks: `TripSync payout organizer ${uid}`,
       });
 
       if (transferResult.success) {
@@ -1643,7 +1651,7 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
       accountNumber: bankAccountNumber,
       ifsc: bankIfsc,
       accountHolderName: bankAccountName,
-      remarks: `TripSync admin payout for organizer #${String((requestRow as { organizer_id?: unknown }).organizer_id)}`,
+      remarks: `TripSync admin payout organizer ${String((requestRow as { organizer_id?: unknown }).organizer_id)}`,
     });
 
     const ok = transferResult.success;
