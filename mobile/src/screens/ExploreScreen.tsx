@@ -19,6 +19,7 @@ import type { TripListItem } from "../types";
 import { typography } from "../theme";
 import { Badge } from "../components/ui";
 import { useAppTheme } from "../context/ThemeContext";
+import type { ColorMode } from "../context/ThemeContext";
 
 const THEMES = ["All", "Adventure", "Trekking", "Bike Ride", "Cultural", "Food Trail", "Night Ride", "Nature Escape", "Beach Trip"];
 const SORTS = [
@@ -27,11 +28,13 @@ const SORTS = [
   { id: "price-desc", label: "Price ↓" },
 ] as const;
 
-const CHIP_HEIGHT = 36;
+const CHIP_HEIGHT = 34;
+
+type ThemeColors = ReturnType<typeof useAppTheme>["colors"];
 
 export function ExploreScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { colors } = useAppTheme();
+  const { colors, mode } = useAppTheme();
   const insets = useSafeAreaInsets();
   const [trips, setTrips] = useState<TripListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,7 +83,7 @@ export function ExploreScreen() {
     if (parent) parent.navigate("TripDetail", { id: String(id) });
   };
 
-  const s = useMemo(() => makeStyles(colors, insets.top), [colors, insets.top]);
+  const s = useMemo(() => makeStyles(colors, mode, insets.top), [colors, mode, insets.top]);
 
   return (
     <View style={s.root}>
@@ -89,12 +92,12 @@ export function ExploreScreen() {
         <Text style={s.heroSub}>Find your next adventure from our curated marketplace</Text>
       </View>
 
+      {/* Sort chips row */}
       <View style={s.sortRowOuter}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={s.sortRowInner}
-          style={s.chipScroll}
         >
           {SORTS.map((sort) => (
             <Pressable
@@ -108,6 +111,7 @@ export function ExploreScreen() {
         </ScrollView>
       </View>
 
+      {/* Search bar */}
       <View style={s.searchWrap}>
         <TextInput
           style={s.search}
@@ -118,12 +122,12 @@ export function ExploreScreen() {
         />
       </View>
 
+      {/* Theme pills row */}
       <View style={s.pillRowOuter}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={s.pillRowInner}
-          style={s.chipScroll}
         >
           {THEMES.map((t) => (
             <Pressable
@@ -184,33 +188,35 @@ export function ExploreScreen() {
   );
 }
 
-const makeStyles = (colors: ReturnType<typeof useAppTheme>["colors"], topInset: number) =>
+const makeStyles = (colors: ThemeColors, mode: ColorMode, topInset: number) =>
   StyleSheet.create({
     root: { flex: 1, backgroundColor: colors.bg, paddingTop: topInset },
     hero: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
     heroTitle: { ...typography.hero, color: colors.text, fontSize: 28, lineHeight: 34 },
     heroSub: { color: colors.muted, fontSize: 14, marginTop: 10 },
-    chipScroll: { height: CHIP_HEIGHT },
-    sortRowOuter: { paddingHorizontal: 16, marginBottom: 18 },
-    sortRowInner: { gap: 8, flexDirection: "row", alignItems: "center", height: CHIP_HEIGHT },
+    sortRowOuter: { paddingHorizontal: 16, marginBottom: 14 },
+    sortRowInner: {
+      gap: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      height: CHIP_HEIGHT,
+    },
     sortChip: {
       paddingHorizontal: 16,
-      paddingVertical: 0,
       height: CHIP_HEIGHT,
       borderRadius: 999,
       borderWidth: 1,
       borderColor: colors.border,
-      marginRight: 8,
       justifyContent: "center",
       alignItems: "center",
     },
     sortChipOn: { backgroundColor: colors.text, borderColor: colors.text },
     sortChipText: { color: colors.muted, fontWeight: "700", fontSize: 12 },
     sortChipTextOn: { color: colors.bg },
-    searchWrap: { paddingHorizontal: 16, marginBottom: 16 },
+    searchWrap: { paddingHorizontal: 16, marginBottom: 14 },
     search: {
-      borderWidth: 1,
-      borderColor: colors.border,
+      borderWidth: 1.5,
+      borderColor: mode === "light" ? "rgba(0,0,0,0.2)" : colors.border,
       borderRadius: 16,
       padding: 14,
       color: colors.text,
@@ -218,15 +224,18 @@ const makeStyles = (colors: ReturnType<typeof useAppTheme>["colors"], topInset: 
       backgroundColor: colors.surface,
     },
     pillRowOuter: { paddingHorizontal: 16, marginBottom: 12 },
-    pillRowInner: { gap: 8, flexDirection: "row", alignItems: "center", height: CHIP_HEIGHT },
+    pillRowInner: {
+      gap: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      height: CHIP_HEIGHT,
+    },
     pill: {
       paddingHorizontal: 16,
-      paddingVertical: 0,
       height: CHIP_HEIGHT,
       borderRadius: 999,
       borderWidth: 1,
       borderColor: colors.border,
-      marginRight: 8,
       justifyContent: "center",
       alignItems: "center",
     },
