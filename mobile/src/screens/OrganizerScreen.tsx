@@ -1,3 +1,5 @@
+//path: mobile/src/screens/OrganizerScreen.tsx
+
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,

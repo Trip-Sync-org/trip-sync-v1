@@ -44,61 +44,64 @@ function maskFullAccountNumber(acct: string): string {
   return `••••••${s.slice(-4)}`;
 }
 
-async function getCashfreePayoutToken(supabase: SupabaseClient): Promise<string | null> {
-  const cashfreeAppId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || process.env.CASHFREE_APP_ID || "").trim();
-  const cashfreeSecretKey = String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY || "").trim();
-  const cashfreeEnv = String(process.env.CASHFREE_ENV || "sandbox").trim();
-  const payoutBase = cashfreeEnv === "production" ? "https://payout-api.cashfree.com" : "https://payout-gamma.cashfree.com";
+/**
+ * Generates the mandatory 2FA signature for Cashfree Payouts.
+ * Encrypts "clientId.timestamp" using RSA OAEP with the public key.
+ */
+function getCashfreeSignature(): string | null {
+  const clientId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || process.env.CASHFREE_APP_ID || "").trim();
+  const rawPublicKey = String(process.env.CASHFREE_PUBLIC_KEY || "").trim();
 
-  if (!cashfreeAppId || !cashfreeSecretKey) return null;
-
-  // Return cached token if valid
-  if (CASHFREE_PAYOUT_TOKEN_CACHE.token && Date.now() < CASHFREE_PAYOUT_TOKEN_CACHE.expiresAt) {
-    return CASHFREE_PAYOUT_TOKEN_CACHE.token;
+  if (!clientId || !rawPublicKey) {
+    console.warn("[cashfree-payout] Missing CASHFREE_PAYOUT_CLIENT_ID or CASHFREE_PUBLIC_KEY for 2FA signature");
+    return null;
   }
 
   try {
-    const res = await fetch(`${payoutBase}/payout/v1/authorize`, {
-      method: "POST",
-      headers: {
-        "x-client-id": cashfreeAppId,
-        "x-client-secret": cashfreeSecretKey,
-        "Content-Type": "application/json",
+    const timestamp = Math.floor(Date.now() / 1000);
+    const dataToEncrypt = `${clientId}.${timestamp}`;
+    const buffer = Buffer.from(dataToEncrypt);
+
+    // Normalize the public key: ensure it has proper PEM headers
+    let pemKey = rawPublicKey;
+    if (!pemKey.includes("-----BEGIN PUBLIC KEY-----")) {
+      pemKey = `-----BEGIN PUBLIC KEY-----\n${pemKey}\n-----END PUBLIC KEY-----`;
+    }
+
+    const encrypted = crypto.publicEncrypt(
+      {
+        key: pemKey,
+        padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+        oaepHash: "sha256",
       },
-    });
-    // Cashfree Payouts API returns HTTP 200 with status/error in body even for failures
-    const text = await res.text();
-    let data: Record<string, unknown> = {};
-    try { data = JSON.parse(text); } catch { /* ignore */ }
+      buffer,
+    );
 
-    const status = String(data?.status || "").toUpperCase();
-    const subCode = String(data?.subCode || "");
-    const message = String(data?.message || "");
-
-    if (status === "ERROR" || subCode === "403") {
-      console.warn("[cashfree-payout] authorize failed:", message, "(subCode:", subCode, ")");
-      if (message.includes("IP not whitelisted")) {
-        console.warn("[cashfree-payout] ** IP WHITELISTING REQUIRED **");
-        console.warn("[cashfree-payout] Go to https://merchant.cashfree.com -> Settings -> Payouts -> IP Whitelist");
-        console.warn("[cashfree-payout] Add the server's public IP to the whitelist.");
-        console.warn("[cashfree-payout] For local dev, use ngrok or deploy to Vercel/staging first.");
-      }
-      return null;
-    }
-
-    const token = (data?.data as Record<string, unknown> | undefined)?.token as string | undefined;
-    if (token) {
-      CASHFREE_PAYOUT_TOKEN_CACHE.token = token;
-      CASHFREE_PAYOUT_TOKEN_CACHE.expiresAt = Date.now() + 25 * 60 * 1000; // 25 min (token lives 30)
-      console.log("[cashfree-payout] token acquired successfully");
-    } else {
-      console.warn("[cashfree-payout] authorize response - no token:", JSON.stringify(data).slice(0, 300));
-    }
-    return token ?? null;
+    return encrypted.toString("base64");
   } catch (e) {
-    console.warn("[cashfree-payout] authorize error:", e);
+    console.warn("[cashfree-payout] signature generation error:", e);
     return null;
   }
+}
+
+// Cashfree Payouts v2 uses x-client-id, x-client-secret + x-cf-signature on every call (no authorize token needed)
+function getCashfreePayoutHeaders(): Record<string, string> | null {
+  const cashfreeAppId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || process.env.CASHFREE_APP_ID || "").trim();
+  const cashfreeSecretKey = String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY || "").trim();
+  if (!cashfreeAppId || !cashfreeSecretKey) return null;
+
+  const headers: Record<string, string> = {
+    "x-client-id": cashfreeAppId,
+    "x-client-secret": cashfreeSecretKey,
+    "Content-Type": "application/json",
+  };
+
+  const signature = getCashfreeSignature();
+  if (signature) {
+    headers["x-cf-signature"] = signature;
+  }
+
+  return headers;
 }
 
 async function initiateCashfreeBankTransfer(opts: {
@@ -108,11 +111,11 @@ async function initiateCashfreeBankTransfer(opts: {
   ifsc: string;
   accountHolderName: string;
   remarks: string;
-  supabase: SupabaseClient;
 }): Promise<{ success: boolean; referenceId?: string; error?: string }> {
-  const { transferId, amount, accountNumber, ifsc, accountHolderName, remarks, supabase } = opts;
-  const token = await getCashfreePayoutToken(supabase);
-  if (!token) return { success: false, error: "Cashfree payouts not configured or auth failed" };
+  const { transferId, amount, accountNumber, ifsc, accountHolderName, remarks } = opts;
+
+  const headers = getCashfreePayoutHeaders();
+  if (!headers) return { success: false, error: "Cashfree PayOut client credentials not configured" };
 
   const cashfreeEnv = String(process.env.CASHFREE_ENV || "sandbox").trim();
   const payoutBase = cashfreeEnv === "production" ? "https://payout-api.cashfree.com" : "https://payout-gamma.cashfree.com";
@@ -120,10 +123,7 @@ async function initiateCashfreeBankTransfer(opts: {
   try {
     const res = await fetch(`${payoutBase}/payout/v1/directTransfer`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify({
         transferId,
         amount,
@@ -1105,7 +1105,6 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
         ifsc: String(bankAccount.ifsc),
         accountHolderName: String(bankAccount.account_holder_name),
         remarks: `TripSync payout for organizer #${uid}`,
-        supabase,
       });
 
       if (transferResult.success) {
