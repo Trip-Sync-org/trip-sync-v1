@@ -66,13 +66,27 @@ async function getCashfreePayoutToken(supabase: SupabaseClient): Promise<string 
         "Content-Type": "application/json",
       },
     });
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => "");
-      console.warn("[cashfree-payout] authorize failed:", res.status, errBody.slice(0, 500));
+    // Cashfree Payouts API returns HTTP 200 with status/error in body even for failures
+    const text = await res.text();
+    let data: Record<string, unknown> = {};
+    try { data = JSON.parse(text); } catch { /* ignore */ }
+
+    const status = String(data?.status || "").toUpperCase();
+    const subCode = String(data?.subCode || "");
+    const message = String(data?.message || "");
+
+    if (status === "ERROR" || subCode === "403") {
+      console.warn("[cashfree-payout] authorize failed:", message, "(subCode:", subCode, ")");
+      if (message.includes("IP not whitelisted")) {
+        console.warn("[cashfree-payout] ** IP WHITELISTING REQUIRED **");
+        console.warn("[cashfree-payout] Go to https://merchant.cashfree.com -> Settings -> Payouts -> IP Whitelist");
+        console.warn("[cashfree-payout] Add the server's public IP to the whitelist.");
+        console.warn("[cashfree-payout] For local dev, use ngrok or deploy to Vercel/staging first.");
+      }
       return null;
     }
-    const data = (await res.json()) as { subCode?: string; status?: string; message?: string; data?: { token?: string } };
-    const token = data?.data?.token ?? null;
+
+    const token = (data?.data as Record<string, unknown> | undefined)?.token as string | undefined;
     if (token) {
       CASHFREE_PAYOUT_TOKEN_CACHE.token = token;
       CASHFREE_PAYOUT_TOKEN_CACHE.expiresAt = Date.now() + 25 * 60 * 1000; // 25 min (token lives 30)
@@ -80,7 +94,7 @@ async function getCashfreePayoutToken(supabase: SupabaseClient): Promise<string 
     } else {
       console.warn("[cashfree-payout] authorize response - no token:", JSON.stringify(data).slice(0, 300));
     }
-    return token;
+    return token ?? null;
   } catch (e) {
     console.warn("[cashfree-payout] authorize error:", e);
     return null;
