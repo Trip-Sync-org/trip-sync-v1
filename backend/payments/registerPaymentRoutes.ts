@@ -96,63 +96,20 @@ function getCashfreeSignature(): string | null {
  * Get Cashfree Payouts authorization token using 2FA public key signature.
  * Flow: POST /payout/v1/authorize with x-cf-signature → returns token → use as Bearer for directTransfer
  */
-async function getCashfreePayoutToken(): Promise<string | null> {
-  const cashfreeAppId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || process.env.CASHFREE_APP_ID || "").trim();
-  const cashfreeSecretKey = String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY || "").trim();
-  // Always use production API for authorize - test credentials work on production
-  const payoutBase = "https://api.cashfree.com";
-
-  if (!cashfreeAppId || !cashfreeSecretKey) return null;
-
-  // Return cached token if still valid (tokens live ~30 min)
-  if (CASHFREE_PAYOUT_TOKEN_CACHE.token && Date.now() < CASHFREE_PAYOUT_TOKEN_CACHE.expiresAt) {
-    return CASHFREE_PAYOUT_TOKEN_CACHE.token;
-  }
-
-  try {
-    const signature = getCashfreeSignature();
-    const headers: Record<string, string> = {
-      "x-client-id": cashfreeAppId,
-      "x-client-secret": cashfreeSecretKey,
-      "Content-Type": "application/json",
-    };
-    if (signature) {
-      headers["x-cf-signature"] = signature;
-    }
-
-    console.log("[cashfree-payout] Requesting authorize token with signature length:", signature?.length ?? 0);
-    const res = await fetch(`${payoutBase}/payout/v1/authorize`, { method: "POST", headers });
-    const text = await res.text();
-
-    let data: Record<string, unknown> = {};
-    try { data = JSON.parse(text); } catch { /* ignore */ }
-
-    const status = String(data?.status || "").toUpperCase();
-    if (status === "ERROR") {
-      console.warn("[cashfree-payout] authorize failed:", data?.message, "(subCode:", data?.subCode, ")");
-      return null;
-    }
-
-    // Cashfree returns token in data.subToken or data.token depending on version
-    const tokenData = data?.data as Record<string, unknown> | undefined;
-    const token = String(tokenData?.token || data?.subToken || data?.token || "").trim() || null;
-
-    if (token && token.length > 10) {
-      CASHFREE_PAYOUT_TOKEN_CACHE.token = token;
-      CASHFREE_PAYOUT_TOKEN_CACHE.expiresAt = Date.now() + 25 * 60 * 1000; // 25 min
-      console.log("[cashfree-payout] token acquired successfully, len=" + token.length);
-      return token;
-    }
-
-    console.warn("[cashfree-payout] authorize response - no token found:", JSON.stringify(data).slice(0, 400));
-    return null;
-  } catch (e) {
-    console.warn("[cashfree-payout] authorize error:", e);
-    return null;
-  }
+// V2 API on gamma uses x-client-id/x-client-secret/x-cf-signature directly (no bearer token)
+function getV2Headers(): Record<string, string> {
+  const clientId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || process.env.CASHFREE_APP_ID || "").trim();
+  const secret = String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY || "").trim();
+  const sig = getCashfreeSignature();
+  return {
+    "x-client-id": clientId,
+    "x-client-secret": secret,
+    "x-cf-signature": sig || "",
+    "x-api-version": "2025-01-01",
+    "Content-Type": "application/json",
+  };
 }
 
-// v1 directTransfer uses Bearer token from authorize + x-cf-signature header per Cashfree docs
 async function initiateCashfreeBankTransfer(opts: {
   transferId: string;
   amount: number;
@@ -162,32 +119,27 @@ async function initiateCashfreeBankTransfer(opts: {
   remarks: string;
 }): Promise<{ success: boolean; referenceId?: string; error?: string }> {
   const { transferId, amount, accountNumber, ifsc, accountHolderName, remarks } = opts;
-  const token = await getCashfreePayoutToken();
-  if (!token) return { success: false, error: "Cashfree payout auth failed" };
-
-  // Use production API for directTransfer - gamma sandbox blocks v1 but production works with test keys
-  const transferBase = "https://api.cashfree.com";
+  const headers = getV2Headers();
+  if (!headers["x-client-id"]) return { success: false, error: "Cashfree credentials not configured" };
 
   try {
-    const res = await fetch(`${transferBase}/payout/v1/directTransfer`, {
+    const res = await fetch("https://api.cashfree.com/payout/v2/transfers", {
       method: "POST",
-      headers: {
-        "Authorization": "Bearer " + token,
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify({
-        transferId,
-        amount,
-        currency: "INR",
-        purpose: "Organizer Payout",
-        beneficiary: {
-          name: accountHolderName,
-          email: "organizer@tripsync.app",
-          phone: "9999999999",
-          bankAccount: accountNumber,
-          ifsc,
+        transfer_id: transferId,
+        transfer_amount: amount,
+        transfer_currency: "INR",
+        transfer_mode: "bank_account",
+        transfer_remarks: remarks,
+        transfer_purpose: "Organizer Payout",
+        beneficiary_details: {
+          beneficiary_name: accountHolderName,
+          beneficiary_instrument_details: {
+            bank_account_number: accountNumber,
+            bank_ifsc: ifsc,
+          },
         },
-        remarks,
       }),
     });
 
