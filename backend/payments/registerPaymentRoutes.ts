@@ -128,16 +128,20 @@ async function initiateCashfreeBankTransfer(opts: {
     console.warn("[cashfree-payout] No 2FA signature generated — request may be rejected if Public Key 2FA is enabled");
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
   try {
     console.log("[cashfree-payout] signature present:", !!sig, "url:", url, "transferId:", body.transfer_id);
-    console.log("[cashfree-payout] Sending v2 transfer request to", url, "for amount", opts.amount, "transferId", body.transfer_id);
     const res = await fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
     const text = await res.text();
-    console.log("[cashfree-payout] v2 Transfer response status:", res.status, "body:", text.slice(0, 500));
+    console.log("[cashfree-payout] v2 response status:", res.status, "body:", text.slice(0, 600));
 
     let data: Record<string, unknown> = {};
     try { data = JSON.parse(text); } catch {
@@ -153,7 +157,12 @@ async function initiateCashfreeBankTransfer(opts: {
 
     return { success: false, error: String(data?.message || data?.sub_code || text || "Payout failed") };
   } catch (e) {
-    console.error("[cashfree-payout] v2 transfer fetch error:", e);
+    clearTimeout(timeoutId);
+    if ((e as any)?.name === "AbortError") {
+      console.error("[cashfree-payout] fetch timed out after 15s");
+      return { success: false, error: "Cashfree API timeout" };
+    }
+    console.error("[cashfree-payout] fetch error:", e);
     return { success: false, error: String(e) };
   }
 }
@@ -1100,8 +1109,11 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
 
     // Try Cashfree Payouts if configured (uses outer cashfreePayoutEnabled from function scope)
     if (cashfreePayoutEnabled) {
+      const shortUuid = payoutId.replace(/-/g, "").slice(-12);
+      const tsSuffix = String(Date.now()).slice(-6);
+      const transferId = `PAYOUT_${shortUuid}_${tsSuffix}`;
       const transferResult = await initiateCashfreeBankTransfer({
-        transferId: `PAYOUT_${payoutId}_${Date.now()}`,
+        transferId,
         amount,
         accountNumber: String(bankAccount.account_number),
         ifsc: String(bankAccount.ifsc),
@@ -1624,8 +1636,9 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
       return res.status(400).json({ error: "Bank account details incomplete for payout" });
     }
 
+    const tsSuffix = String(Date.now()).slice(-6);
     const transferResult = await initiateCashfreeBankTransfer({
-      transferId: `PAYOUT_${requestId}_${Date.now()}`,
+      transferId: `PAYOUT_admin_${requestId}_${tsSuffix}`,
       amount,
       accountNumber: bankAccountNumber,
       ifsc: bankIfsc,
