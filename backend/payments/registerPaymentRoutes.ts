@@ -152,6 +152,25 @@ async function getCashfreePayoutToken(): Promise<string | null> {
   }
 }
 
+// V2 headers for Cashfree Payouts
+function getV2Headers(): Record<string, string> | null {
+  const clientId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || process.env.CASHFREE_APP_ID || "").trim();
+  const secret = String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY || "").trim();
+  if (!clientId || !secret) return null;
+
+  const headers: Record<string, string> = {
+    "x-client-id": clientId,
+    "x-client-secret": secret,
+    "x-api-version": "2025-01-01",
+    "Content-Type": "application/json",
+  };
+
+  const sig = getCashfreeSignature();
+  if (sig) headers["x-cf-signature"] = sig;
+
+  return headers;
+}
+
 async function initiateCashfreeBankTransfer(opts: {
   transferId: string;
   amount: number;
@@ -161,32 +180,30 @@ async function initiateCashfreeBankTransfer(opts: {
   remarks: string;
 }): Promise<{ success: boolean; referenceId?: string; error?: string }> {
   const { transferId, amount, accountNumber, ifsc, accountHolderName, remarks } = opts;
-  const token = await getCashfreePayoutToken();
-  if (!token) return { success: false, error: "Cashfree payout auth failed — check CASHFREE_PUBLIC_KEY" };
-
   const cashfreeEnv = String(process.env.CASHFREE_ENV || "sandbox").trim();
-  const payoutBase = cashfreeEnv === "production" ? "https://payout-api.cashfree.com" : "https://payout-gamma.cashfree.com";
+  const payoutBase = cashfreeEnv === "production" ? "https://api.cashfree.com" : "https://payout-gamma.cashfree.com";
 
-    try {
-    const res = await fetch(`${payoutBase}/payout/v1/directTransfer`, {
+  const headers = getV2Headers();
+  if (!headers) return { success: false, error: "Cashfree PayOut credentials not configured" };
+
+  try {
+    const res = await fetch(`${payoutBase}/payout/v2/transfers`, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify({
-        transferId,
-        amount,
-        currency: "INR",
-        purpose: "Trip-Sync Organizer Payout",
-        beneficiary: {
-          name: accountHolderName,
-          email: "organizer@tripsync.app",
-          phone: "9999999999",
-          bankAccount: accountNumber,
-          ifsc,
+        transfer_id: transferId,
+        transfer_amount: amount,
+        transfer_currency: "INR",
+        transfer_mode: "bank_account",
+        transfer_remarks: remarks,
+        transfer_purpose: "Organizer Payout",
+        beneficiary_details: {
+          beneficiary_name: accountHolderName,
+          beneficiary_instrument_details: {
+            bank_account_number: accountNumber,
+            bank_ifsc: ifsc,
+          },
         },
-        remarks,
       }),
     });
 
@@ -201,7 +218,7 @@ async function initiateCashfreeBankTransfer(opts: {
     }
     return { success: false, error: String(data?.message || data?.subCode || "Payout transfer failed") };
   } catch (e) {
-    console.warn("[cashfree-payout] directTransfer error:", e);
+    console.warn("[cashfree-payout] transfer error:", e);
     return { success: false, error: String(e) };
   }
 }
