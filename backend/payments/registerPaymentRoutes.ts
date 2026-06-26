@@ -94,67 +94,67 @@ function getCashfreeSignature(): string | null {
 
 /**
  * Get Cashfree Payouts authorization token using 2FA public key signature.
- * Flow: POST /payout/v1/authorize with x-cf-signature → returns token → use as Bearer for directTransfer
+ * Flow: POST /payout/v1/authorize with x-cf-signature → returns token → v1/directTransfer
+ * Note: v1 API still works in production for test credentials
  */
-// V2 API on gamma uses x-client-id/x-client-secret/x-cf-signature directly (no bearer token)
-function getV2Headers(): Record<string, string> {
-  const clientId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || process.env.CASHFREE_APP_ID || "").trim();
-  const secret = String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY || "").trim();
-  const sig = getCashfreeSignature();
-  return {
-    "x-client-id": clientId,
-    "x-client-secret": secret,
-    "x-cf-signature": sig || "",
-    "x-api-version": "2025-01-01",
-    "Content-Type": "application/json",
-  };
+async function getCashfreePayoutToken(): Promise<string | null> {
+  const cashfreeAppId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || process.env.CASHFREE_APP_ID || "").trim();
+  const cashfreeSecretKey = String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY || "").trim();
+  const payoutBase = "https://payout-gamma.cashfree.com";
+
+  if (!cashfreeAppId || !cashfreeSecretKey) return null;
+
+  if (CASHFREE_PAYOUT_TOKEN_CACHE.token && Date.now() < CASHFREE_PAYOUT_TOKEN_CACHE.expiresAt) {
+    return CASHFREE_PAYOUT_TOKEN_CACHE.token;
+  }
+
+  try {
+    const sig = getCashfreeSignature();
+    const headers: Record<string, string> = {"x-client-id": cashfreeAppId, "x-client-secret": cashfreeSecretKey, "Content-Type": "application/json"};
+    if (sig) headers["x-cf-signature"] = sig;
+
+    const res = await fetch(`${payoutBase}/payout/v1/authorize`, {method: "POST", headers});
+    const data = await res.json();
+    const token = String(data?.data?.token || "").trim();
+
+    if (token && token.length > 10) {
+      CASHFREE_PAYOUT_TOKEN_CACHE.token = token;
+      CASHFREE_PAYOUT_TOKEN_CACHE.expiresAt = Date.now() + 25 * 60 * 1000;
+      console.log("[cashfree-payout] token OK, len=" + token.length);
+      return token;
+    }
+    console.warn("[cashfree-payout] authorize failed:", data?.message);
+    return null;
+  } catch(e) {
+    console.warn("[cashfree-payout] authorize error:", e);
+    return null;
+  }
 }
 
 async function initiateCashfreeBankTransfer(opts: {
-  transferId: string;
-  amount: number;
-  accountNumber: string;
-  ifsc: string;
-  accountHolderName: string;
-  remarks: string;
+  transferId: string; amount: number; accountNumber: string; ifsc: string; accountHolderName: string; remarks: string;
 }): Promise<{ success: boolean; referenceId?: string; error?: string }> {
-  const { transferId, amount, accountNumber, ifsc, accountHolderName, remarks } = opts;
-  const headers = getV2Headers();
-  if (!headers["x-client-id"]) return { success: false, error: "Cashfree credentials not configured" };
-
+  const token = await getCashfreePayoutToken();
+  if (!token) return { success: false, error: "Cashfree auth failed" };
+  
   try {
-    const res = await fetch("https://api.cashfree.com/payout/v2/transfers", {
+    const res = await fetch("https://payout-gamma.cashfree.com/payout/v1/directTransfer", {
       method: "POST",
-      headers,
-      body: JSON.stringify({
-        transfer_id: transferId,
-        transfer_amount: amount,
-        transfer_currency: "INR",
-        transfer_mode: "bank_account",
-        transfer_remarks: remarks,
-        transfer_purpose: "Organizer Payout",
-        beneficiary_details: {
-          beneficiary_name: accountHolderName,
-          beneficiary_instrument_details: {
-            bank_account_number: accountNumber,
-            bank_ifsc: ifsc,
-          },
-        },
-      }),
+      headers: {"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+      body: JSON.stringify({transferId: opts.transferId, amount: opts.amount, currency: "INR",
+        purpose: "Organizer Payout", beneficiary: {name: opts.accountHolderName, email: "org@t.app",
+          phone: "9999999999", bankAccount: opts.accountNumber, ifsc: opts.ifsc}, remarks: opts.remarks}),
     });
-
     const text = await res.text();
     let data: Record<string, unknown> = {};
-    try { data = JSON.parse(text); } catch { /* ignore */ }
-
-    const status = String(data?.status || data?.subCode || "").toUpperCase();
-    if (status === "SUCCESS" || status === "200") {
+    try { data = JSON.parse(text); } catch {}
+    const s = String(data?.status || data?.subCode || "").toUpperCase();
+    if (s === "SUCCESS" || s === "200") {
       const d = data?.data as Record<string, unknown> | undefined;
-      return { success: true, referenceId: String(d?.referenceId || data?.referenceId || transferId) };
+      return { success: true, referenceId: String(d?.referenceId || data?.referenceId || opts.transferId) };
     }
-    return { success: false, error: String(data?.message || data?.subCode || "Payout transfer failed") };
-  } catch (e) {
-    console.warn("[cashfree-payout] transfer error:", e);
+    return { success: false, error: String(data?.message || data?.subCode || text || "Payout failed") };
+  } catch(e) {
     return { success: false, error: String(e) };
   }
 }
