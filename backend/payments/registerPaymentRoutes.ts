@@ -165,29 +165,30 @@ async function initiateCashfreeBankTransfer(opts: {
   const token = await getCashfreePayoutToken();
   if (!token) return { success: false, error: "Cashfree payout auth failed" };
 
-  const cashfreeEnv = String(process.env.CASHFREE_ENV || "sandbox").trim();
-  const payoutBase = cashfreeEnv === "production" ? "https://payout-api.cashfree.com" : "https://payout-gamma.cashfree.com";
+  const transferBase = "https://api.cashfree.com";
 
   try {
-    const res = await fetch(`${payoutBase}/payout/v1/directTransfer`, {
+    const res = await fetch(`${transferBase}/payout/v2/transfers`, {
       method: "POST",
       headers: {
         "Authorization": "Bearer " + token,
+        "x-api-version": "2025-01-01",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        transferId,
-        amount,
-        currency: "INR",
-        purpose: "Organizer Payout",
-        beneficiary: {
-          name: accountHolderName,
-          email: "organizer@tripsync.app",
-          phone: "9999999999",
-          bankAccount: accountNumber,
-          ifsc,
+        transfer_id: transferId,
+        transfer_amount: amount,
+        transfer_currency: "INR",
+        transfer_mode: "bank_account",
+        transfer_remarks: remarks,
+        transfer_purpose: "Organizer Payout",
+        beneficiary_details: {
+          beneficiary_name: accountHolderName,
+          beneficiary_instrument_details: {
+            bank_account_number: accountNumber,
+            bank_ifsc: ifsc,
+          },
         },
-        remarks,
       }),
     });
 
