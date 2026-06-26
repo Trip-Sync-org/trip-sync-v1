@@ -58,24 +58,27 @@ async function getCashfreePayoutToken(supabase: SupabaseClient): Promise<string 
   }
 
   try {
-    const b64 = Buffer.from(`${cashfreeAppId}:${cashfreeSecretKey}`).toString("base64");
     const res = await fetch(`${payoutBase}/payout/v1/authorize`, {
       method: "POST",
       headers: {
-        Authorization: `Basic ${b64}`,
+        "x-client-id": cashfreeAppId,
+        "x-client-secret": cashfreeSecretKey,
         "Content-Type": "application/json",
       },
     });
     if (!res.ok) {
       const errBody = await res.text().catch(() => "");
-      console.warn("[cashfree-payout] authorize failed:", res.status, errBody.slice(0, 200));
+      console.warn("[cashfree-payout] authorize failed:", res.status, errBody.slice(0, 500));
       return null;
     }
-    const data = (await res.json()) as { subCode?: string; data?: { token?: string } };
+    const data = (await res.json()) as { subCode?: string; status?: string; message?: string; data?: { token?: string } };
     const token = data?.data?.token ?? null;
     if (token) {
       CASHFREE_PAYOUT_TOKEN_CACHE.token = token;
       CASHFREE_PAYOUT_TOKEN_CACHE.expiresAt = Date.now() + 25 * 60 * 1000; // 25 min (token lives 30)
+      console.log("[cashfree-payout] token acquired successfully");
+    } else {
+      console.warn("[cashfree-payout] authorize response - no token:", JSON.stringify(data).slice(0, 300));
     }
     return token;
   } catch (e) {
