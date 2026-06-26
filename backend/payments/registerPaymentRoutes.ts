@@ -24,6 +24,8 @@ export type PaymentRoutesContext = {
   resolveOrganizerId: (input: unknown) => Promise<number | null>;
 };
 
+const CASHFREE_PAYOUT_TOKEN_CACHE: { token: string | null; expiresAt: number } = { token: null, expiresAt: 0 };
+
 function parseBookingIdFromOrderId(orderId: string): number | null {
   const m = String(orderId || "").match(/^TS_\d+_(\d+)_\d+$/);
   if (!m) return null;
@@ -33,6 +35,198 @@ function parseBookingIdFromOrderId(orderId: string): number | null {
 
 function maskAccountNumber(last4: string): string {
   return `••••••${last4}`;
+}
+
+/** Mask all but last 4 digits of a bank account */
+function maskFullAccountNumber(acct: string): string {
+  const s = String(acct || "").trim();
+  if (s.length <= 4) return s;
+  return `••••••${s.slice(-4)}`;
+}
+
+async function getCashfreePayoutToken(supabase: SupabaseClient): Promise<string | null> {
+  const cashfreeAppId = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || process.env.CASHFREE_APP_ID || "").trim();
+  const cashfreeSecretKey = String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY || "").trim();
+  const cashfreeEnv = String(process.env.CASHFREE_ENV || "sandbox").trim();
+  const payoutBase = cashfreeEnv === "production" ? "https://payout-api.cashfree.com" : "https://payout-gamma.cashfree.com";
+
+  if (!cashfreeAppId || !cashfreeSecretKey) return null;
+
+  // Return cached token if valid
+  if (CASHFREE_PAYOUT_TOKEN_CACHE.token && Date.now() < CASHFREE_PAYOUT_TOKEN_CACHE.expiresAt) {
+    return CASHFREE_PAYOUT_TOKEN_CACHE.token;
+  }
+
+  try {
+    const b64 = Buffer.from(`${cashfreeAppId}:${cashfreeSecretKey}`).toString("base64");
+    const res = await fetch(`${payoutBase}/payout/v1/authorize`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${b64}`,
+        "Content-Type": "application/json",
+      },
+    });
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => "");
+      console.warn("[cashfree-payout] authorize failed:", res.status, errBody.slice(0, 200));
+      return null;
+    }
+    const data = (await res.json()) as { subCode?: string; data?: { token?: string } };
+    const token = data?.data?.token ?? null;
+    if (token) {
+      CASHFREE_PAYOUT_TOKEN_CACHE.token = token;
+      CASHFREE_PAYOUT_TOKEN_CACHE.expiresAt = Date.now() + 25 * 60 * 1000; // 25 min (token lives 30)
+    }
+    return token;
+  } catch (e) {
+    console.warn("[cashfree-payout] authorize error:", e);
+    return null;
+  }
+}
+
+async function initiateCashfreeBankTransfer(opts: {
+  transferId: string;
+  amount: number;
+  accountNumber: string;
+  ifsc: string;
+  accountHolderName: string;
+  remarks: string;
+  supabase: SupabaseClient;
+}): Promise<{ success: boolean; referenceId?: string; error?: string }> {
+  const { transferId, amount, accountNumber, ifsc, accountHolderName, remarks, supabase } = opts;
+  const token = await getCashfreePayoutToken(supabase);
+  if (!token) return { success: false, error: "Cashfree payouts not configured or auth failed" };
+
+  const cashfreeEnv = String(process.env.CASHFREE_ENV || "sandbox").trim();
+  const payoutBase = cashfreeEnv === "production" ? "https://payout-api.cashfree.com" : "https://payout-gamma.cashfree.com";
+
+  try {
+    const res = await fetch(`${payoutBase}/payout/v1/directTransfer`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        transferId,
+        amount,
+        currency: "INR",
+        purpose: "Trip-Sync Organizer Payout",
+        beneficiary: {
+          name: accountHolderName,
+          email: "organizer@tripsync.app",
+          phone: "9999999999",
+          bankAccount: accountNumber,
+          ifsc,
+        },
+        remarks,
+      }),
+    });
+
+    const text = await res.text();
+    let data: Record<string, unknown> = {};
+    try { data = JSON.parse(text); } catch { /* ignore */ }
+
+    const status = String(data?.status || data?.subCode || "").toUpperCase();
+    if (status === "SUCCESS" || status === "200") {
+      const d = data?.data as Record<string, unknown> | undefined;
+      return { success: true, referenceId: String(d?.referenceId || data?.referenceId || transferId) };
+    }
+    return { success: false, error: String(data?.message || data?.subCode || "Payout transfer failed") };
+  } catch (e) {
+    console.warn("[cashfree-payout] directTransfer error:", e);
+    return { success: false, error: String(e) };
+  }
+}
+
+/**
+ * Credit an organizer's wallet after a successful booking payment.
+ * Uses wallet_ledger to prevent double-crediting (checks existing booking_id).
+ */
+async function creditOrganizerWallet(opts: {
+  supabase: SupabaseClient;
+  organizerId: number;
+  bookingId: number;
+  tripId: number;
+  grossAmount: number;
+  platformFeeAmount: number;
+}): Promise<boolean> {
+  const { supabase, organizerId, bookingId, tripId, grossAmount, platformFeeAmount } = opts;
+
+  if (grossAmount <= 0) return true;
+
+  // Check wallet_ledger for existing booking_id to prevent double-credit
+  const { data: existing } = await supabase
+    .from("wallet_ledger")
+    .select("id")
+    .eq("booking_id", bookingId)
+    .eq("type", "booking_credit")
+    .maybeSingle();
+
+  if (existing) {
+    console.log(`[wallet] booking ${bookingId} already credited, skipping`);
+    return true;
+  }
+
+  const netAmount = grossAmount - platformFeeAmount;
+
+  // Upsert organizer_wallet
+  // We do this in a transaction-safe way using a Supabase function approach,
+  // but since we don't have a custom RPC, we'll do it application-side.
+  // First read the current wallet
+  const { data: wallet } = await supabase
+    .from("organizer_wallet")
+    .select("total_earned, total_paid_out, pending_payout, platform_fee_deducted")
+    .eq("organizer_id", String(organizerId))
+    .maybeSingle();
+
+  if (wallet) {
+    // Update existing
+    const { error: upErr } = await supabase
+      .from("organizer_wallet")
+      .update({
+        total_earned: Number(wallet.total_earned || 0) + netAmount,
+        platform_fee_deducted: Number(wallet.platform_fee_deducted || 0) + platformFeeAmount,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("organizer_id", String(organizerId));
+    if (upErr) {
+      console.error("[wallet] upsert update error:", upErr.message);
+      return false;
+    }
+  } else {
+    // Insert new
+    const { error: insErr } = await supabase
+      .from("organizer_wallet")
+      .insert({
+        organizer_id: String(organizerId),
+        total_earned: netAmount,
+        platform_fee_deducted: platformFeeAmount,
+        total_paid_out: 0,
+        pending_payout: 0,
+      });
+    if (insErr) {
+      console.error("[wallet] upsert insert error:", insErr.message);
+      return false;
+    }
+  }
+
+  // Write wallet_ledger entry
+  const { error: ledgerErr } = await supabase
+    .from("wallet_ledger")
+    .insert({
+      organizer_id: String(organizerId),
+      amount: netAmount,
+      type: "booking_credit",
+      booking_id: bookingId,
+      description: `Booking #${bookingId} for trip #${tripId}`,
+    });
+
+  if (ledgerErr) {
+    console.error("[wallet] ledger insert error:", ledgerErr.message);
+  }
+
+  return true;
 }
 
 export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): void {
@@ -283,11 +477,34 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
           if (!okInc) console.warn("[payments/webhook] coupon increment failed", couponId);
         }
 
-        if (io) {
-          io.to(`trip-${Number((booking as { trip_id?: unknown }).trip_id)}`).emit("payment:confirmed", {
+        // Credit organizer wallet
+        const tripId = Number((booking as { trip_id?: unknown }).trip_id);
+        const userId = Number((booking as { user_id?: unknown }).user_id);
+        const organizerId = Number((booking as { organizer_id?: unknown }).organizer_id) || (await (async () => {
+          const { data: tripData } = await supabase.from("trips").select("organizer_id").eq("id", tripId).single();
+          return tripData ? Number(tripData.organizer_id) : null;
+        })());
+
+        if (organizerId && Number.isFinite(organizerId)) {
+          void creditOrganizerWallet({
+            supabase,
+            organizerId,
             bookingId,
-            tripId: Number((booking as { trip_id?: unknown }).trip_id),
-            userId: Number((booking as { user_id?: unknown }).user_id),
+            tripId,
+            grossAmount: paidAmount,
+            platformFeeAmount: platformFee,
+          }).then((ok) => {
+            if (ok && io) {
+              io.to(`organizer-${organizerId}`).emit("wallet-balance-updated", { organizerId });
+            }
+          });
+        }
+
+        if (io) {
+          io.to(`trip-${tripId}`).emit("payment:confirmed", {
+            bookingId,
+            tripId,
+            userId,
             amount: paidAmount,
           });
         }
@@ -347,6 +564,31 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
           if (couponId != null && Number.isFinite(Number(couponId))) {
             const okInc = await incrementOrganizerCouponUsage(Number(couponId));
             if (!okInc) console.warn("[payments/verify] coupon increment failed", couponId);
+          }
+          // Also credit wallet for reconciled payments
+          const { data: reconciledBooking } = await supabase
+            .from("bookings")
+            .select("trip_id, user_id")
+            .eq("id", bookingId)
+            .maybeSingle();
+          if (reconciledBooking) {
+            const tripId = Number(reconciledBooking.trip_id);
+            const { data: tripData } = await supabase.from("trips").select("organizer_id").eq("id", tripId).single();
+            const organizerId = tripData ? Number(tripData.organizer_id) : null;
+            if (organizerId && Number.isFinite(organizerId)) {
+              void creditOrganizerWallet({
+                supabase,
+                organizerId,
+                bookingId,
+                tripId,
+                grossAmount: paidAmount,
+                platformFeeAmount: platformFee,
+              }).then((ok) => {
+                if (ok && io) {
+                  io.to(`organizer-${organizerId}`).emit("wallet-balance-updated", { organizerId });
+                }
+              });
+            }
           }
         }
       }
@@ -468,6 +710,40 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
     });
   });
 
+  /** GET /api/organizer/revenue/mini/:userId — mini revenue snapshot */
+  app.get("/api/organizer/revenue/mini/:userId", async (req: Request, res: Response) => {
+    const organizerId = await resolveOrganizerId(req.params.userId);
+    if (organizerId == null) {
+      return res.status(400).json({ error: "Invalid organizer id" });
+    }
+
+    const { data: trips } = await supabase
+      .from("trips")
+      .select("id")
+      .eq("organizer_id", organizerId);
+    const tripIds = (trips ?? []).map((t: any) => Number(t.id)).filter(Number.isFinite);
+
+    if (tripIds.length === 0) {
+      return res.json({ totalBookings: 0, totalRevenue: 0 });
+    }
+
+    const { data: bookings } = await supabase
+      .from("bookings")
+      .select("amount_paid")
+      .in("trip_id", tripIds)
+      .eq("payment_status", "paid");
+
+    let totalRevenue = 0;
+    for (const b of bookings ?? []) {
+      totalRevenue += Number((b as { amount_paid?: unknown }).amount_paid ?? 0);
+    }
+
+    return res.json({
+      totalBookings: (bookings ?? []).length,
+      totalRevenue,
+    });
+  });
+
   /** GET /api/organizer/payout/balance/:userId */
   app.get("/api/organizer/payout/balance/:userId", async (req: Request, res: Response) => {
     const organizerId = await resolveOrganizerId(req.params.userId);
@@ -484,7 +760,609 @@ export function registerPaymentRoutes(app: Express, ctx: PaymentRoutesContext): 
     });
   });
 
-  /** POST /api/organizer/payout/request */
+  /** GET /api/organizers/:id/payout-balance — reads from organizer_wallet */
+  app.get("/api/organizers/:id/payout-balance", async (req: Request, res: Response) => {
+    const organizerId = await resolveOrganizerId(req.params.id);
+    if (organizerId == null) {
+      return res.status(400).json({ error: "Invalid organizer id" });
+    }
+
+    // Try organizer_wallet first
+    const { data: wallet } = await supabase
+      .from("organizer_wallet")
+      .select("total_earned, total_paid_out, pending_payout, platform_fee_deducted")
+      .eq("organizer_id", String(organizerId))
+      .maybeSingle();
+
+    if (wallet) {
+      const totalEarned = Number(wallet.total_earned || 0);
+      const totalPaidOut = Number(wallet.total_paid_out || 0);
+      const pendingPayout = Number(wallet.pending_payout || 0);
+      const availableBalance = Math.max(0, totalEarned - totalPaidOut - pendingPayout);
+      return res.json({
+        eligibleForPayout: totalEarned,
+        totalPaidOut,
+        pendingPayout,
+        availableBalance,
+      });
+    }
+
+    // Fallback to computeOrganizerRevenue if wallet table not populated yet
+    const r = await computeOrganizerRevenue(supabase, organizerId, platformFeePercent);
+    return res.json({
+      eligibleForPayout: r.eligibleForPayout,
+      totalPaidOut: r.totalPaidOut,
+      pendingPayout: r.pendingPayout,
+      availableBalance: r.availableBalance,
+    });
+  });
+
+  // ===================================================================
+  // BANK ACCOUNT ROUTES
+  // ===================================================================
+
+  /** GET /api/organizers/:id/bank-accounts — list bank accounts */
+  app.get("/api/organizers/:id/bank-accounts", async (req: Request, res: Response) => {
+    const uid = await resolveOrganizerId(req.params.id);
+    if (uid == null) return res.status(400).json({ error: "Invalid organizer id" });
+
+    const { data, error } = await supabase
+      .from("organizer_bank_accounts")
+      .select("*")
+      .eq("organizer_id", String(uid))
+      .order("is_primary", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("bank-accounts list:", error.message);
+      return res.status(500).json({ error: "Failed to fetch bank accounts" });
+    }
+
+    // Mask account numbers — show only last 4 digits
+    const masked = (data ?? []).map((r: any) => ({
+      id: r.id,
+      accountNumber: maskFullAccountNumber(String(r.account_number || "")),
+      ifsc: String(r.ifsc || ""),
+      bankName: String(r.bank_name || ""),
+      accountHolderName: String(r.account_holder_name || ""),
+      isPrimary: Boolean(r.is_primary),
+      isVerified: Boolean(r.is_verified),
+      createdAt: r.created_at,
+    }));
+
+    return res.json(masked);
+  });
+
+  /** POST /api/organizers/:id/bank-accounts — add a bank account */
+  app.post("/api/organizers/:id/bank-accounts", async (req: Request, res: Response) => {
+    const uid = await resolveOrganizerId(req.params.id);
+    if (uid == null) return res.status(400).json({ error: "Invalid organizer id" });
+
+    const { account_number, ifsc, account_holder_name, bank_name } = req.body ?? {};
+
+    if (!account_number || !ifsc || !account_holder_name) {
+      return res.status(400).json({ error: "account_number, ifsc, and account_holder_name are required" });
+    }
+
+    const ifscUpper = String(ifsc).trim().toUpperCase();
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifscUpper)) {
+      return res.status(400).json({ error: "Invalid IFSC code format" });
+    }
+
+    // Check if this is the first account
+    const { count } = await supabase
+      .from("organizer_bank_accounts")
+      .select("*", { count: "exact", head: true })
+      .eq("organizer_id", String(uid));
+
+    const isFirst = (count ?? 0) === 0;
+
+    const { data, error } = await supabase
+      .from("organizer_bank_accounts")
+      .insert({
+        organizer_id: String(uid),
+        account_number: String(account_number).trim(),
+        ifsc: ifscUpper,
+        bank_name: String(bank_name || "").trim(),
+        account_holder_name: String(account_holder_name).trim(),
+        is_primary: isFirst,
+        is_verified: false,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("bank-accounts create:", error.message);
+      return res.status(500).json({ error: "Failed to save bank account" });
+    }
+
+    return res.json({
+      id: data.id,
+      accountNumber: maskFullAccountNumber(String(data.account_number || "")),
+      ifsc: String(data.ifsc || ""),
+      bankName: String(data.bank_name || ""),
+      accountHolderName: String(data.account_holder_name || ""),
+      isPrimary: Boolean(data.is_primary),
+      isVerified: Boolean(data.is_verified),
+    });
+  });
+
+  /** DELETE /api/organizers/:id/bank-accounts/:accountId — delete a bank account */
+  app.delete("/api/organizers/:id/bank-accounts/:accountId", async (req: Request, res: Response) => {
+    const uid = await resolveOrganizerId(req.params.id);
+    if (uid == null) return res.status(400).json({ error: "Invalid organizer id" });
+    const accountId = String(req.params.accountId ?? "");
+    if (!accountId) return res.status(400).json({ error: "Invalid account id" });
+
+    // Check if there are pending payouts against this account
+    const { data: pendingPayouts } = await supabase
+      .from("payout_requests")
+      .select("id")
+      .eq("bank_account_id", accountId)
+      .in("status", ["pending", "processing"])
+      .limit(1);
+
+    if (pendingPayouts && pendingPayouts.length > 0) {
+      return res.status(400).json({ error: "Cannot delete account with pending payout requests" });
+    }
+
+    const { error } = await supabase
+      .from("organizer_bank_accounts")
+      .delete()
+      .eq("id", accountId)
+      .eq("organizer_id", String(uid));
+
+    if (error) {
+      console.error("bank-accounts delete:", error.message);
+      return res.status(500).json({ error: "Failed to delete bank account" });
+    }
+
+    return res.json({ deleted: true });
+  });
+
+  // ===================================================================
+  // PAYOUT REQUEST ROUTES
+  // ===================================================================
+
+  /** GET /api/organizers/:id/payouts — list payout requests */
+  app.get("/api/organizers/:id/payouts", async (req: Request, res: Response) => {
+    const uid = await resolveOrganizerId(req.params.id);
+    if (uid == null) return res.status(400).json({ error: "Invalid organizer id" });
+
+    const { data, error } = await supabase
+      .from("payout_requests")
+      .select("*")
+      .eq("organizer_id", uid)
+      .order("requested_at", { ascending: false });
+
+    if (error) {
+      console.error("payouts list:", error.message);
+      return res.status(500).json({ error: "Failed to load payouts" });
+    }
+
+    const mapped = (data ?? []).map((r: any) => ({
+      id: String(r.id),
+      amount: Number(r.amount || 0),
+      status: String(r.status || "pending").toLowerCase(),
+      createdAt: r.requested_at || r.created_at || new Date().toISOString(),
+      processedAt: r.processed_at || null,
+      utr: r.utr || null,
+      accountLabel: r.account_label || null,
+      note: r.note || null,
+    }));
+
+    return res.json(mapped);
+  });
+
+  /** POST /api/organizers/:id/payouts — request a payout */
+  app.post("/api/organizers/:id/payouts", async (req: Request, res: Response) => {
+    const uid = await resolveOrganizerId(req.params.id);
+    if (uid == null) return res.status(400).json({ error: "Invalid organizer id" });
+
+    const amount = Number(req.body?.amount);
+    const bankAccountId = String(req.body?.bank_account_id ?? "").trim();
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: "Positive amount is required" });
+    }
+
+    if (amount < 100) {
+      return res.status(400).json({ error: "Minimum payout is ₹100" });
+    }
+
+    if (!bankAccountId) {
+      return res.status(400).json({ error: "bank_account_id is required" });
+    }
+
+    // Validate bank account belongs to this organizer
+    const { data: bankAccount } = await supabase
+      .from("organizer_bank_accounts")
+      .select("id, account_number, ifsc, account_holder_name, bank_name")
+      .eq("id", bankAccountId)
+      .eq("organizer_id", String(uid))
+      .maybeSingle();
+
+    if (!bankAccount) {
+      return res.status(400).json({ error: "Bank account not found or does not belong to you" });
+    }
+
+    // Check for existing pending/processing payout
+    const { data: pendingRows } = await supabase
+      .from("payout_requests")
+      .select("id")
+      .eq("organizer_id", uid)
+      .in("status", ["pending", "processing"])
+      .limit(1);
+
+    if ((pendingRows ?? []).length > 0) {
+      return res.status(400).json({ error: "You already have a payout request in progress" });
+    }
+
+    // Check balance from organizer_wallet
+    let availableBalance = 0;
+    const { data: wallet } = await supabase
+      .from("organizer_wallet")
+      .select("total_earned, total_paid_out, pending_payout")
+      .eq("organizer_id", String(uid))
+      .maybeSingle();
+
+    if (wallet) {
+      const totalEarned = Number(wallet.total_earned || 0);
+      const totalPaidOut = Number(wallet.total_paid_out || 0);
+      const pendingPayout = Number(wallet.pending_payout || 0);
+      availableBalance = Math.max(0, totalEarned - totalPaidOut - pendingPayout);
+    } else {
+      // Fallback to revenue engine
+      const r = await computeOrganizerRevenue(supabase, uid, platformFeePercent);
+      availableBalance = r.availableBalance;
+    }
+
+    if (amount > availableBalance + 0.01) {
+      return res.status(400).json({ error: "Insufficient balance" });
+    }
+
+    // Create account label for history display
+    const accountLabel = `${String(bankAccount.bank_name || "Bank")} ••••${String(bankAccount.account_number || "").slice(-4)}`;
+
+    // Deduct from wallet pending_payout (reserve it)
+    const { error: walletErr } = await supabase
+      .from("organizer_wallet")
+      .update({
+        pending_payout: Number(wallet?.pending_payout || 0) + amount,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("organizer_id", String(uid));
+
+    if (walletErr) {
+      console.error("[payout] wallet reserve error:", walletErr.message);
+    }
+
+    // Write wallet_ledger entry
+    await supabase
+      .from("wallet_ledger")
+      .insert({
+        organizer_id: String(uid),
+        amount: -amount,
+        type: "payout_debit",
+        description: `Payout request #${Date.now()}`,
+      });
+
+    // Create payout request
+    const { data: inserted, error: insErr } = await supabase
+      .from("payout_requests")
+      .insert({
+        organizer_id: uid,
+        amount,
+        status: "pending",
+        net_amount: amount,
+        bank_account_id: bankAccountId,
+        account_label: accountLabel,
+        payout_method_snapshot: accountLabel,
+      })
+      .select("id")
+      .single();
+
+    if (insErr || !inserted) {
+      console.error("payout insert:", insErr?.message);
+      // Refund the wallet reservation
+      await supabase
+        .from("organizer_wallet")
+        .update({
+          pending_payout: Math.max(0, Number(wallet?.pending_payout || 0)),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("organizer_id", String(uid));
+      return res.status(500).json({ error: "Failed to create payout request" });
+    }
+
+    const payoutId = String(inserted.id);
+
+    // Try Cashfree Payouts if configured
+    const cashfreePayoutEnabled = String(process.env.CASHFREE_PAYOUT_CLIENT_ID || process.env.CASHFREE_APP_ID || "").trim()
+      && String(process.env.CASHFREE_PAYOUT_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY || "").trim();
+
+    if (cashfreePayoutEnabled) {
+      const transferResult = await initiateCashfreeBankTransfer({
+        transferId: `PAYOUT_${payoutId}_${Date.now()}`,
+        amount,
+        accountNumber: String(bankAccount.account_number),
+        ifsc: String(bankAccount.ifsc),
+        accountHolderName: String(bankAccount.account_holder_name),
+        remarks: `TripSync payout for organizer #${uid}`,
+        supabase,
+      });
+
+      if (transferResult.success) {
+        await supabase
+          .from("payout_requests")
+          .update({
+            status: "processing",
+            utr: transferResult.referenceId || null,
+          })
+          .eq("id", inserted.id);
+      } else {
+        console.warn("[payout] Cashfree transfer failed, leaving as pending:", transferResult.error);
+      }
+    }
+
+    // Emit socket event
+    if (io) {
+      io.to(`organizer-${uid}`).emit("payout-status-updated", {
+        payoutId,
+        status: "pending",
+        amount,
+        utr: null,
+      });
+    }
+
+    return res.json({
+      id: payoutId,
+      amount,
+      status: "pending",
+      message: cashfreePayoutEnabled
+        ? "Payout initiated. Processing via bank transfer."
+        : "Payout requested. Admin will process within 2-3 business days.",
+    });
+  });
+
+  /** POST /api/admin/payouts/:payoutId/status — admin updates payout status */
+  app.post("/api/admin/payouts/:payoutId/status", async (req: Request, res: Response) => {
+    const adminKey = String(req.headers["x-admin-key"] ?? req.headers["admin-secret-key"] ?? "");
+    if (!adminSecretKey || adminKey !== adminSecretKey) {
+      return res.status(403).json({ error: "Unauthorized — invalid admin key" });
+    }
+
+    const payoutId = String(req.params.payoutId ?? "");
+    if (!payoutId) return res.status(400).json({ error: "Invalid payout id" });
+
+    const status = String(req.body?.status ?? "").toLowerCase();
+    if (!["completed", "failed"].includes(status)) {
+      return res.status(400).json({ error: "Status must be 'completed' or 'failed'" });
+    }
+
+    const utr = String(req.body?.utr ?? "").trim() || null;
+    const note = String(req.body?.note ?? "").trim() || null;
+
+    // Fetch the payout request
+    const { data: payout } = await supabase
+      .from("payout_requests")
+      .select("id, organizer_id, amount, status")
+      .eq("id", payoutId)
+      .maybeSingle();
+
+    if (!payout) return res.status(404).json({ error: "Payout request not found" });
+
+    const currentStatus = String(payout.status || "").toLowerCase();
+    if (currentStatus === "completed" || currentStatus === "failed") {
+      return res.status(400).json({ error: `Payout is already ${currentStatus}` });
+    }
+
+    const amount = Number(payout.amount || 0);
+    const organizerId = Number(payout.organizer_id);
+
+    // Update payout request
+    const updatePayload: Record<string, unknown> = {
+      status,
+      processed_at: new Date().toISOString(),
+    };
+    if (utr) updatePayload.utr = utr;
+    if (note) updatePayload.note = note;
+
+    const { error: upErr } = await supabase
+      .from("payout_requests")
+      .update(updatePayload)
+      .eq("id", payoutId);
+
+    if (upErr) {
+      console.error("admin payout status update:", upErr.message);
+      return res.status(500).json({ error: "Failed to update payout status" });
+    }
+
+    // Update wallet
+    const { data: wallet } = await supabase
+      .from("organizer_wallet")
+      .select("total_paid_out, pending_payout, total_earned")
+      .eq("organizer_id", String(organizerId))
+      .maybeSingle();
+
+    if (wallet) {
+      if (status === "completed") {
+        await supabase
+          .from("organizer_wallet")
+          .update({
+            total_paid_out: Number(wallet.total_paid_out || 0) + amount,
+            pending_payout: Math.max(0, Number(wallet.pending_payout || 0) - amount),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("organizer_id", String(organizerId));
+      } else if (status === "failed") {
+        // Refund pending_payout back (no net change to total_earned, just release the reserve)
+        await supabase
+          .from("organizer_wallet")
+          .update({
+            pending_payout: Math.max(0, Number(wallet.pending_payout || 0) - amount),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("organizer_id", String(organizerId));
+      }
+    }
+
+    // Write wallet_ledger entry
+    await supabase
+      .from("wallet_ledger")
+      .insert({
+        organizer_id: String(organizerId),
+        amount: status === "completed" ? -amount : amount,
+        type: status === "completed" ? "payout_debit" : "refund_debit",
+        payout_request_id: payoutId,
+        description: status === "completed"
+          ? `Payout completed (UTR: ${utr || "N/A"})`
+          : `Payout failed — refunded (${note || "No reason"})`,
+      });
+
+    // Emit socket event
+    if (io) {
+      io.to(`organizer-${organizerId}`).emit("payout-status-updated", {
+        payoutId,
+        status,
+        amount,
+        utr: utr || null,
+      });
+      io.to(`organizer-${organizerId}`).emit("wallet-balance-updated", { organizerId });
+    }
+
+    return res.json({ ok: true, status });
+  });
+
+  /** POST /api/payments/webhook/cashfree-payout — Cashfree webhook for payout status */
+  app.post("/api/payments/webhook/cashfree-payout", async (req: Request, res: Response) => {
+    try {
+      const rawBody = Buffer.isBuffer(req.body) ? req.body.toString() : String(req.body ?? "");
+      const signature = String(req.headers["x-webhook-signature"] ?? "");
+      const timestamp = String(req.headers["x-webhook-timestamp"] ?? "");
+
+      if (timestamp && signature) {
+        const expectedSig = crypto
+          .createHmac("sha256", cashfreeSecretKey)
+          .update(timestamp + rawBody)
+          .digest("base64");
+        if (expectedSig !== signature) {
+          console.error("[cashfree-payout webhook] signature mismatch");
+          return res.status(200).json({ ok: true }); // always return 200
+        }
+      }
+
+      const event = JSON.parse(rawBody) as {
+        type?: string;
+        data?: {
+          transfer?: {
+            transferId?: string;
+            status?: string;
+            utr?: string;
+            referenceId?: string;
+          };
+        };
+      };
+
+      const transferId = String(event?.data?.transfer?.transferId ?? "");
+      const transferStatus = String(event?.data?.transfer?.status ?? "").toLowerCase();
+      const utr = String(event?.data?.transfer?.utr ?? "").trim() || null;
+
+      if (!transferId) return res.status(200).json({ ok: true });
+
+      // Extract payoutId from transferId (format: PAYOUT_<id>_<timestamp>)
+      const m = transferId.match(/^PAYOUT_([a-f0-9-]+)_\d+$/);
+      if (!m) return res.status(200).json({ ok: true });
+      const payoutId = m[1];
+
+      const mappedStatus = transferStatus === "success" ? "completed" : transferStatus === "failed" ? "failed" : null;
+      if (!mappedStatus) return res.status(200).json({ ok: true });
+
+      // Fetch the payout request
+      const { data: payout } = await supabase
+        .from("payout_requests")
+        .select("id, organizer_id, amount, status")
+        .eq("id", payoutId)
+        .maybeSingle();
+
+      if (!payout) return res.status(200).json({ ok: true });
+
+      const currentStatus = String(payout.status || "").toLowerCase();
+      if (currentStatus === "completed" || currentStatus === "failed") {
+        return res.status(200).json({ ok: true });
+      }
+
+      const organizerId = Number(payout.organizer_id);
+      const amount = Number(payout.amount || 0);
+
+      // Update payout
+      const payoutUpdate: Record<string, unknown> = {
+        status: mappedStatus,
+        processed_at: new Date().toISOString(),
+      };
+      if (utr) payoutUpdate.utr = utr;
+      await supabase.from("payout_requests").update(payoutUpdate).eq("id", payoutId);
+
+      // Update wallet
+      const { data: wallet } = await supabase
+        .from("organizer_wallet")
+        .select("total_paid_out, pending_payout, total_earned")
+        .eq("organizer_id", String(organizerId))
+        .maybeSingle();
+
+      if (wallet) {
+        if (mappedStatus === "completed") {
+          await supabase
+            .from("organizer_wallet")
+            .update({
+              total_paid_out: Number(wallet.total_paid_out || 0) + amount,
+              pending_payout: Math.max(0, Number(wallet.pending_payout || 0) - amount),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("organizer_id", String(organizerId));
+        } else if (mappedStatus === "failed") {
+          await supabase
+            .from("organizer_wallet")
+            .update({
+              pending_payout: Math.max(0, Number(wallet.pending_payout || 0) - amount),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("organizer_id", String(organizerId));
+        }
+      }
+
+      // Wallet ledger
+      await supabase
+        .from("wallet_ledger")
+        .insert({
+          organizer_id: String(organizerId),
+          amount: mappedStatus === "completed" ? -amount : amount,
+          type: mappedStatus === "completed" ? "payout_debit" : "refund_debit",
+          payout_request_id: payoutId,
+          description: mappedStatus === "completed"
+            ? `Payout completed via Cashfree (UTR: ${utr || "N/A"})`
+            : "Payout failed via Cashfree",
+        });
+
+      // Socket events
+      if (io) {
+        io.to(`organizer-${organizerId}`).emit("payout-status-updated", {
+          payoutId,
+          status: mappedStatus,
+          amount,
+          utr: utr || null,
+        });
+        io.to(`organizer-${organizerId}`).emit("wallet-balance-updated", { organizerId });
+      }
+
+      return res.status(200).json({ ok: true });
+    } catch (e) {
+      console.error("[cashfree-payout webhook]", e);
+      return res.status(200).json({ ok: true });
+    }
+  });
+
+  /** POST /api/organizer/payout/request — legacy endpoint */
   app.post("/api/organizer/payout/request", async (req: Request, res: Response) => {
     const organizerId = Number(req.body?.organizerId ?? req.body?.userId);
     const amount = Number(req.body?.amount);

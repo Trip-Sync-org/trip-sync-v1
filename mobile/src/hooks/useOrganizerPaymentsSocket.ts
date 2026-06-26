@@ -6,6 +6,7 @@ type SocketPayload = { organizerId?: number | null };
 
 /**
  * Listens for organizer-scoped payment/payout events (global `io.emit` from the API).
+ * Also listens for room-based events from the `identify` handler.
  */
 export function useOrganizerPaymentsSocket(opts: {
   userId: number | undefined;
@@ -37,11 +38,28 @@ export function useOrganizerPaymentsSocket(opts: {
       if (Number.isFinite(oid) && oid === userId) payoutRef.current?.();
     };
 
+    // Room-based events (emitted via io.to(`organizer-${organizerId}`))
+    const onPayoutStatusUpdated = () => {
+      payoutRef.current?.();
+    };
+
+    const onWalletBalanceUpdated = () => {
+      payRef.current?.();
+    };
+
     socket.on("payment:confirmed", onPay);
     socket.on("payout:updated", onPayout);
+    socket.on("payout-status-updated", onPayoutStatusUpdated);
+    socket.on("wallet-balance-updated", onWalletBalanceUpdated);
+
+    // Send identify so server knows to join us to the organizer room
+    socket.emit("identify", { userId, tripId: -1, role });
+
     return () => {
       socket.off("payment:confirmed", onPay);
       socket.off("payout:updated", onPayout);
+      socket.off("payout-status-updated", onPayoutStatusUpdated);
+      socket.off("wallet-balance-updated", onWalletBalanceUpdated);
       socket.disconnect();
     };
   }, [userId, role]);

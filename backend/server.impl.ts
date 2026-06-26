@@ -2731,8 +2731,15 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       socket.on("identify", async (payload: { userId?: unknown; tripId?: unknown; role?: unknown }) => {
         const uid = Number(payload?.userId);
         const tid = Number(payload?.tripId);
-        if (!Number.isFinite(uid) || !Number.isFinite(tid)) return;
+        if (!Number.isFinite(uid)) return;
         myUserId = uid;
+
+        // Always join personal organizer room for payout/wallet events
+        socket.join(`organizer-${uid}`);
+
+        // If no tripId provided (e.g. -1 sent for pure organizer room join), skip trip logic
+        if (!Number.isFinite(tid) || tid <= 0) return;
+
         myTripId = tid;
         const room = `trip-${Number(tid)}`;
         if (!tripRiders.has(tid)) tripRiders.set(tid, new Map());
