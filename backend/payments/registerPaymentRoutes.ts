@@ -168,7 +168,7 @@ async function initiateCashfreeBankTransfer(opts: {
   const payoutBase = cashfreeEnv === "production" ? "https://payout-api.cashfree.com" : "https://payout-gamma.cashfree.com";
 
   try {
-    const res = await fetch(`${payoutBase}/payout/v1/directTransfer`, {
+    const res = await fetch(`${payoutBase}/payout/v2/transfers`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${token}`,
