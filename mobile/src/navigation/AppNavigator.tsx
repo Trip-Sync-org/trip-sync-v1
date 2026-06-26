@@ -35,6 +35,8 @@ import { FAQScreen } from "../screens/FAQScreen";
 import { ReferFriendsScreen } from "../screens/ReferFriendsScreen";
 import { NotificationsScreen } from "../screens/NotificationsScreen";
 import { AppearanceScreen } from "../screens/AppearanceScreen";
+import { MyTripsScreen } from "../screens/MyTripsScreen";
+import { MyCouponsScreen } from "../screens/MyCouponsScreen";
 import type { NavigatorScreenParams } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { navigateToRootStack } from "./navigateRoot";
@@ -144,6 +146,8 @@ export type RootStackParamList = {
   ReferFriends: undefined;
   Notifications: undefined;
   Appearance: undefined;
+  MyTrips: undefined;
+  MyCoupons: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -286,6 +290,8 @@ export function AppNavigator() {
             <Stack.Screen name="ReferFriends" component={ReferFriendsScreen} />
             <Stack.Screen name="Notifications" component={NotificationsScreen} />
             <Stack.Screen name="Appearance" component={AppearanceScreen} />
+            <Stack.Screen name="MyTrips" component={MyTripsScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="MyCoupons" component={MyCouponsScreen} options={{ headerShown: false }} />
           </>
         )}
       </Stack.Navigator>

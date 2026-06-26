@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { ActivityIndicator, Alert, Animated, Image, Pressable, StyleSheet, Switch, Text, View } from "react-native";
-import { CreditCard, MapPin, Camera, Gift, Bell, Megaphone, RefreshCw, Phone, LogOut, Compass, Briefcase, CheckCircle2, SunMoon } from "lucide-react-native";
+import { CreditCard, MapPin, Camera, Gift, Bell, Megaphone, RefreshCw, Phone, LogOut, Compass, Briefcase, CheckCircle2, SunMoon, Calendar, Tag } from "lucide-react-native";
 import { useAuth } from "../context/AuthContext";
 import { useAuthPalette } from "../theme/authTheme";
 import { useAppTheme } from "../context/ThemeContext";
@@ -82,10 +82,10 @@ export function ProfileScreen() {
 
       <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>GENERAL</Text>
       <View style={[styles.card, { backgroundColor: c.bgCard, borderColor: c.borderDefault }]}>
-        <MenuItem icon={<CreditCard color={c.textPrimary} size={14} strokeWidth={2} />} title="Payment Methods" subtitle="Add your credit & debit cards" onPress={() => {}} c={c} />
-        <MenuItem icon={<MapPin color={c.textPrimary} size={14} strokeWidth={2} />} title="Locations" subtitle="Add your home & work locations" onPress={() => {}} c={c} />
+        <MenuItem icon={<Calendar color={c.textPrimary} size={20} strokeWidth={2} />} title="My Trips" subtitle="View all your booked trips" onPress={() => navigateToRootStack(navigation, "MyTrips")} c={c} />
+        <MenuItem icon={<Tag color={c.textPrimary} size={20} strokeWidth={2} />} title="My Coupons" subtitle="View your coupon codes & discounts" onPress={() => navigateToRootStack(navigation, "MyCoupons")} c={c} />
         <MenuItem icon={<Camera color={c.textPrimary} size={14} strokeWidth={2} />} title="Add Social Account" subtitle="Add Facebook, Instagram, Twitter etc" onPress={() => {}} c={c} />
-        <MenuItem icon={<Gift color={c.textPrimary} size={14} strokeWidth={2} />} title="Refer to Friends" subtitle="Get $10 for referring friends" onPress={() => navigateToRootStack(navigation, "ReferFriends")} c={c} last />
+        <MenuItem icon={<Gift color={c.textPrimary} size={14} strokeWidth={2} />} title="Refer to Friends" subtitle="Get ₹250 for referring friends" onPress={() => navigateToRootStack(navigation, "ReferFriends")} c={c} last />
       </View>
 
       <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>NOTIFICATIONS</Text>
