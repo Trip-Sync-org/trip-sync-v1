@@ -11,7 +11,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
-import { Alert, PermissionsAndroid, Platform } from "react-native";
+import { PermissionsAndroid, Platform } from "react-native";
+import { useGlobalAlert } from "../context/AlertContext";
 import type { Socket } from "socket.io-client";
 import { SOCKET_URL } from "../config";
 
@@ -84,26 +85,25 @@ export function useConvoyVoice({
   const canHearRef = useRef(canHear);
   canHearRef.current = canHear;
 
+  const { showAlert } = useGlobalAlert();
+
   // ── JOIN ──────────────────────────────────────────────────────────────────
   const joinVoice = useCallback(async (): Promise<boolean> => {
     if (isInVoice || isConnecting) return false;
     if (!Number.isFinite(myUserId) || myUserId <= 0) {
-      Alert.alert("Voice error", "Sign in again to use convoy voice.");
+      showAlert({ title: "Voice error", message: "Sign in again to use convoy voice." });
       return false;
     }
 
     const ok = await requestMicPermission();
     if (!ok) {
-      Alert.alert("Microphone needed", "Allow microphone access in Settings to use convoy voice chat.");
+      showAlert({ title: "Microphone needed", message: "Allow microphone access in Settings to use convoy voice chat." });
       return false;
     }
 
     if (!useRoomContext && !LiveKitRoom) {
       // Expo Go fallback — inform user but don't crash
-      Alert.alert(
-        "Voice unavailable",
-        "LiveKit voice requires a native build. Run: npx expo run:android",
-      );
+      showAlert({ title: "Voice unavailable", message: "LiveKit voice requires a native build. Run: npx expo run:android" });
       return false;
     }
 
@@ -231,13 +231,13 @@ export function useConvoyVoice({
     } catch (err: unknown) {
       console.error("[voice] failed to start:", err);
       const msg = err instanceof Error ? err.message : "Could not start voice. Check microphone permission.";
-      Alert.alert("Voice unavailable", msg);
+      showAlert({ title: "Voice unavailable", message: msg });
       roomRef.current = null;
       return false;
     } finally {
       setIsConnecting(false);
     }
-  }, [isInVoice, isConnecting, myUserId, tripId]);
+  }, [isInVoice, isConnecting, myUserId, tripId, showAlert]);
 
   // ── LEAVE ─────────────────────────────────────────────────────────────────
   const leaveVoice = useCallback(() => {

@@ -8,6 +8,7 @@ import { ProfileLayout } from "../components/profile/ProfileLayout";
 import { navigateToRootStack } from "../navigation/navigateRoot";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { supabase } from "../lib/supabase";
+import { ConfirmModal } from "../components/ConfirmModal";
 
 export function ProfileScreen() {
   const c = useAuthPalette();
@@ -19,6 +20,7 @@ export function ProfileScreen() {
   const [promoNotifs, setPromoNotifs] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
   const [avatarUrl, setAvatarUrl] = React.useState<string | null>(null);
+  const [showSignOut, setShowSignOut] = useState(false);
 
   const fetchAvatar = React.useCallback(async () => {
     if (!supabase || !user?.authUserId) return;
@@ -59,16 +61,11 @@ export function ProfileScreen() {
   const avatarUri = avatarUrl || `https://api.dicebear.com/7.x/avataaars/png?seed=${encodeURIComponent(user?.name || "User")}`;
 
   const onLogout = () => {
-    if (loggingOut) return;
-    setLoggingOut(true);
-    Alert.alert("Sign out?", undefined, [
-      { text: "Cancel", style: "cancel", onPress: () => setLoggingOut(false) },
-      { text: "Sign out", style: "destructive", onPress: () => { logout().finally(() => setLoggingOut(false)); } },
-    ]);
+    setShowSignOut(true);
   };
 
   return (
-    <ProfileLayout navigation={navigation} title="Profile" fallback="Main">
+    <ProfileLayout navigation={navigation} title="Profile" fallback="Main" tabBarPadding>
       <View style={styles.center}>
         <Pressable onPress={() => navigateToRootStack(navigation, "EditProfile")}>
           <Image source={{ uri: avatarUri }} style={styles.avatar} />
@@ -118,13 +115,30 @@ export function ProfileScreen() {
       <View style={[styles.card, { backgroundColor: c.bgCard, borderColor: c.borderDefault }]}>
         <MenuItem icon={<SunMoon color={c.textPrimary} size={14} strokeWidth={2} />} title="Appearance" subtitle={themeLabel} onPress={() => navigateToRootStack(navigation, "Appearance")} c={c} />
         <MenuItem icon={<Phone color={c.textPrimary} size={14} strokeWidth={2} />} title="Contact Us" subtitle="For more information" onPress={() => navigateToRootStack(navigation, "ContactUs")} c={c} />
-        <Pressable style={styles.rowNoBorder} onPress={onLogout}>
-          <LogOut color="#E05555" size={14} strokeWidth={2} />
-          <View style={styles.menuText}>
-            <Text style={[styles.menuTitle, { color: "#E05555" }]}>Logout</Text>
-          </View>
+        <Pressable style={styles.rowNoBorder} onPress={() => setShowSignOut(true)}>
+      <LogOut color="#E05555" size={14} strokeWidth={2} />
+      <View style={styles.menuText}>
+        <Text style={[styles.menuTitle, { color: "#E05555" }]}>Logout</Text>
+      </View>
         </Pressable>
       </View>
+      <ConfirmModal
+        visible={showSignOut}
+        onClose={() => setShowSignOut(false)}
+        onConfirm={async () => {
+          setLoggingOut(true);
+          try {
+            await logout();
+          } finally {
+            setLoggingOut(false);
+          }
+        }}
+        title="Sign out?"
+        message="You will be signed out of your account."
+        confirmLabel="Sign out"
+        cancelLabel="Cancel"
+        confirmDanger
+      />
     </ProfileLayout>
   );
 }

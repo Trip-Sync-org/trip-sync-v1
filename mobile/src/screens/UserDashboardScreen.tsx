@@ -282,7 +282,7 @@ export function UserDashboardScreen() {
     <ScrollView
       style={s.root}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.text} />}
-      contentContainerStyle={{ paddingBottom: 40 }}
+      contentContainerStyle={{ paddingBottom: 100, flexGrow: 1 }}
     >
       <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
         <Text style={s.welcome}>Welcome back,</Text>

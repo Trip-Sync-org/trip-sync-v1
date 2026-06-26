@@ -62,6 +62,8 @@ type AuthContextValue = {
   requestPasswordReset: (email: string) => Promise<void>;
   confirmPasswordReset: (code: string, newPassword: string) => Promise<void>;
   resendPasswordReset: () => Promise<void>;
+  // --- Change password for logged-in user ---
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   // --- Existing ---
   switchRole: (newRole: "explorer" | "organisor") => Promise<void>;
   addRole: (newRole: "explorer" | "organisor") => Promise<void>;
@@ -529,6 +531,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signIn.prepareFirstFactor({ strategy: "reset_password_email_code", emailAddressId: factor.emailAddressId });
   }, [signIn]);
 
+  /**
+   * Changes the password for the currently signed-in user using Clerk's
+   * user.updatePassword API. Requires the current password for verification.
+   * Throws on invalid current password or other Clerk errors.
+   *
+   * After a successful password change, Clerk invalidates existing sessions.
+   * This method clears all local state so the caller can navigate to the
+   * login screen without relying on a stale session.
+   */
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
+    if (!clerkUser) throw new Error("Not signed in");
+    try {
+      await clerkUser.updatePassword({ currentPassword, newPassword });
+    } catch (e: unknown) {
+      if (e && typeof e === "object" && "errors" in e && Array.isArray(e.errors)) {
+        const clerkErrors = (e as { errors: Array<{ message: string }> }).errors;
+        const firstMsg = clerkErrors[0]?.message || "Failed to change password";
+        throw new Error(firstMsg);
+      }
+      if (e instanceof Error) throw e;
+      throw new Error("Failed to change password");
+    }
+    // Password changed successfully — Clerk has invalidated the session.
+    // Clear local state immediately so navigation to Login works cleanly.
+    setAppUser(null);
+    setAccessToken(null);
+    setNumericId(undefined);
+    await AsyncStorage.multiRemove([STORAGE_KEY, NUMERIC_ID_KEY]);
+  }, [clerkUser]);
+
   const logout = useCallback(async () => {
     await clerkSignOut();
     setAppUser(null);
@@ -555,6 +587,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       requestPasswordReset,
       confirmPasswordReset,
       resendPasswordReset,
+      changePassword,
       logout,
       setPendingGoogleRole,
     }),
@@ -562,7 +595,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       appUser, accessToken, loading, clerkUserLoaded, login,
       requestLoginOtp, verifyLoginOtp, resendLoginOtp,
       signup, verifyEmailOtp, resendEmailOtp,
-      switchRole, addRole, requestPasswordReset, confirmPasswordReset, resendPasswordReset, logout, setPendingGoogleRole,
+      switchRole, addRole, requestPasswordReset, confirmPasswordReset, resendPasswordReset,
+      changePassword, logout, setPendingGoogleRole,
     ],
   );
 

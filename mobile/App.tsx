@@ -1,12 +1,13 @@
 //App.tsx
 import React from "react";
-import { KeyboardAvoidingView, Platform, View } from "react-native";
+import { View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ClerkProvider, ClerkLoaded } from "@clerk/clerk-expo";
 import { AuthProvider } from "./src/context/AuthContext";
 import { ThemeProvider, useAppTheme } from "./src/context/ThemeContext";
+import { AlertProvider } from "./src/context/AlertContext";
 import { AppNavigator } from "./src/navigation/AppNavigator";
 import tokenCache from "./src/lib/tokenCache";
 
@@ -15,16 +16,10 @@ const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
 function AppInner() {
   const { mode, colors } = useAppTheme();
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: colors.bg }}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
-    >
-      <View style={{ flex: 1, backgroundColor: colors.bg }}>
-        <StatusBar style={mode === "dark" ? "light" : "dark"} />
-        <AppNavigator />
-      </View>
-    </KeyboardAvoidingView>
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <StatusBar style={mode === "dark" ? "light" : "dark"} />
+      <AppNavigator />
+    </View>
   );
 }
 
@@ -36,7 +31,9 @@ export default function App() {
           <ThemeProvider>
             <AuthProvider>
               <GestureHandlerRootView style={{ flex: 1 }}>
-                <AppInner />
+                <AlertProvider>
+                  <AppInner />
+                </AlertProvider>
               </GestureHandlerRootView>
             </AuthProvider>
           </ThemeProvider>

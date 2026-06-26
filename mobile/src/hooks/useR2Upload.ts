@@ -1,8 +1,9 @@
 import { useState, useCallback } from "react";
 import * as ImagePicker from "expo-image-picker";
 import * as VideoThumbnails from "expo-video-thumbnails";
-import { Platform, Alert } from "react-native";
+import { Platform } from "react-native";
 import { useAuth } from "@clerk/clerk-expo";
+import { useGlobalAlert } from "../context/AlertContext";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
@@ -59,6 +60,7 @@ async function getClerkJwt(
 
 export function useR2Upload() {
   const { getToken } = useAuth();
+  const { showAlert } = useGlobalAlert();
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -225,7 +227,7 @@ export function useR2Upload() {
           if (accept === "images") {
             const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
             if (!perm.granted) {
-              Alert.alert("Permission Required", "We need media library access to upload images.");
+              showAlert({ title: "Permission Required", message: "We need media library access to upload images." });
               return [];
             }
 
@@ -240,7 +242,7 @@ export function useR2Upload() {
 
             for (const asset of pickerResult.assets) {
               if (asset.fileSize && asset.fileSize > MAX_IMAGE_SIZE_BYTES) {
-                Alert.alert("File too large", "Images must be under 10 MB each.");
+                showAlert({ title: "File too large", message: "Images must be under 10 MB each." });
                 return [];
               }
             }
@@ -257,7 +259,7 @@ export function useR2Upload() {
           if (accept === "images+videos") {
             const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
             if (!perm.granted) {
-              Alert.alert("Permission Required", "We need media library access to upload photos and videos.");
+              showAlert({ title: "Permission Required", message: "We need media library access to upload photos and videos." });
               return [];
             }
 
@@ -272,11 +274,11 @@ export function useR2Upload() {
 
             for (const asset of pickerResult.assets) {
               if (asset.type === "video" && asset.fileSize && asset.fileSize > MAX_VIDEO_SIZE_BYTES) {
-                Alert.alert("File too large", "Videos must be under 100 MB each.");
+                showAlert({ title: "File too large", message: "Videos must be under 100 MB each." });
                 return [];
               }
               if (asset.type !== "video" && asset.fileSize && asset.fileSize > MAX_IMAGE_SIZE_BYTES) {
-                Alert.alert("File too large", "Images must be under 10 MB each.");
+                showAlert({ title: "File too large", message: "Images must be under 10 MB each." });
                 return [];
               }
             }
@@ -304,7 +306,7 @@ export function useR2Upload() {
       } catch (e) {
         const msg = e instanceof Error ? e.message : "An unexpected error occurred";
         setError(msg);
-        Alert.alert("Upload Error", msg);
+        showAlert({ title: "Upload Error", message: msg });
         return [];
       } finally {
         setIsUploading(false);

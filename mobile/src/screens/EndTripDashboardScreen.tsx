@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, Alert } from "react-native";
+import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from "react-native";
 import { Star } from "lucide-react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -8,6 +8,7 @@ import type { RootStackParamList } from "../navigation/AppNavigator";
 import { apiFetch, readApiErrorMessage } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { useAppTheme } from "../context/ThemeContext";
+import { ConfirmModal } from "../components/ConfirmModal";
 
 type Props = NativeStackScreenProps<RootStackParamList, "EndTripDashboard">;
 
@@ -34,10 +35,11 @@ export function EndTripDashboardScreen({ route, navigation }: Props) {
   const [review, setReview] = React.useState("");
   const [submitted, setSubmitted] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const [reviewError, setReviewError] = React.useState<string | null>(null);
 
   const submitReview = async () => {
     if (!rating || !review.trim()) {
-      Alert.alert("Review", "Pick a star rating and write a short review.");
+      setReviewError("Pick a star rating and write a short review.");
       return;
     }
     if (!user?.id) return;
@@ -52,7 +54,7 @@ export function EndTripDashboardScreen({ route, navigation }: Props) {
         }),
       });
       if (!res.ok) {
-        Alert.alert("Review", await readApiErrorMessage(res));
+        setReviewError(await readApiErrorMessage(res));
         return;
       }
       setSubmitted(true);
@@ -155,6 +157,16 @@ export function EndTripDashboardScreen({ route, navigation }: Props) {
           {user?.activeRole === "organizer" ? "Organizer dashboard" : "Go to dashboard"}
         </Text>
       </Pressable>
+
+      {/* Review error modal */}
+      <ConfirmModal
+        visible={reviewError !== null}
+        onClose={() => setReviewError(null)}
+        onConfirm={() => setReviewError(null)}
+        title="Review"
+        message={reviewError || ""}
+        singleButton
+      />
     </ScrollView>
   );
 }

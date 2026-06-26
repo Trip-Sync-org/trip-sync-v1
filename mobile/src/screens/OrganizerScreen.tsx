@@ -954,7 +954,7 @@ export function OrganizerScreen() {
     <View style={s.root}>
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.text} />}
-        contentContainerStyle={{ paddingBottom: 48 }}
+        contentContainerStyle={{ paddingBottom: 100, flexGrow: 1 }}
       >
         <Pressable style={s.tabSwitcher} onPress={() => setTabMenuOpen(true)}>
           <Text style={s.tabSwitcherText}>≡  {activeTab}</Text>

@@ -159,7 +159,15 @@ function MainTabs() {
       screenOptions={{
         headerStyle: { backgroundColor: tc.bg },
         headerTintColor: tc.text,
-        tabBarStyle: { backgroundColor: tc.surface, borderTopColor: tc.border },
+        tabBarStyle: {
+          backgroundColor: tc.surface,
+          borderTopColor: tc.border,
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          elevation: 0,
+        },
         tabBarActiveTintColor: tc.text,
         tabBarInactiveTintColor: tc.muted,
       }}

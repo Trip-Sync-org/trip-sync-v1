@@ -7,7 +7,6 @@ import {
   ScrollView,
   RefreshControl,
   ActivityIndicator,
-  Alert,
   Platform,
   TextInput,
   KeyboardAvoidingView,
@@ -24,6 +23,7 @@ import { typography, useThemeColors } from "../theme";
 import { navigateToRootStack } from "../navigation/navigateRoot";
 import { useOrganizerPaymentsSocket } from "../hooks/useOrganizerPaymentsSocket";
 import { buildPayoutHistoryHtml, shareRevenuePdf } from "../lib/revenuePdf";
+import { ConfirmModal } from "../components/ConfirmModal";
 
 type Balance = {
   eligibleForPayout: number;
@@ -82,6 +82,7 @@ export function PayoutScreen({ navigation }: Props) {
   const [showBankForm, setShowBankForm] = useState(false);
   const [newBank, setNewBank] = useState({ accountNumber: "", ifsc: "", accountHolderName: "" });
   const [bankBusy, setBankBusy] = useState(false);
+  const [alertState, setAlertState] = useState<{ title: string; message: string } | null>(null);
 
   const maxPayout = balance?.eligibleForPayout ?? 0;
   const disabledReason =
@@ -157,7 +158,7 @@ export function PayoutScreen({ navigation }: Props) {
   const addBankAccount = async () => {
     if (!user?.id) return;
     if (!newBank.accountNumber.trim() || !newBank.ifsc.trim() || !newBank.accountHolderName.trim()) {
-      Alert.alert("Bank account", "All fields are required."); return;
+      setAlertState({ title: "Bank account", message: "All fields are required." }); return;
     }
     setBankBusy(true);
     try {
@@ -169,7 +170,7 @@ export function PayoutScreen({ navigation }: Props) {
           account_holder_name: newBank.accountHolderName.trim(),
         }),
       });
-      if (!res.ok) { Alert.alert("Bank account", await readApiErrorMessage(res)); return; }
+      if (!res.ok) { setAlertState({ title: "Bank account", message: await readApiErrorMessage(res) }); return; }
       setShowBankForm(false);
       setNewBank({ accountNumber: "", ifsc: "", accountHolderName: "" });
       const bankRes = await apiFetch(`/api/organizers/${user.id}/bank-accounts`);
@@ -185,7 +186,7 @@ export function PayoutScreen({ navigation }: Props) {
         rows: payouts.map((r) => ({ amount: r.amount, status: r.status, date: r.createdAt, utr: r.utr ?? undefined })),
       });
       await shareRevenuePdf(html);
-    } catch { Alert.alert("Export failed"); } finally { setPdfBusy(false); }
+    } catch { setAlertState({ title: "Export failed", message: "Could not generate or share the PDF." }); } finally { setPdfBusy(false); }
   };
 
   const badgeForStatus = (s: string) => {
@@ -315,6 +316,14 @@ export function PayoutScreen({ navigation }: Props) {
           </View>
         </View>
       </Modal>
+      <ConfirmModal
+        visible={alertState !== null}
+        onClose={() => setAlertState(null)}
+        onConfirm={() => setAlertState(null)}
+        title={alertState?.title ?? ""}
+        message={alertState?.message ?? ""}
+        singleButton
+      />
     </KeyboardAvoidingView>
   );
 }

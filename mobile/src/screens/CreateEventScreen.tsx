@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Modal,
@@ -46,6 +45,7 @@ import { getMapboxPublicToken, mapboxTokenConfigError } from "../lib/mapboxPubli
 import { useR2Upload } from "../hooks/useR2Upload";
 import type { UploadResult } from "../hooks/useR2Upload";
 import { MediaPickerGrid } from "../components/MediaPickerGrid";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { supabase } from "../lib/supabase";
 
 type Props = NativeStackScreenProps<RootStackParamList, "CreateEvent">;
@@ -335,6 +335,13 @@ export function CreateEventScreen({ navigation }: Props) {
   const [durationModal, setDurationModal] = useState(false);
 
   const [busy, setBusy] = useState(false);
+  const [alertState, setAlertState] = useState<{
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    onConfirm?: () => void;
+    singleButton?: boolean;
+  } | null>(null);
 
   useEffect(() => {
     void ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -581,62 +588,64 @@ export function CreateEventScreen({ navigation }: Props) {
         const raw = await AsyncStorage.getItem(CREATE_EVENT_DRAFT_KEY);
         if (!raw || cancelled) return;
         const d = JSON.parse(raw) as Record<string, unknown>;
-        Alert.alert("Restore draft?", "You have a saved draft for this form.", [
-          { text: "Discard", style: "destructive", onPress: () => void AsyncStorage.removeItem(CREATE_EVENT_DRAFT_KEY) },
-          {
-            text: "Restore",
-            onPress: () => {
-              if (typeof d.name === "string") setName(d.name);
-              if (Array.isArray(d.selectedThemes)) setSelectedThemes(d.selectedThemes.filter((x) => typeof x === "string"));
-              if (typeof d.duration === "string") setDuration(d.duration);
-              if (typeof d.ageGroup === "string") setAgeGroup(d.ageGroup);
-              if (Array.isArray(d.selectedLanguages)) setSelectedLanguages(d.selectedLanguages.filter((x) => typeof x === "string"));
-              if (typeof d.meetupPoint === "string") setMeetupPoint(d.meetupPoint);
-              if (typeof d.endLocation === "string") setEndLocation(d.endLocation);
-              if (d.startCoords && typeof d.startCoords === "object" && d.startCoords !== null) {
-                const sc = d.startCoords as { lat?: unknown; lng?: unknown };
-                if (typeof sc.lat === "number" && typeof sc.lng === "number") {
-                  setStartCoords({ lat: sc.lat, lng: sc.lng });
-                }
+        setAlertState({
+          title: "Restore draft?",
+          message: "You have a saved draft for this form.",
+          confirmLabel: "Restore",
+          singleButton: false,
+          onConfirm: () => {
+            void AsyncStorage.removeItem(CREATE_EVENT_DRAFT_KEY);
+            if (typeof d.name === "string") setName(d.name);
+            if (Array.isArray(d.selectedThemes)) setSelectedThemes(d.selectedThemes.filter((x) => typeof x === "string"));
+            if (typeof d.duration === "string") setDuration(d.duration);
+            if (typeof d.ageGroup === "string") setAgeGroup(d.ageGroup);
+            if (Array.isArray(d.selectedLanguages)) setSelectedLanguages(d.selectedLanguages.filter((x) => typeof x === "string"));
+            if (typeof d.meetupPoint === "string") setMeetupPoint(d.meetupPoint);
+            if (typeof d.endLocation === "string") setEndLocation(d.endLocation);
+            if (d.startCoords && typeof d.startCoords === "object" && d.startCoords !== null) {
+              const sc = d.startCoords as { lat?: unknown; lng?: unknown };
+              if (typeof sc.lat === "number" && typeof sc.lng === "number") {
+                setStartCoords({ lat: sc.lat, lng: sc.lng });
               }
-              if (d.endCoords && typeof d.endCoords === "object" && d.endCoords !== null) {
-                const ec = d.endCoords as { lat?: unknown; lng?: unknown };
-                if (typeof ec.lat === "number" && typeof ec.lng === "number") {
-                  setEndCoords({ lat: ec.lat, lng: ec.lng });
-                }
+            }
+            if (d.endCoords && typeof d.endCoords === "object" && d.endCoords !== null) {
+              const ec = d.endCoords as { lat?: unknown; lng?: unknown };
+              if (typeof ec.lat === "number" && typeof ec.lng === "number") {
+                setEndCoords({ lat: ec.lat, lng: ec.lng });
               }
-              if (typeof d.description === "string") setDescription(d.description);
-              if (typeof d.privacy === "string" && (d.privacy === "Public" || d.privacy === "Private")) {
-                setPrivacy(d.privacy);
-              }
-              if (typeof d.startDtIso === "string") {
-                const t = new Date(d.startDtIso);
-                if (!Number.isNaN(t.getTime())) setStartDt(t);
-              }
-              if (typeof d.endDtIso === "string") {
-                const t = new Date(d.endDtIso);
-                if (!Number.isNaN(t.getTime())) setEndDt(t);
-              }
-              if (typeof d.maxParticipants === "number") setMaxParticipants(d.maxParticipants);
-              if (typeof d.price === "string") setPrice(d.price);
-              if (typeof d.isFree === "boolean") setIsFree(d.isFree);
-              if (typeof d.prerequisites === "string") setPrerequisites(d.prerequisites);
-              if (typeof d.terms === "string") setTerms(d.terms);
-              if (typeof d.contactName === "string") setContactName(d.contactName);
-              if (typeof d.contactPhone === "string") setContactPhone(d.contactPhone);
-              if (typeof d.contactEmail === "string") setContactEmail(d.contactEmail);
-              if (d.couponForm && typeof d.couponForm === "object") {
-                const cf = d.couponForm as Record<string, unknown>;
-                setCouponForm((prev) => ({
-                  prefix: typeof cf.prefix === "string" ? cf.prefix : prev.prefix,
-                  discount: typeof cf.discount === "number" ? cf.discount : prev.discount,
-                  limit: typeof cf.limit === "number" ? cf.limit : prev.limit,
-                  expiry: typeof cf.expiry === "string" ? cf.expiry : prev.expiry,
-                }));
-              }
-            },
+            }
+            if (typeof d.description === "string") setDescription(d.description);
+            if (typeof d.privacy === "string" && (d.privacy === "Public" || d.privacy === "Private")) {
+              setPrivacy(d.privacy);
+            }
+            if (typeof d.startDtIso === "string") {
+              const t = new Date(d.startDtIso);
+              if (!Number.isNaN(t.getTime())) setStartDt(t);
+            }
+            if (typeof d.endDtIso === "string") {
+              const t = new Date(d.endDtIso);
+              if (!Number.isNaN(t.getTime())) setEndDt(t);
+            }
+            if (typeof d.maxParticipants === "number") setMaxParticipants(d.maxParticipants);
+            if (typeof d.price === "string") setPrice(d.price);
+            if (typeof d.isFree === "boolean") setIsFree(d.isFree);
+            if (typeof d.prerequisites === "string") setPrerequisites(d.prerequisites);
+            if (typeof d.terms === "string") setTerms(d.terms);
+            if (typeof d.contactName === "string") setContactName(d.contactName);
+            if (typeof d.contactPhone === "string") setContactPhone(d.contactPhone);
+            if (typeof d.contactEmail === "string") setContactEmail(d.contactEmail);
+            if (d.couponForm && typeof d.couponForm === "object") {
+              const cf = d.couponForm as Record<string, unknown>;
+              setCouponForm((prev) => ({
+                prefix: typeof cf.prefix === "string" ? cf.prefix : prev.prefix,
+                discount: typeof cf.discount === "number" ? cf.discount : prev.discount,
+                limit: typeof cf.limit === "number" ? cf.limit : prev.limit,
+                expiry: typeof cf.expiry === "string" ? cf.expiry : prev.expiry,
+              }));
+            }
+            setAlertState(null);
           },
-        ]);
+        });
       } catch {
         /* ignore */
       }
@@ -713,9 +722,9 @@ export function CreateEventScreen({ navigation }: Props) {
         couponForm,
       };
       await AsyncStorage.setItem(CREATE_EVENT_DRAFT_KEY, JSON.stringify(payload));
-      Alert.alert("Draft saved", "You can restore it next time you open Create Event.");
+      setAlertState({ title: "Draft saved", message: "You can restore it next time you open Create Event.", singleButton: true });
     } catch {
-      Alert.alert("Could not save draft");
+      setAlertState({ title: "Draft saved", message: "Could not save draft", singleButton: true });
     }
   };
 
@@ -805,7 +814,7 @@ export function CreateEventScreen({ navigation }: Props) {
     if (!user?.id) return;
     const remaining = 10 - galleryMedia.length;
     if (remaining <= 0) {
-      Alert.alert("Limit reached", "Maximum 10 gallery items allowed.");
+      setAlertState({ title: "Limit reached", message: "Maximum 10 gallery items allowed.", singleButton: true });
       return;
     }
     const results = await pickAndUpload({
@@ -829,11 +838,11 @@ export function CreateEventScreen({ navigation }: Props) {
 
   const publish = async () => {
     if (!user || user.activeRole !== "organizer") {
-      Alert.alert("Organizers only", "Sign in as an organizer to create events.");
+      setAlertState({ title: "Organizers only", message: "Sign in as an organizer to create events.", singleButton: true });
       return;
     }
     if (!name.trim()) {
-      Alert.alert("Event name", "Please enter an event name.");
+      setAlertState({ title: "Event name", message: "Please enter an event name.", singleButton: true });
       return;
     }
     setBusy(true);
@@ -850,10 +859,7 @@ export function CreateEventScreen({ navigation }: Props) {
       }
 
       if (!resolvedStart) {
-        Alert.alert(
-          "Meetup location",
-          "Please choose a valid meetup location from suggestions or keep typing until you pick one.",
-        );
+        setAlertState({ title: "Meetup location", message: "Please choose a valid meetup location from suggestions or keep typing until you pick one.", singleButton: true });
         setBusy(false);
         return;
       }
@@ -916,7 +922,7 @@ export function CreateEventScreen({ navigation }: Props) {
 
       if (!res.ok) {
         const body = await readApiErrorMessage(res);
-        Alert.alert("Could not create event", body);
+        setAlertState({ title: "Could not create event", message: body, singleButton: true });
         return;
       }
 
@@ -926,11 +932,7 @@ export function CreateEventScreen({ navigation }: Props) {
       };
       const createdId = data?.id ?? data?.trip_id;
       if (createdId == null) {
-        Alert.alert(
-          "Created",
-          "Event created, but trip id was missing in response. Open it from the Organizer dashboard.",
-          [{ text: "OK", onPress: () => navigation.navigate("Main") }],
-        );
+        setAlertState({ title: "Created", message: "Event created, but trip id was missing in response. Open it from the Organizer dashboard.", singleButton: true, onConfirm: () => navigation.navigate("Main") });
         return;
       }
       if (checkpointDrafts.length > 0) {
@@ -948,7 +950,7 @@ export function CreateEventScreen({ navigation }: Props) {
             }),
           });
           if (!cpRes.ok) {
-            Alert.alert("Checkpoints", await readApiErrorMessage(cpRes));
+            setAlertState({ title: "Checkpoints", message: await readApiErrorMessage(cpRes), singleButton: true });
             break;
           }
         }
@@ -956,7 +958,7 @@ export function CreateEventScreen({ navigation }: Props) {
       navigation.replace("TripDetail", { id: String(createdId) });
     } catch (e) {
       console.error(e);
-      Alert.alert("Error", "Something went wrong while creating the event.");
+      setAlertState({ title: "Error", message: "Something went wrong while creating the event.", singleButton: true });
     } finally {
       setBusy(false);
     }
@@ -977,7 +979,7 @@ export function CreateEventScreen({ navigation }: Props) {
         }),
       });
       if (!res.ok) {
-        Alert.alert("Coupon", await readApiErrorMessage(res));
+        setAlertState({ title: "Coupon", message: await readApiErrorMessage(res), singleButton: true });
         return;
       }
       const body = (await res.json()) as Record<string, unknown>;
@@ -1001,10 +1003,7 @@ export function CreateEventScreen({ navigation }: Props) {
       ]);
       setCouponCode("");
     } catch {
-      Alert.alert(
-        "Network",
-        "Could not reach the server. Check EXPO_PUBLIC_API_URL and that npm run dev is running.",
-      );
+      setAlertState({ title: "Network", message: "Could not reach the server. Check EXPO_PUBLIC_API_URL and that npm run dev is running.", singleButton: true });
     } finally {
       setCouponAttachLoading(false);
     }
@@ -1026,7 +1025,7 @@ export function CreateEventScreen({ navigation }: Props) {
     try {
       await Share.share({ message: code });
     } catch {
-      Alert.alert("Code", code);
+      setAlertState({ title: "Code", message: code, singleButton: true });
     }
   };
 
@@ -1045,7 +1044,7 @@ export function CreateEventScreen({ navigation }: Props) {
     setCheckpointDrafts((prev) => {
       const already = prev.some((cp) => cp.nearby_attraction_id === attraction.id);
       if (already) {
-        Alert.alert("Checkpoint", "Already added as a checkpoint.");
+        setAlertState({ title: "Checkpoint", message: "Already added as a checkpoint.", singleButton: true });
         return prev;
       }
       return [
@@ -2103,6 +2102,18 @@ export function CreateEventScreen({ navigation }: Props) {
           ) : null}
         </View>
       </Modal>
+      <ConfirmModal
+        visible={alertState !== null}
+        onClose={() => { if (alertState?.singleButton !== false) setAlertState(null); }}
+        onConfirm={() => {
+          if (alertState?.onConfirm) alertState.onConfirm();
+          setAlertState(null);
+        }}
+        title={alertState?.title ?? ""}
+        message={alertState?.message ?? ""}
+        confirmLabel={alertState?.confirmLabel}
+        singleButton={alertState?.singleButton ?? true}
+      />
     </KeyboardAvoidingView>
   );
 }

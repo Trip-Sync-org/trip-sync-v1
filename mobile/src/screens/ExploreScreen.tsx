@@ -145,7 +145,7 @@ export function ExploreScreen() {
         data={filtered}
         keyExtractor={(item) => String(item.id)}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.text} />}
-        contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 100 }}
         ListEmptyComponent={
           !loading ? (
             <Text style={s.empty}>No trips found. Try adjusting search or theme.</Text>
@@ -187,11 +187,11 @@ export function ExploreScreen() {
 const makeStyles = (colors: ReturnType<typeof useAppTheme>["colors"], topInset: number) =>
   StyleSheet.create({
     root: { flex: 1, backgroundColor: colors.bg, paddingTop: topInset },
-    hero: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
+    hero: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
     heroTitle: { ...typography.hero, color: colors.text, fontSize: 28, lineHeight: 34 },
-    heroSub: { color: colors.muted, fontSize: 14, marginTop: 6 },
+    heroSub: { color: colors.muted, fontSize: 14, marginTop: 10 },
     chipScroll: { height: CHIP_HEIGHT },
-    sortRowOuter: { paddingHorizontal: 16, paddingVertical: 4 },
+    sortRowOuter: { paddingHorizontal: 16, marginBottom: 18 },
     sortRowInner: { gap: 8, flexDirection: "row", alignItems: "center", height: CHIP_HEIGHT },
     sortChip: {
       paddingHorizontal: 16,
@@ -207,7 +207,7 @@ const makeStyles = (colors: ReturnType<typeof useAppTheme>["colors"], topInset: 
     sortChipOn: { backgroundColor: colors.text, borderColor: colors.text },
     sortChipText: { color: colors.muted, fontWeight: "700", fontSize: 12 },
     sortChipTextOn: { color: colors.bg },
-    searchWrap: { paddingHorizontal: 16, marginBottom: 8 },
+    searchWrap: { paddingHorizontal: 16, marginBottom: 16 },
     search: {
       borderWidth: 1,
       borderColor: colors.border,
@@ -217,7 +217,7 @@ const makeStyles = (colors: ReturnType<typeof useAppTheme>["colors"], topInset: 
       fontSize: 15,
       backgroundColor: colors.surface,
     },
-    pillRowOuter: { paddingHorizontal: 16, paddingBottom: 4 },
+    pillRowOuter: { paddingHorizontal: 16, marginBottom: 12 },
     pillRowInner: { gap: 8, flexDirection: "row", alignItems: "center", height: CHIP_HEIGHT },
     pill: {
       paddingHorizontal: 16,
@@ -233,12 +233,12 @@ const makeStyles = (colors: ReturnType<typeof useAppTheme>["colors"], topInset: 
     pillOn: { backgroundColor: colors.text, borderColor: colors.text },
     pillText: { color: colors.muted, fontWeight: "600", fontSize: 13 },
     pillTextOn: { color: colors.bg },
-    count: { ...typography.label, paddingHorizontal: 16, marginBottom: 4, color: colors.muted },
+    count: { ...typography.label, paddingHorizontal: 16, marginBottom: 16, color: colors.muted },
     empty: { color: colors.muted, textAlign: "center", marginTop: 40 },
     card: {
       backgroundColor: colors.surface,
       borderRadius: 16,
-      marginBottom: 14,
+      marginBottom: 16,
       overflow: "hidden",
       borderWidth: 1,
       borderColor: colors.border,

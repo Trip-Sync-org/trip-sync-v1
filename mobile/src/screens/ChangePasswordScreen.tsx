@@ -10,7 +10,7 @@ type Props = NativeStackScreenProps<RootStackParamList, "ChangePassword">;
 
 export function ChangePasswordScreen({ navigation }: Props) {
   const c = useAuthPalette();
-  const { logout } = useAuth();
+  const { changePassword } = useAuth();
   const [currentPw, setCurrentPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
@@ -29,7 +29,10 @@ export function ChangePasswordScreen({ navigation }: Props) {
     setLoading(true);
     setError("");
     try {
-      await logout();
+      // Changes password via Clerk's user.updatePassword API.
+      // On success Clerk invalidates the session and AuthContext clears local state.
+      // User is then redirected to Login where they can sign in with the new password.
+      await changePassword(currentPw, newPw);
       navigation.replace("Login");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to change password");
@@ -79,12 +82,12 @@ export function ChangePasswordScreen({ navigation }: Props) {
       <Pressable
         style={[
           styles.saveBtn,
-          { backgroundColor: isDisabled ? c.btnDisabledBg : "#4FA88A" },
+          { backgroundColor: isDisabled ? c.btnDisabledBg : c.textPrimary },
         ]}
         onPress={() => void onSave()}
         disabled={isDisabled}
       >
-        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Save Password</Text>}
+        {loading ? <ActivityIndicator color={c.bgCard} /> : <Text style={[styles.saveText, { color: c.bgCard }]}>Save Password</Text>}
       </Pressable>
     </ProfileLayout>
   );
@@ -143,5 +146,5 @@ const styles = StyleSheet.create({
   },
   input: { flex: 1, paddingVertical: 10, fontSize: 14 },
   saveBtn: { marginTop: 16, borderRadius: 12, paddingVertical: 15, alignItems: "center" },
-  saveText: { color: "#FFFFFF", fontWeight: "700", fontSize: 15 },
+  saveText: { fontWeight: "700", fontSize: 15 },
 });

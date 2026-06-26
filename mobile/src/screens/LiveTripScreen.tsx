@@ -31,6 +31,7 @@ import { useAuth } from "../context/AuthContext";
 import { normalizeTripFromApi, type Trip } from "../lib/tripNormalize";
 import { fetchWeatherNow, type WeatherNow } from "../lib/weather";
 import { useAppTheme } from "../context/ThemeContext";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { LiveMapView, type LiveMapViewRef, type MapMember, type MapPoint, type UserGeo, type RouteStep } from "../components/LiveMapView";
 import {
   formatDistance,
@@ -524,6 +525,19 @@ type MapPinRequestSocketPayload = {
 /** Distinct pin colors so riders read like a racing grid. */
 const RIDER_PIN_COLORS = ["#22c55e", "#3b82f6", "#dc2626", "#a855f7", "#ec4899", "#14b8a6", "#eab308", "#ef4444"];
 
+/** Convert a 1-based index to a letter label (1→A, 2→B, ..., 27→AA, 28→AB). */
+function waypointLetter(index: number): string {
+  if (index < 1) return "?";
+  let n = index;
+  let out = "";
+  while (n > 0) {
+    n--;
+    out = String.fromCharCode(65 + (n % 26)) + out;
+    n = Math.floor(n / 26);
+  }
+  return out;
+}
+
 type DrivingRoutePayload = {
   coordinates: { latitude: number; longitude: number }[];
   start: { lat: number; lng: number } | null;
@@ -543,13 +557,102 @@ type RouteWaypoint = {
   id: string;
 };
 
+type LiveStyles = {
+  liveSheet: any;
+  metricBig: any;
+  metricLabel: any;
+  settingsCard: any;
+  cardTitle: any;
+  attTab: any;
+  attTabOn: any;
+  attTabText: any;
+  attTabTextOn: any;
+  attCard: any;
+  attCardOk: any;
+  attCardWay: any;
+  timelineRow: any;
+  timelineName: any;
+  setLabel: any;
+  setSub: any;
+  mutedSmall: any;
+  sectionRouteTitle: any;
+  roundIcon: any;
+};
+
+function makeLiveStyles(tc: { bg: string; surface: string; text: string; muted: string; border: string; card: string }): LiveStyles {
+  return {
+    liveSheet: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: tc.bg,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      borderWidth: 1,
+      borderColor: tc.border,
+      paddingHorizontal: 16,
+      paddingTop: 4,
+    },
+    metricBig: { color: tc.text, fontSize: 28, fontWeight: "800" },
+    metricLabel: { color: tc.muted, fontSize: 10, fontWeight: "700", marginTop: 2 },
+    settingsCard: {
+      backgroundColor: tc.card,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: tc.border,
+      padding: 12,
+      gap: 12,
+      marginBottom: 12,
+    },
+    cardTitle: { fontSize: 10, fontWeight: "800", color: tc.muted, letterSpacing: 1 },
+    attTab: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+    attTabOn: { backgroundColor: tc.text === "#ffffff" ? "#fff" : "#000" },
+    attTabText: { fontSize: 11, fontWeight: "700", color: tc.muted, textTransform: "capitalize" },
+    attTabTextOn: { color: tc.text === "#ffffff" ? "#000" : "#fff" },
+    attCard: {
+      padding: 14,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: tc.border,
+      marginBottom: 10,
+      backgroundColor: tc.card,
+    },
+    attCardOk: { borderColor: tc.border, backgroundColor: tc.card },
+    attCardWay: { borderColor: tc.muted, backgroundColor: tc.card },
+    timelineRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 10,
+      paddingVertical: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: tc.border,
+    },
+    timelineName: { color: tc.text, fontWeight: "700", fontSize: 14 },
+    setLabel: { color: tc.text, fontSize: 13, fontWeight: "600", flex: 1 },
+    setSub: { color: tc.text, fontSize: 11 },
+    mutedSmall: { color: tc.text, fontSize: 11 },
+    sectionRouteTitle: { color: tc.text, fontSize: 10, fontWeight: "900", letterSpacing: 1.5, marginTop: 8 },
+    roundIcon: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: tc.card,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+  };
+}
+
 export function LiveTripScreen({ route, navigation }: Props) {
   const { id } = route.params;
   /** Expo Go cannot load native WebRTC — show a short hint instead of a scary error. */
   const isExpoGo = Constants.appOwnership === "expo";
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
-  const { mode, toggleMode } = useAppTheme();
+  const { mode, colors: themeColors, toggleMode } = useAppTheme();
+  const s = useMemo(() => makeLiveStyles(themeColors), [themeColors]);
+  const ts = themeColors;
 
   const [phase, setPhase] = useState<"waiting" | "live">("waiting");
   const [pausedFromLive, setPausedFromLive] = useState(false);
@@ -572,6 +675,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const [attendanceTab, setAttendanceTab] = useState<"all" | "arrived" | "pending">("all");
 
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [showEndTripConfirm, setShowEndTripConfirm] = useState(false);
+  const [endTripSource, setEndTripSource] = useState<"peek" | "chip">("peek");
   const [elapsedSec, setElapsedSec] = useState(0);
   const [sheetExpanded, setSheetExpanded] = useState(false);
   const [endingTrip, setEndingTrip] = useState(false);
@@ -975,7 +1080,6 @@ export function LiveTripScreen({ route, navigation }: Props) {
   const arrivedCount = members.filter((m) => m.status === "arrived").length;
   const totalCount = members.length;
 
-  const bannerSeed = trip?.banner ?? trip?.id ?? "trip";
 
   useEffect(() => {
     let cancelled = false;
@@ -1813,6 +1917,11 @@ export function LiveTripScreen({ route, navigation }: Props) {
         );
         return;
       }
+      const servicesEnabled = await Location.hasServicesEnabledAsync().catch(() => false);
+      if (!servicesEnabled) {
+        console.warn("[LiveTrip] GPS/location services disabled — map won't auto-center");
+        return;
+      }
       try {
         await Location.enableNetworkProviderAsync();
       } catch {
@@ -2405,8 +2514,34 @@ export function LiveTripScreen({ route, navigation }: Props) {
             },
           ]
         : [];
-    return [...fromServer, ...pending, ...staff];
-  }, [mapPins, pendingMemberPins, pinRequestQueue, canSendLineupFormation]);
+    // Checkpoint waypoint markers with letter labels (A, B, C...)
+    const checkpointPins = allWaypointsRef.current
+      .filter((wp) => wp.type === "checkpoint")
+      .map((wp, i) => {
+        const letter = waypointLetter(i + 1);
+        const reached = passedWaypointIdsRef.current.has(wp.id);
+        return {
+          id: wp.id,
+          label: letter,
+          lat: wp.lat,
+          lng: wp.lng,
+          type: "checkpoint" as const,
+          color: reached ? "rgba(255,255,255,0.25)" : "#ffffff",
+          reached,
+        };
+      });
+    // Start marker (hollow blue dot)
+    const startPin = allWaypointsRef.current.find((wp) => wp.type === "start");
+    const startMarker = startPin
+      ? [{ id: "start-marker", label: "Start", lat: startPin.lat, lng: startPin.lng, type: "start" as const }]
+      : [];
+    // End marker (red teardrop)
+    const endPin = allWaypointsRef.current.find((wp) => wp.type === "end");
+    const endMarker = endPin
+      ? [{ id: "end-marker", label: "End", lat: endPin.lat, lng: endPin.lng, type: "end" as const }]
+      : [];
+    return [...startMarker, ...checkpointPins, ...endMarker, ...fromServer, ...pending, ...staff];
+  }, [mapPins, pendingMemberPins, pinRequestQueue, canSendLineupFormation, checkpoints]);
 
   const onLeave = useCallback(() => {
     setShowExitConfirm(false);
@@ -2491,18 +2626,81 @@ export function LiveTripScreen({ route, navigation }: Props) {
       if (j.coordinates && j.coordinates.length >= 2) {
         const coords = j.coordinates.map(c => [c.longitude, c.latitude]);
         const allWps = allWaypointsRef.current;
+        const waypoints = (j.waypoints ?? []) as RouteWaypoint[];
+        const checkpoints = allWps.filter(w => w.type === 'checkpoint') as RouteWaypoint[];
+        
+        // Build segment opacities based on passedWaypointIdsRef
+        const totalLegs = Math.max(1, waypoints.length - 1);
+        const cwi = currentWaypointIndexRef.current;
+        const segmentOpacity: number[] = [];
+        for (let li = 0; li < totalLegs; li++) {
+          const legStartWp = waypoints[li];
+          const legEndWp = waypoints[li + 1];
+          const startPassed = legStartWp ? passedWaypointIdsRef.current.has(legStartWp.id) : false;
+          const endPassed = legEndWp ? passedWaypointIdsRef.current.has(legEndWp.id) : false;
+          if (startPassed && endPassed) {
+            segmentOpacity.push(0.2); // passed leg
+          } else if (!startPassed && !endPassed && li >= cwi - 1) {
+            segmentOpacity.push(1.0); // active leg
+          } else if (!startPassed && !endPassed) {
+            segmentOpacity.push(0.4); // upcoming leg
+          } else {
+            // Partial: transitioning - treat as active
+            segmentOpacity.push(endPassed ? 0.2 : 1.0);
+          }
+        }
+        
+        // Build leg durations proportional to leg distance
+        let legDurations: number[] = [];
+        const totalDuration = j.durationSeconds ?? 0;
+        if (totalDuration > 0 && coords.length >= 2) {
+          // Compute total coordinate length for proportion
+          let totalCoordLen = 0;
+          const legCoordLengths: number[] = [];
+          const cps = checkpoints.concat(waypoints.filter(w => w.type !== 'checkpoint'));
+          let lastSplit = 0;
+          for (let li = 0; li < totalLegs; li++) {
+            let legLen = 0;
+            const endIdx = Math.floor(((li + 1) / totalLegs) * (coords.length - 1));
+            for (let ci = lastSplit; ci < Math.min(coords.length, endIdx + 1); ci++) {
+              if (ci > lastSplit) {
+                const prev = coords[ci - 1];
+                const cur = coords[ci];
+                if (prev && cur) {
+                  legLen += haversineKm({ lat: prev[1], lng: prev[0] }, { lat: cur[1], lng: cur[0] });
+                }
+              }
+            }
+            legCoordLengths.push(legLen);
+            totalCoordLen += legLen;
+            lastSplit = endIdx;
+          }
+          if (totalCoordLen > 0) {
+            legDurations = legCoordLengths.map(l => Math.round((l / totalCoordLen) * totalDuration));
+          }
+        }
+        if (legDurations.length === 0 && totalLegs > 0) {
+          const perLeg = Math.round(totalDuration / totalLegs);
+          legDurations = Array(totalLegs).fill(perLeg);
+        }
+        
         liveMapRef.current?.postMessage({
           type: 'SET_ROUTE',
           payload: {
             coordinates: coords,
             steps: (j as any).steps ?? [],
-            waypoints: j.waypoints ?? [],
-            checkpoints: allWps.filter(w => w.type === 'checkpoint'),
+            waypoints,
+            checkpoints,
             mapPins: mapPins.map(p => ({ id: p.id, type: p.type, lat: p.lat, lng: p.lng, label: p.label })),
+            segmentOpacity,
+            legDurations,
+            start: j.start ? { lat: j.start.lat, lng: j.start.lng, type: "start" } : undefined,
+            end: j.end ? { lat: j.end.lat, lng: j.end.lng, type: "end" } : undefined,
           }
         });
         console.log('[LiveTrip] initial route sent to WebView, coords:', coords.length,
-          'waypoints:', allWps.map(w => `${w.type}:${w.name}`).join(', '));
+          'waypoints:', allWps.map(w => `${w.type}:${w.name}`).join(', '),
+          'segments:', segmentOpacity, 'legDurations:', legDurations);
       }
     } catch {
       if (__DEV__) console.log('[LiveTrip] failed to fetch driving route');
@@ -2986,14 +3184,71 @@ export function LiveTripScreen({ route, navigation }: Props) {
           );
           console.log('[LiveTrip] liveMapRef.current exists:', !!liveMapRef.current,
             'has postMessage:', typeof liveMapRef.current?.postMessage);
+          // Build segment opacities for reroute based on current waypoint state
+          const rw = remainingWaypoints as RouteWaypoint[];
+          const rwCheckpoints = rw.filter(w => w.type === 'checkpoint');
+          const rwTotalLegs = Math.max(1, rw.length - 1);
+          const rwCwi = currentWaypointIndexRef.current;
+          const rwSegmentOpacity: number[] = [];
+          for (let li = 0; li < rwTotalLegs; li++) {
+            const ls = rw[li];
+            const le = rw[li + 1];
+            const sp = ls ? passedWaypointIdsRef.current.has(ls.id) : false;
+            const ep = le ? passedWaypointIdsRef.current.has(le.id) : false;
+            if (sp && ep) {
+              rwSegmentOpacity.push(0.2);
+            } else if (!sp && !ep && li >= rwCwi - 1) {
+              rwSegmentOpacity.push(1.0);
+            } else if (!sp && !ep) {
+              rwSegmentOpacity.push(0.4);
+            } else {
+              rwSegmentOpacity.push(ep ? 0.2 : 1.0);
+            }
+          }
+          // Build leg durations for reroute
+          const rwTotalDuration = j.durationSeconds ?? 0;
+          let rwLegDurations: number[] = [];
+          if (rwTotalDuration > 0 && routeCoordsForWebView.length >= 2) {
+            let totalLen = 0;
+            const legLens: number[] = [];
+            let lastSplit = 0;
+            for (let li = 0; li < rwTotalLegs; li++) {
+              let legLen = 0;
+              const endIdx = Math.floor(((li + 1) / rwTotalLegs) * (routeCoordsForWebView.length - 1));
+              for (let ci = lastSplit; ci < Math.min(routeCoordsForWebView.length, endIdx + 1); ci++) {
+                if (ci > lastSplit) {
+                  const prev = routeCoordsForWebView[ci - 1];
+                  const cur = routeCoordsForWebView[ci];
+                  if (prev && cur) {
+                    legLen += haversineKm({ lat: prev[1], lng: prev[0] }, { lat: cur[1], lng: cur[0] });
+                  }
+                }
+              }
+              legLens.push(legLen);
+              totalLen += legLen;
+              lastSplit = endIdx;
+            }
+            if (totalLen > 0) {
+              rwLegDurations = legLens.map(l => Math.round((l / totalLen) * rwTotalDuration));
+            }
+          }
+          if (rwLegDurations.length === 0 && rwTotalLegs > 0) {
+            const perLeg = Math.round(rwTotalDuration / rwTotalLegs);
+            rwLegDurations = Array(rwTotalLegs).fill(perLeg);
+          }
           // ✅ CRITICAL: Send new route to WebView to redraw the blue line + checkpoints
           liveMapRef.current?.postMessage({
             type: 'SET_ROUTE',
             payload: {
               coordinates: routeCoordsForWebView,
               steps: (j as any).steps ?? [],
-              waypoints: remainingWaypoints,
-              checkpoints: remainingWaypoints.filter(w => w.type === 'checkpoint'),
+              waypoints: rw,
+              checkpoints: rwCheckpoints,
+              mapPins: mapPins.map(p => ({ id: p.id, type: p.type, lat: p.lat, lng: p.lng, label: p.label })),
+              segmentOpacity: rwSegmentOpacity,
+              legDurations: rwLegDurations,
+              start: j.start ? { lat: j.start.lat, lng: j.start.lng, type: "start" } : undefined,
+              end: j.end ? { lat: j.end.lat, lng: j.end.lng, type: "end" } : undefined,
             }
           });
         }
@@ -3098,26 +3353,27 @@ export function LiveTripScreen({ route, navigation }: Props) {
   }
 
   if (phase === "waiting") {
+
     return (
-      <View style={[styles.root, { paddingTop: insets.top }]}>
-        <View style={styles.waitHeader}>
+      <View style={[styles.root, { paddingTop: insets.top, backgroundColor: ts.bg }]}>
+        <View style={[styles.waitHeader, { backgroundColor: ts.card, borderBottomColor: ts.border }]}>
           <View style={styles.waitHeaderLeft}>
             <View style={styles.pulseDot} />
-            <Text style={styles.waitTitle}>Waiting Room</Text>
+            <Text style={[styles.waitTitle, { color: ts.text }]}>Waiting Room</Text>
             <View style={styles.preTripBadge}>
               <Text style={styles.preTripBadgeText}>{pausedFromLive ? "PAUSED" : "PRE-TRIP"}</Text>
             </View>
           </View>
           <View style={styles.waitHeaderRight}>
-            <Text style={styles.metaSmall}>
+            <Text style={[styles.metaSmall, { color: ts.muted }]}>
               {arrivedCount}/{totalCount} at meetup
             </Text>
             <Pressable
               onPress={() => setShowExitConfirm(true)}
-              style={styles.iconBtn}
+              style={[styles.iconBtn, { borderColor: ts.border, backgroundColor: ts.card }]}
               hitSlop={12}
             >
-              <Ionicons name="close" size={18} color="rgba(255,255,255,0.45)" />
+              <Ionicons name="close" size={18} color={ts.muted} />
             </Pressable>
           </View>
         </View>
@@ -3126,14 +3382,14 @@ export function LiveTripScreen({ route, navigation }: Props) {
           {pausedFromLive ? (
             <View style={styles.pausedBanner}>
               <Ionicons name="pause-circle" size={18} color="#fbbf24" />
-              <Text style={styles.pausedBannerText}>
+              <Text style={[styles.pausedBannerText, { color: ts.text }]}>
                 Trip paused - you are back in the waiting room. Resume to return to live tracking.
               </Text>
             </View>
           ) : null}
           <View style={styles.bannerWrap}>
-            <Image
-              source={{ uri: `https://picsum.photos/seed/${encodeURIComponent(bannerSeed)}/800/300` }}
+      <Image
+        source={{ uri: String(trip?.banner_url ?? `https://picsum.photos/seed/${trip?.id ?? "trip"}/800/300`) }}
               style={StyleSheet.absoluteFill}
               resizeMode="cover"
             />
@@ -3149,28 +3405,28 @@ export function LiveTripScreen({ route, navigation }: Props) {
           </View>
 
           <View style={styles.pad}>
-            <Text style={styles.sectionLabel}>Organizer Controls</Text>
+            <Text style={[styles.sectionLabel, { color: ts.muted }]}>Organizer Controls</Text>
 
-            <View style={styles.card}>
+            <View style={[styles.card, { backgroundColor: ts.card, borderColor: ts.border }]}>
               <View style={styles.rowBetween}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.cardTitle}>GROUP COMMS</Text>
-                  <Text style={styles.mutedSmall}>
+                  <Text style={[styles.cardTitle, { color: ts.muted }]}>GROUP COMMS</Text>
+                  <Text style={[styles.mutedSmall, { color: ts.muted }]}>
                     {members.filter((m) => m.status !== "absent").length} members active
                   </Text>
                 </View>
                 <View style={[styles.connBadge, isInVoice && styles.connBadgeOn]}>
-                  <Text style={[styles.connBadgeText, isInVoice && { color: "#34d399" }]}>
+                  <Text style={[styles.connBadgeText, { color: isInVoice ? "#34d399" : ts.muted }]}>
                     {isInVoice ? "Voice Connected" : "Not Connected"}
                   </Text>
                 </View>
               </View>
               {isExpoGo ? (
-                <Text style={[styles.mutedSmall, { marginTop: 6, color: "rgba(255,255,255,0.42)" }]} numberOfLines={4}>
+                <Text style={[styles.mutedSmall, { marginTop: 6, color: ts.muted }]} numberOfLines={4}>
                   Expo Go does not include WebRTC, so there is no live mic audio here. Talk mode, raise hand, and other
                   controls still sync over the network. For real voice, build a dev client:{" "}
-                  <Text style={{ fontWeight: "700", color: "rgba(255,255,255,0.55)" }}>npx expo run:android</Text> or{" "}
-                  <Text style={{ fontWeight: "700", color: "rgba(255,255,255,0.55)" }}>npx expo run:ios</Text>.
+                  <Text style={{ fontWeight: "700", color: ts.text }}>npx expo run:android</Text> or{" "}
+                  <Text style={{ fontWeight: "700", color: ts.text }}>npx expo run:ios</Text>.
                 </Text>
               ) : null}
 
@@ -3178,15 +3434,15 @@ export function LiveTripScreen({ route, navigation }: Props) {
                 <Pressable
                   disabled={!canModerateVoice}
                   onPress={() => void setVoiceMode("open")}
-                  style={[styles.voicePill, voiceMode === "open" && styles.voicePillActive]}
+                  style={[styles.voicePill, { borderColor: ts.border, backgroundColor: ts.card }, voiceMode === "open" && styles.voicePillActive]}
                 >
                   <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}>
                     <Mic
-                      color={voiceMode === "open" ? "#000" : "rgba(255,255,255,0.45)"}
+                      color={voiceMode === "open" ? "#000" : ts.muted}
                       size={14}
                       strokeWidth={2}
                     />
-                    <Text style={[styles.voicePillText, voiceMode === "open" && styles.voicePillTextOn]}>
+                    <Text style={[styles.voicePillText, { color: voiceMode === "open" ? "#000" : ts.muted }, voiceMode === "open" && styles.voicePillTextOn]}>
                       Talk All
                     </Text>
                   </View>
@@ -3194,16 +3450,16 @@ export function LiveTripScreen({ route, navigation }: Props) {
                 <Pressable
                   disabled={!canModerateVoice}
                   onPress={() => void setVoiceMode("controlled")}
-                  style={[styles.voicePill, voiceMode === "controlled" && styles.voicePillActive]}
+                  style={[styles.voicePill, { borderColor: ts.border, backgroundColor: ts.card }, voiceMode === "controlled" && styles.voicePillActive]}
                 >
                   <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}>
                     <Lock
-                      color={voiceMode === "controlled" ? "#000" : "rgba(255,255,255,0.45)"}
+                      color={voiceMode === "controlled" ? "#000" : ts.muted}
                       size={14}
                       strokeWidth={2}
                     />
                     <Text
-                      style={[styles.voicePillText, voiceMode === "controlled" && styles.voicePillTextOn]}
+                      style={[styles.voicePillText, { color: voiceMode === "controlled" ? "#000" : ts.muted }, voiceMode === "controlled" && styles.voicePillTextOn]}
                     >
                       Staff Talk
                     </Text>
@@ -3211,7 +3467,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
                 </Pressable>
               </View>
               {/* Mode description */}
-              <Text style={[styles.mutedSmall, { marginTop: 6, lineHeight: 16 }]}>
+              <Text style={[styles.mutedSmall, { color: ts.muted, marginTop: 6, lineHeight: 16 }]}>
                 {voiceMode === "open"
                   ? "All members can talk. Staff can mute all riders anytime."
                   : "Only organizer & staff can talk. Riders cannot hear this channel."}
@@ -3219,20 +3475,20 @@ export function LiveTripScreen({ route, navigation }: Props) {
 
               {!isInVoice ? (
                 <Pressable
-                  style={styles.joinVoice}
+                  style={[styles.joinVoice, { backgroundColor: ts.card, borderColor: ts.border }]}
                   onPress={() => void joinVoiceChannel()}
                   disabled={voiceConnecting}
                 >
-                  <Text style={styles.joinVoiceText}>
+                  <Text style={[styles.joinVoiceText, { color: ts.text }]}>
                     {voiceConnecting ? "Connecting…" : "Join Voice Channel"}
                   </Text>
                 </Pressable>
               ) : (
                 <Pressable
-                  style={[styles.joinVoice, { backgroundColor: "rgba(255,255,255,0.06)" }]}
+                  style={[styles.joinVoice, { backgroundColor: ts.card, borderColor: ts.border }]}
                   onPress={() => leaveVoiceChannel()}
                 >
-                  <Text style={[styles.joinVoiceText, { color: "rgba(255,255,255,0.75)" }]}>
+                  <Text style={[styles.joinVoiceText, { color: ts.muted }]}>
                     Disconnect
                   </Text>
                 </Pressable>
@@ -3277,9 +3533,9 @@ export function LiveTripScreen({ route, navigation }: Props) {
 
               {isInVoice && voiceMode === "controlled" && canModerateVoice ? (
                 <View style={{ marginTop: 8 }}>
-                  <Text style={styles.cardTitle}>SPEAK REQUESTS</Text>
+                  <Text style={[styles.cardTitle, { color: ts.muted }]}>SPEAK REQUESTS</Text>
                   {speakRequests.length === 0 ? (
-                    <Text style={[styles.mutedSmall, { marginTop: 6 }]}>No requests yet</Text>
+                    <Text style={[styles.mutedSmall, { color: ts.muted, marginTop: 6 }]}>No requests yet</Text>
                   ) : (
                     speakRequests.map((rid) => {
                       const rm = members.find((m) => m.id === rid);
@@ -3337,12 +3593,12 @@ export function LiveTripScreen({ route, navigation }: Props) {
                 style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
                 onPress={() => setCheckpointsSectionOpen((s) => !s)}
               >
-                <Text style={styles.cardTitle}>CHECKPOINTS ({checkpoints.length})</Text>
-                <Text style={{ color: "rgba(255,255,255,0.45)" }}>{checkpointsSectionOpen ? "▼" : "▶"}</Text>
+                <Text style={[styles.cardTitle, { color: ts.muted }]}>CHECKPOINTS ({checkpoints.length})</Text>
+                <Text style={{ color: ts.muted }}>{checkpointsSectionOpen ? "▼" : "▶"}</Text>
               </Pressable>
               {checkpointsSectionOpen ? (
                 checkpoints.length === 0 ? (
-                  <Text style={[styles.mutedSmall, { marginTop: 8 }]}>No checkpoints yet.</Text>
+                  <Text style={[styles.mutedSmall, { color: ts.muted, marginTop: 8 }]}>No checkpoints yet.</Text>
                 ) : (
                   waitingCheckpointList.map(({ cp, distM, reached, distKind }, i) => {
                       const startLat = trip?.meetupLat;
@@ -3371,18 +3627,18 @@ export function LiveTripScreen({ route, navigation }: Props) {
                       return (
                         <View key={cp.id} style={[styles.cpRow, reached && { opacity: 0.45 }]}>
                           <View style={[styles.cpIdx, reached && styles.cpIdxOn]}>
-                            <Text style={{ fontSize: 10, fontWeight: "700" }}>{reached ? "✓" : i + 1}</Text>
+                            <Text style={{ fontSize: 10, fontWeight: "700", color: reached ? "#fff" : ts.muted }}>{reached ? "✓" : i + 1}</Text>
                           </View>
                           <View style={{ flex: 1 }}>
-                            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }} numberOfLines={2}>
+                            <Text style={{ color: ts.text, fontSize: 12, fontWeight: "700" }} numberOfLines={2}>
                               {cp.name}
                             </Text>
                             {cp.description ? (
-                              <Text style={[styles.mutedSmall, { marginTop: 2 }]} numberOfLines={2}>
+                              <Text style={[styles.mutedSmall, { marginTop: 2, color: ts.muted }]} numberOfLines={2}>
                                 {cp.description}
                               </Text>
                             ) : null}
-                            <Text style={[styles.mutedSmall, { marginTop: 2 }]}>
+                            <Text style={[styles.mutedSmall, { marginTop: 2, color: ts.muted }]}>
                               {cp.source === "nearby_attraction" ? "★ Community discovery" : ""}
                               {cp.source === "map_pin" ? "📌 Member pin" : ""}
                               {distLabel}
@@ -3396,12 +3652,12 @@ export function LiveTripScreen({ route, navigation }: Props) {
               ) : null}
               {checkpointsSectionOpen && canSendLineupFormation ? (
                 <Pressable
-                  style={[styles.primaryBtn, styles.outlineBtn, { marginTop: 10 }]}
+                  style={[styles.primaryBtn, styles.outlineBtn, { marginTop: 10, borderColor: ts.border }]}
                   onPress={() =>
                     Alert.alert("Manage checkpoints", "Reorder and delete from the trip tools on web for now.")
                   }
                 >
-                  <Text style={styles.outlineBtnText}>Manage</Text>
+                  <Text style={[styles.outlineBtnText, { color: ts.text }]}>Manage</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -3413,7 +3669,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
                   onPress={() => setAttendanceTab(tab)}
                   style={[styles.attTab, attendanceTab === tab && styles.attTabOn]}
                 >
-                  <Text style={[styles.attTabText, attendanceTab === tab && styles.attTabTextOn]}>
+                  <Text style={[styles.attTabText, { color: attendanceTab === tab ? "#000" : ts.muted }, attendanceTab === tab && styles.attTabTextOn]}>
                     {tab}{" "}
                     {tab === "arrived"
                       ? `(${arrivedCount})`
@@ -3452,8 +3708,9 @@ export function LiveTripScreen({ route, navigation }: Props) {
                     key={`att-${member.id}`}
                     style={[
                       styles.attCard,
-                      member.status === "arrived" && styles.attCardOk,
-                      member.status === "on-way" && styles.attCardWay,
+                      { backgroundColor: ts.card, borderColor: ts.border },
+                      member.status === "arrived" && { backgroundColor: ts.card, borderColor: ts.border },
+                      member.status === "on-way" && { backgroundColor: ts.card, borderColor: ts.muted }
                     ]}
                   >
                     <View style={styles.row}>
@@ -3481,7 +3738,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
                           <View style={[styles.rolePill, { borderColor: rs.borderColor, backgroundColor: rs.bg }]}>
                             <Text style={[styles.rolePillText, { color: rs.color }]}>{roleLabel}</Text>
                           </View>
-                          <Text style={styles.mutedSmall}>
+                          <Text style={[styles.mutedSmall, { color: ts.muted }]}>
                             {member.status === "arrived"
                               ? "✓ Arrived"
                               : member.status === "on-way"
@@ -3517,7 +3774,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
                                           style={{
                                             fontSize: 9,
                                             fontWeight: "700",
-                                            color: member.role === r ? "#000" : "rgba(255,255,255,0.45)",
+                                            color: member.role === r ? "#000" : ts.muted,
                                             textTransform: "capitalize",
                                           }}
                                         >
@@ -3573,22 +3830,16 @@ export function LiveTripScreen({ route, navigation }: Props) {
           </Text>
         </View>
 
-        <Modal visible={showExitConfirm} transparent animationType="fade">
-          <Pressable style={styles.modalBackdrop} onPress={() => setShowExitConfirm(false)}>
-            <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
-              <Text style={styles.modalTitle}>Leave waiting room?</Text>
-              <Text style={styles.mutedSmall}>You can rejoin from the trip anytime.</Text>
-              <View style={styles.modalActions}>
-                <Pressable style={[styles.primaryBtn, styles.outlineBtn]} onPress={() => setShowExitConfirm(false)}>
-                  <Text style={styles.outlineBtnText}>Stay</Text>
-                </Pressable>
-                <Pressable style={styles.primaryBtn} onPress={onLeave}>
-                  <Text style={styles.primaryBtnText}>Leave</Text>
-                </Pressable>
-              </View>
-            </Pressable>
-          </Pressable>
-        </Modal>
+        <ConfirmModal
+          visible={showExitConfirm}
+          onClose={() => setShowExitConfirm(false)}
+          onConfirm={onLeave}
+          title="Leave waiting room?"
+          message="You can rejoin from the trip anytime."
+          confirmLabel="Leave"
+          cancelLabel="Stay"
+          confirmDanger
+        />
       </View>
     );
   }
@@ -3692,35 +3943,30 @@ export function LiveTripScreen({ route, navigation }: Props) {
         </View>
       )}
 
-      {__DEV__ && userGeo && (
-        <Pressable
-          style={{ position: 'absolute', top: 100, right: 10, backgroundColor: '#ef4444', padding: 8, borderRadius: 8, zIndex: 999 }}
-          onPress={() => handleOffRoute({ lat: userGeo.lat + 0.001, lng: userGeo.lng + 0.001 })}
-        >
-          <Text style={{ color: 'white', fontSize: 12, fontWeight: '700' }}>Test Reroute</Text>
-        </Pressable>
-      )}
-
       {/* ── Feature 6: Speedometer ────────────────────────────────────────────── */}
-      <View style={navStyles.speedometer}>
-        <Text style={navStyles.speedValue}>{Math.round(navSpeedKmh)}</Text>
-        <Text style={navStyles.speedUnit}>km/h</Text>
-      </View>
+      {!sheetBlocking ? (
+        <View style={navStyles.speedometer}>
+          <Text style={navStyles.speedValue}>{Math.round(navSpeedKmh)}</Text>
+          <Text style={navStyles.speedUnit}>km/h</Text>
+        </View>
+      ) : null}
 
       {/* ── Feature 5: ETA bar ────────────────────────────────────────────────── */}
-      <View style={navStyles.etaBar}>
-        <View style={navStyles.progressTrack}>
-          <View style={[navStyles.progressFill, { width: `${routeProgress}%` }]} />
+      {!sheetBlocking ? (
+        <View style={navStyles.etaBar}>
+          <View style={navStyles.progressTrack}>
+            <View style={[navStyles.progressFill, { width: `${routeProgress}%` }]} />
+          </View>
+          <View style={navStyles.etaRow}>
+            <Text style={navStyles.etaText}>
+              {remainingNavDistance > 0 ? formatDistance(remainingNavDistance) : ''}
+            </Text>
+            <Text style={navStyles.etaText}>
+              {drivingRoute?.durationSeconds != null ? formatETA(Math.round(drivingRoute.durationSeconds * (1 - routeProgress / 100))) : ''}
+            </Text>
+          </View>
         </View>
-        <View style={navStyles.etaRow}>
-          <Text style={navStyles.etaText}>
-            {remainingNavDistance > 0 ? formatDistance(remainingNavDistance) : ''}
-          </Text>
-          <Text style={navStyles.etaText}>
-            {drivingRoute?.durationSeconds != null ? formatETA(Math.round(drivingRoute.durationSeconds * (1 - routeProgress / 100))) : ''}
-          </Text>
-        </View>
-      </View>
+      ) : null}
 
       {mapPinCrosshair ? (
         <View style={styles.crosshairWrap} pointerEvents="box-none">
@@ -3732,16 +3978,16 @@ export function LiveTripScreen({ route, navigation }: Props) {
             }}
             style={styles.crosshairHit}
           >
-            <View style={styles.crosshairRing} />
-            <View style={styles.crosshairH} />
-            <View style={styles.crosshairV} />
+            <View style={[styles.crosshairRing, { borderColor: mode === 'dark' ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)' }]} />
+            <View style={[styles.crosshairH, { backgroundColor: mode === 'dark' ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)' }]} />
+            <View style={[styles.crosshairV, { backgroundColor: mode === 'dark' ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)' }]} />
           </Pressable>
-          <Text style={styles.crosshairHint}>
+          <Text style={[styles.crosshairHint, { color: mode === 'dark' ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.65)' }]}>
             Move map to your desired location, then long-press the crosshair.
           </Text>
           <Pressable
             style={{
-              backgroundColor: '#c084fc',
+              backgroundColor: mode === 'dark' ? '#ffffff' : '#000000',
               paddingHorizontal: 20,
               paddingVertical: 10,
               borderRadius: 24,
@@ -3752,7 +3998,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
               liveMapRef.current?.postMessage({ type: 'GET_MAP_CENTER' });
             }}
           >
-            <Text style={{ color: '#000', fontWeight: '700', fontSize: 14 }}>
+            <Text style={{ color: mode === 'dark' ? '#000000' : '#ffffff', fontWeight: '700', fontSize: 14 }}>
               Place Pin Here 📍
             </Text>
           </Pressable>
@@ -3767,8 +4013,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
         </View>
       ) : null}
       {!sheetBlocking ? (
-        <Pressable style={[styles.recenterPill, { bottom: Math.max(insets.bottom + 210, 220) }]} onPress={() => void handleRecenter()}>
-          <Ionicons name="navigate" size={20} color="#0f7a8a" />
+        <Pressable style={[styles.recenterPill, { bottom: Math.max(insets.bottom + 260, 270) }]} onPress={() => void handleRecenter()}>
+          <Ionicons name="navigate" size={20} color="#34a853" />
           <Text style={styles.recenterPillText}>Re-centre</Text>
         </Pressable>
       ) : null}
@@ -3841,7 +4087,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
 
       <Animated.View
         style={[
-          styles.liveSheet,
+          s.liveSheet,
           {
             height: sheetHeightAnim,
             paddingBottom: Math.max(insets.bottom, 10),
@@ -3862,8 +4108,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
           <>
             <View style={styles.peekRow}>
               <View style={styles.peekMetricSide}>
-                <Text style={styles.metricBig}>{formatElapsedStrava(elapsedSec)}</Text>
-                <Text style={styles.metricLabel}>TIME</Text>
+                <Text style={s.metricBig}>{formatElapsedStrava(elapsedSec)}</Text>
+                <Text style={s.metricLabel}>TIME</Text>
               </View>
               <View style={styles.peekPauseCenter}>
                 <Pressable onPress={() => !endingTrip && goToPausedWaiting()}>
@@ -3875,8 +4121,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
                 </Pressable>
               </View>
               <View style={[styles.peekMetricSide, { alignItems: "flex-end" }]}>
-                <Text style={styles.metricBig}>{myDistanceKm.toFixed(1)}</Text>
-                <Text style={styles.metricLabel}>DISTANCE (KM)</Text>
+                <Text style={s.metricBig}>{myDistanceKm.toFixed(1)}</Text>
+                <Text style={s.metricLabel}>DISTANCE (KM)</Text>
               </View>
             </View>
             <View style={styles.peekActions}>
@@ -3898,10 +4144,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
                 style={styles.dangerOutline}
                 disabled={endingTrip}
                 onPress={() => {
-                  Alert.alert("End trip", "End this trip for everyone?", [
-                    { text: "Cancel", style: "cancel" },
-                    { text: "End trip", style: "destructive", onPress: () => void endTrip() },
-                  ]);
+                  setEndTripSource("peek");
+                  setShowEndTripConfirm(true);
                 }}
               >
                 <Text style={styles.dangerOutlineText}>End trip</Text>
@@ -3922,31 +4166,31 @@ export function LiveTripScreen({ route, navigation }: Props) {
             overScrollMode="never"
           >
             <View style={styles.statusBanner}>
-              <View style={styles.gpsDot} />
-              <Text style={styles.statusBannerText}>Live GPS tracking</Text>
-              <Text style={styles.statusBannerMuted}> · Convoy sync</Text>
+              <View style={[styles.gpsDot, { backgroundColor: mode === "dark" ? "#34d399" : "#059669" }]} />
+              <Text style={[styles.statusBannerText, { color: ts.text }]}>Live GPS tracking</Text>
+              <Text style={[styles.statusBannerMuted, { color: ts.muted }]}> · Convoy sync</Text>
             </View>
             <View style={styles.metrics2}>
               <View>
-                <Text style={styles.metricBig}>{formatElapsedStrava(elapsedSec)}</Text>
-                <Text style={styles.metricLabel}>TIME</Text>
+                <Text style={s.metricBig}>{formatElapsedStrava(elapsedSec)}</Text>
+                <Text style={s.metricLabel}>TIME</Text>
               </View>
               <View style={{ alignItems: "flex-end" }}>
-                <Text style={styles.metricBig}>{myDistanceKm.toFixed(1)}</Text>
-                <Text style={styles.metricLabel}>DISTANCE (KM)</Text>
+                <Text style={s.metricBig}>{myDistanceKm.toFixed(1)}</Text>
+                <Text style={s.metricLabel}>DISTANCE (KM)</Text>
               </View>
             </View>
             <View style={styles.iconRow}>
               <Pressable
-                style={styles.roundIcon}
+                style={s.roundIcon}
                 onPress={() => {
                   setSheetExpanded(false);
                   setShowSosModal(true);
                 }}
               >
-                <Ionicons name="warning" size={22} color="#fff" />
+                <Ionicons name="warning" size={22} color={ts.muted} />
               </Pressable>
-              <Pressable style={styles.roundIcon} onPress={() => emitConvoy("regroup-ping")}>
+              <Pressable style={s.roundIcon} onPress={() => emitConvoy("regroup-ping")}>
                 <Ionicons name="notifications" size={22} color="#fbbf24" />
               </Pressable>
               <Pressable onPress={() => !endingTrip && goToPausedWaiting()}>
@@ -3957,7 +4201,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
                 </View>
               </Pressable>
               <Pressable
-                style={[styles.roundIcon, mapPinCrosshair && { borderWidth: 2, borderColor: "#c084fc" }]}
+                style={[s.roundIcon, mapPinCrosshair && { borderWidth: 2, borderColor: "#c084fc" }]}
                 onPress={() => setMapPinCrosshair((x) => !x)}
               >
                 <Ionicons name="location" size={22} color="#c084fc" />
@@ -3968,27 +4212,27 @@ export function LiveTripScreen({ route, navigation }: Props) {
                 ) : null}
               </Pressable>
               <Pressable
-                style={[styles.roundIcon, !canSendLineupFormation && { opacity: 0.35 }]}
+                style={[s.roundIcon, !canSendLineupFormation && { opacity: 0.35 }]}
                 onPress={() => emitConvoy("line-up-formation")}
                 disabled={!canSendLineupFormation}
               >
                 <Ionicons name="list" size={22} color="#2dd4bf" />
               </Pressable>
             </View>
-            <View style={styles.liveChipRow}>
-              <View style={styles.liveChip}>
+              <View style={styles.liveChipRow}>
+              <View style={[styles.liveChip, { backgroundColor: ts.card, borderColor: ts.border }]}>
                 <View style={styles.liveDot} />
-                <Text style={styles.liveChipText}>LIVE</Text>
+                <Text style={[styles.liveChipText, { color: ts.text }]}>LIVE</Text>
               </View>
               <Pressable
-                style={styles.liveChip}
+                style={[styles.liveChip, { backgroundColor: ts.card, borderColor: ts.border }]}
                 onPress={() => {
                   setShowAlertHistoryModal(true);
                   setUnreadAlertCount(0);
                 }}
               >
-                <Ionicons name="notifications-outline" size={14} color="#fff" />
-                <Text style={styles.liveChipText}>Alerts</Text>
+                <Ionicons name="notifications-outline" size={14} color={ts.muted} />
+                <Text style={[styles.liveChipText, { color: ts.text }]}>Alerts</Text>
                 {unreadAlertCount > 0 ? (
                   <View style={styles.alertBadgeInline}>
                     <Text style={styles.alertBadgeText}>{Math.min(99, unreadAlertCount)}</Text>
@@ -3998,81 +4242,13 @@ export function LiveTripScreen({ route, navigation }: Props) {
               <Pressable
                 style={styles.endTripChip}
                 disabled={endingTrip}
-                onPress={() =>
-                  Alert.alert("End trip", "End this trip for everyone?", [
-                    { text: "Cancel", style: "cancel" },
-                    { text: "End trip", style: "destructive", onPress: () => void endTrip() },
-                  ])
-                }
+                onPress={() => {
+                  setEndTripSource("chip");
+                  setShowEndTripConfirm(true);
+                }}
               >
                 <Text style={styles.endTripChipText}>End trip</Text>
               </Pressable>
-            </View>
-
-            {/* ── GROUP COMMS ── */}
-            <View style={styles.settingsCard}>
-              <View style={{ marginBottom: 8 }}>
-                <Text style={styles.cardTitle}>GROUP COMMS</Text>
-              </View>
-              <View style={styles.voiceRow}>
-                <Pressable
-                  disabled={!canModerateVoice}
-                  onPress={() => void setVoiceMode("open")}
-                  style={[styles.voicePill, voiceMode === "open" && styles.voicePillActive]}
-                >
-                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                    <Mic
-                      color={voiceMode === "open" ? "#000" : "rgba(255,255,255,0.45)"}
-                      size={14}
-                      strokeWidth={2}
-                    />
-                    <Text style={[styles.voicePillText, voiceMode === "open" && styles.voicePillTextOn]}>
-                      Talk All
-                    </Text>
-                  </View>
-                </Pressable>
-                <Pressable
-                  disabled={!canModerateVoice}
-                  onPress={() => void setVoiceMode("controlled")}
-                  style={[styles.voicePill, voiceMode === "controlled" && styles.voicePillActive]}
-                >
-                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                    <Lock
-                      color={voiceMode === "controlled" ? "#000" : "rgba(255,255,255,0.45)"}
-                      size={14}
-                      strokeWidth={2}
-                    />
-                    <Text
-                      style={[styles.voicePillText, voiceMode === "controlled" && styles.voicePillTextOn]}
-                    >
-                      Staff Talk
-                    </Text>
-                  </View>
-                </Pressable>
-              </View>
-              <Text style={[styles.mutedSmall, { marginTop: 6, lineHeight: 16 }]}>
-                {voiceMode === "open"
-                  ? "All members can talk. Staff can mute all riders anytime."
-                  : "Only organizer & staff can talk. Riders cannot hear this channel."}
-              </Text>
-              {isInVoice ? (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}>
-                  <View style={[styles.connBadge, styles.connBadgeOn, { flex: 1 }]}>
-                    <Text style={[styles.connBadgeText, { color: "#34d399" }]}>
-                      🎙 {voiceRiders.length + 1} in voice
-                    </Text>
-                  </View>
-                  {canModerateVoice && voiceMode === "open" ? (
-                    <Pressable
-                      onPress={() => (allRidersMuted ? unmuteAllMembers() : muteAllMembers())}
-                      style={styles.muteAllBtn}
-                    >
-                      <Ionicons name={allRidersMuted ? "mic" : "mic-off"} size={12} color="#fca5a5" />
-                      <Text style={styles.muteAllBtnText}>{allRidersMuted ? "Unmute All" : "Mute All"}</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              ) : null}
             </View>
 
             {/* ── ATTENDANCE TABS + JOINER CARDS ── */}
@@ -4081,9 +4257,9 @@ export function LiveTripScreen({ route, navigation }: Props) {
                 <Pressable
                   key={tab}
                   onPress={() => setAttendanceTab(tab)}
-                  style={[styles.attTab, attendanceTab === tab && styles.attTabOn]}
+                  style={[s.attTab, attendanceTab === tab && s.attTabOn]}
                 >
-                  <Text style={[styles.attTabText, attendanceTab === tab && styles.attTabTextOn]}>
+                  <Text style={[s.attTabText, attendanceTab === tab && s.attTabTextOn]}>
                     {tab}{" "}
                     {tab === "arrived"
                       ? `(${arrivedCount})`
@@ -4121,9 +4297,9 @@ export function LiveTripScreen({ route, navigation }: Props) {
                   <View
                     key={`live-att-${member.id}`}
                     style={[
-                      styles.attCard,
-                      member.status === "arrived" && styles.attCardOk,
-                      member.status === "on-way" && styles.attCardWay,
+                      s.attCard,
+                      member.status === "arrived" && s.attCardOk,
+                      member.status === "on-way" && s.attCardWay,
                     ]}
                   >
                     <View style={styles.row}>
@@ -4148,10 +4324,10 @@ export function LiveTripScreen({ route, navigation }: Props) {
                       <View style={{ flex: 1, marginLeft: 10 }}>
                         <Text style={styles.memberName}>{member.name}</Text>
                         <View style={styles.row}>
-                          <View style={[styles.rolePill, { borderColor: rs.borderColor, backgroundColor: rs.bg }]}>
-                            <Text style={[styles.rolePillText, { color: rs.color }]}>{roleLabel}</Text>
-                          </View>
-                          <Text style={styles.mutedSmall}>
+                            <View style={[styles.rolePill, { borderColor: member.role === "member" ? ts.border : rs.borderColor, backgroundColor: member.role === "member" ? ts.card : rs.bg }]}>
+                              <Text style={[styles.rolePillText, { color: member.role === "member" ? ts.muted : rs.color }]}>{member.role}</Text>
+                            </View>
+                          <Text style={s.mutedSmall}>
                             {member.status === "arrived"
                               ? "✓ Arrived"
                               : member.status === "on-way"
@@ -4187,7 +4363,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
                                           style={{
                                             fontSize: 9,
                                             fontWeight: "700",
-                                            color: member.role === r ? "#000" : "rgba(255,255,255,0.45)",
+                                            color: member.role === r ? "#000" : ts.muted,
                                             textTransform: "capitalize",
                                           }}
                                         >
@@ -4208,7 +4384,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
               })}
 
             {/* ── SETTINGS / NEXT CHECKPOINT ── */}
-            <View style={styles.settingsCard}>
+            <View style={s.settingsCard}>
               <View style={styles.setRowTall}>
                 <View style={styles.setIconCol}>
                   <Ionicons
@@ -4220,7 +4396,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
                 <View style={{ flex: 1 }}>
                   <Text
                     style={[
-                      styles.setLabel,
+                      s.setLabel,
                       nextCheckpointInfo?.isCurrent ? { color: "#fbbf24" } : null,
                     ]}
                   >
@@ -4228,10 +4404,10 @@ export function LiveTripScreen({ route, navigation }: Props) {
                   </Text>
                   {nextCheckpointInfo ? (
                     <>
-                      <Text style={styles.setSub} numberOfLines={2}>
+                      <Text style={s.setSub} numberOfLines={2}>
                         {nextCheckpointInfo.next.name}
                       </Text>
-                      <Text style={styles.setSub}>
+                      <Text style={s.setSub}>
                         {nextCheckpointInfo.next.clientDistanceM == null
                           ? "Waiting for GPS…"
                           : nextCheckpointInfo.isCurrent
@@ -4246,48 +4422,50 @@ export function LiveTripScreen({ route, navigation }: Props) {
                       </Text>
                     </>
                   ) : (
-                    <Text style={styles.setSub}>No checkpoints for this trip yet.</Text>
+                    <Text style={s.setSub}>No checkpoints for this trip yet.</Text>
                   )}
                 </View>
               </View>
               <View style={styles.setRowTall}>
                 <View style={styles.setIconCol}>
-                  <Ionicons name="partly-sunny-outline" size={22} color="rgba(255,255,255,0.75)" />
+                  <Ionicons name="partly-sunny-outline" size={22} color={ts.muted} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.setLabel}>Weather</Text>
+                  <Text style={s.setLabel}>Weather</Text>
                   {weatherLoading ? (
-                    <Text style={styles.setSub}>Loading…</Text>
+                    <Text style={s.setSub}>Loading…</Text>
                   ) : weather ? (
-                    <Text style={styles.setSub}>
+                    <Text style={s.setSub}>
                       {weather.label} · {weather.tempC}°C · wind {weather.windKmh} km/h
                     </Text>
                   ) : (
-                    <Text style={styles.setSub}>Open the sheet at your position to load weather.</Text>
+                    <Text style={s.setSub}>Open the sheet at your position to load weather.</Text>
                   )}
                 </View>
               </View>
               {canSaveNearbyAttraction ? (
                 <Pressable style={styles.setRowTall} onPress={() => setShowAttractionModal(true)}>
                   <View style={styles.setIconCol}>
-                    <Ionicons name="star-outline" size={22} color="rgba(255,255,255,0.75)" />
+                    <Ionicons name="star-outline" size={22} color={ts.muted} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.setLabel}>Mark nearby attraction</Text>
-                    <Text style={styles.setSub}>Save a discovered place for organizers (checkpoints).</Text>
+                    <Text style={s.setLabel}>Mark nearby attraction</Text>
+                    <Text style={s.setSub}>Save a discovered place for organizers (checkpoints).</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.35)" />
+                  <Ionicons name="chevron-forward" size={18} color={ts.muted} />
                 </Pressable>
               ) : null}
             </View>
-            <Text style={[styles.sectionRouteTitle, { marginBottom: 8 }]}>ROUTE · CHECKPOINT TIMELINE</Text>
+            <Text style={[s.sectionRouteTitle, { marginBottom: 8 }]}>ROUTE · CHECKPOINT TIMELINE</Text>
             {routeTimeline.length === 0 ? (
-              <Text style={[styles.mutedSmall, { textAlign: "center", padding: 12 }]}>
+              <Text style={[s.mutedSmall, { textAlign: "center", padding: 12 }]}>
                 No checkpoints yet. Organizers can add them when creating the event.
               </Text>
             ) : (
-              routeTimeline.map((row) => (
-                <View key={row.cp.id} style={[styles.timelineRow, row.reached && { opacity: 0.45 }]}>
+              routeTimeline.map((row) => {
+                const letter = String.fromCharCode(64 + row.order);
+                return (
+                <View key={row.cp.id} style={[s.timelineRow, row.reached && { opacity: 0.45 }]}>
                   <View style={styles.timelineDot}>
                     <Text
                       style={[
@@ -4296,21 +4474,21 @@ export function LiveTripScreen({ route, navigation }: Props) {
                         row.isNext && !row.isCurrent && { color: "#00E5B0" },
                       ]}
                     >
-                      {row.reached ? "✓" : row.isCurrent ? "●" : row.isNext ? "→" : "○"}
+                      {row.reached ? "✓" : row.isCurrent ? "●" : row.isNext ? "→" : letter}
                     </Text>
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text
                       style={[
-                        styles.timelineName,
+                        s.timelineName,
                         row.isCurrent && { color: "#fbbf24" },
                         row.isNext && !row.isCurrent && { color: "#00E5B0" },
                         row.reached && { color: "rgba(255,255,255,0.45)" },
                       ]}
                     >
-                      {row.order}. {row.cp.name}
+                      {letter}. {row.cp.name}
                     </Text>
-                    <Text style={styles.setSub}>
+                    <Text style={s.setSub}>
                       {row.reached
                         ? `Passed · ${
                             row.cp.clientDistanceM == null ? "—" : `${formatDistance(row.distM)} from you`
@@ -4327,7 +4505,8 @@ export function LiveTripScreen({ route, navigation }: Props) {
                     </Text>
                   </View>
                 </View>
-              ))
+                );
+              })
             )}
           </ScrollView>
         )}
@@ -4336,24 +4515,24 @@ export function LiveTripScreen({ route, navigation }: Props) {
       <Modal visible={showSosModal} transparent animationType="slide">
         <Pressable style={[styles.modalBackdrop, styles.modalBackdropBottom]} onPress={() => setShowSosModal(false)}>
           <Pressable
-            style={[styles.sosSheet, { paddingBottom: Math.max(insets.bottom + 10, 18) }]}
+            style={[{ backgroundColor: ts.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 18, paddingTop: 16, paddingBottom: Math.max(insets.bottom + 10, 18), borderTopWidth: 1, borderTopColor: ts.border }]}
             onPress={(e) => e.stopPropagation()}
           >
             <View style={styles.sosSheetHandle} />
             <View style={styles.sosSheetHeader}>
               <Text style={styles.sosSheetTitle}>SOS Alert</Text>
               <Pressable style={styles.sosCloseBtn} onPress={() => setShowSosModal(false)}>
-                <Ionicons name="close" size={24} color="rgba(255,255,255,0.75)" />
+                <Ionicons name="close" size={24} color={ts.muted} />
               </Pressable>
             </View>
-            <Text style={styles.sosSheetSubtitle}>
+            <Text style={[{ color: ts.text, fontSize: 14, lineHeight: 19, marginBottom: 14 }]}>
               This will broadcast an emergency alert to all trip members and the organizer.
             </Text>
             <View style={styles.sosSheetGrid}>
               {SOS_OPTIONS.map((opt) => (
                 <Pressable
                   key={opt.id}
-                  style={styles.sosTile}
+                  style={[{ backgroundColor: ts.card, borderColor: ts.border, borderWidth: 1, width: "48%", borderRadius: 14, paddingVertical: 14, alignItems: "center", justifyContent: "center", gap: 6 }]}
                   onPress={() => {
                     if (opt.id === "other") {
                       const reason = sosOtherReason.trim();
@@ -4372,19 +4551,19 @@ export function LiveTripScreen({ route, navigation }: Props) {
                   <View style={styles.sosTileIconWrap}>
                     <Text style={styles.sosTileIcon}>{opt.icon}</Text>
                   </View>
-                  <Text style={styles.sosTileText}>{opt.label}</Text>
+                  <Text style={[{ color: ts.text, fontSize: 14, fontWeight: "700" }]}>{opt.label}</Text>
                 </Pressable>
               ))}
             </View>
             <TextInput
-              style={[styles.textInputDark, { marginTop: 12, borderColor: "rgba(225,29,72,0.35)" }]}
+              style={[{ backgroundColor: ts.card, borderColor: "rgba(225,29,72,0.35)", borderWidth: 1, borderRadius: 12, padding: 12, color: ts.text, marginTop: 12 }]}
               placeholder="Other reason (required for Other)"
-              placeholderTextColor="rgba(255,255,255,0.38)"
+              placeholderTextColor={ts.muted}
               value={sosOtherReason}
               onChangeText={setSosOtherReason}
             />
             <Pressable
-              style={[styles.primaryBtn, { marginTop: 10 }]}
+              style={[styles.primaryBtn, { marginTop: 10, backgroundColor: mode === "dark" ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.9)" }]}
               onPress={() => {
                 const reason = sosOtherReason.trim();
                 if (!reason) {
@@ -4396,24 +4575,29 @@ export function LiveTripScreen({ route, navigation }: Props) {
                 setSosOtherReason("");
               }}
             >
-              <Text style={styles.primaryBtnText}>Send</Text>
+              <Text style={[styles.primaryBtnText, { color: mode === "dark" ? "#000" : "#fff" }]}>Send</Text>
             </Pressable>
           </Pressable>
         </Pressable>
       </Modal>
 
       <Modal visible={!!activeAlert} transparent animationType="fade">
-        <Pressable style={styles.modalBackdrop} onPress={() => setActiveAlert(null)}>
-          <Pressable style={styles.alertCardDark} onPress={(e) => e.stopPropagation()}>
+        <Pressable style={[styles.modalBackdrop, { backgroundColor: mode === "dark" ? "rgba(0,0,0,0.75)" : "rgba(0,0,0,0.45)" }]} onPress={() => setActiveAlert(null)}>
+          <Pressable style={[{ backgroundColor: ts.surface, borderColor: "rgba(225,29,72,0.34)", borderWidth: 1, borderRadius: 18, padding: 18 }]} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.alertCardTitle}>{activeAlert?.title ?? "Alert"}</Text>
-            <Text style={styles.alertCardMeta}>
+            <Text style={[{ color: ts.muted, fontSize: 12, marginTop: 8 }]}>
               From: {activeAlert?.actorName || "Unknown"} •{" "}
               {activeAlert ? new Date(activeAlert.atIso).toLocaleTimeString() : ""}
             </Text>
-            <Text style={styles.alertCardMessage}>{activeAlert?.message}</Text>
+            <Text style={[{ color: ts.text, fontSize: 16, lineHeight: 24, marginTop: 10 }]}>{activeAlert?.message}</Text>
             <View style={styles.modalActions}>
-              <Pressable style={styles.alertCardDismissBtn} onPress={() => setActiveAlert(null)}>
-                <Text style={styles.alertCardDismissText}>Dismiss</Text>
+              <Pressable
+                style={[
+                  { backgroundColor: mode === "dark" ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.9)", paddingVertical: 12, paddingHorizontal: 22, borderRadius: 14, alignItems: "center", flex: 1 }
+                ]}
+                onPress={() => setActiveAlert(null)}
+              >
+                <Text style={{ color: mode === "dark" ? "#000" : "#fff", fontSize: 22, fontWeight: "800" }}>Dismiss</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -4421,16 +4605,21 @@ export function LiveTripScreen({ route, navigation }: Props) {
       </Modal>
 
       <Modal visible={!!sentAlertPopup} transparent animationType="fade">
-        <Pressable style={styles.modalBackdrop} onPress={() => setSentAlertPopup(null)}>
-          <Pressable style={styles.alertCardDark} onPress={(e) => e.stopPropagation()}>
+        <Pressable style={[styles.modalBackdrop, { backgroundColor: mode === "dark" ? "rgba(0,0,0,0.75)" : "rgba(0,0,0,0.45)" }]} onPress={() => setSentAlertPopup(null)}>
+          <Pressable style={[{ backgroundColor: ts.surface, borderColor: "rgba(225,29,72,0.34)", borderWidth: 1, borderRadius: 18, padding: 18 }]} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.alertCardTitle}>{sentAlertPopup?.title ?? "Alert sent"}</Text>
-            <Text style={styles.alertCardMeta}>
+            <Text style={[{ color: ts.muted, fontSize: 12, marginTop: 8 }]}>
               {sentAlertPopup ? new Date(sentAlertPopup.atIso).toLocaleTimeString() : ""}
             </Text>
-            <Text style={styles.alertCardMessage}>{sentAlertPopup?.message}</Text>
+            <Text style={[{ color: ts.text, fontSize: 16, lineHeight: 24, marginTop: 10 }]}>{sentAlertPopup?.message}</Text>
             <View style={styles.modalActions}>
-              <Pressable style={styles.alertCardDismissBtn} onPress={() => setSentAlertPopup(null)}>
-                <Text style={styles.alertCardDismissText}>Dismiss</Text>
+              <Pressable
+                style={[
+                  { backgroundColor: mode === "dark" ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.9)", paddingVertical: 12, paddingHorizontal: 22, borderRadius: 14, alignItems: "center", flex: 1 }
+                ]}
+                onPress={() => setSentAlertPopup(null)}
+              >
+                <Text style={{ color: mode === "dark" ? "#000" : "#fff", fontSize: 22, fontWeight: "800" }}>Dismiss</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -4439,16 +4628,16 @@ export function LiveTripScreen({ route, navigation }: Props) {
 
       <Modal visible={showAlertHistoryModal} transparent animationType="slide">
         <Pressable style={[styles.modalBackdrop, styles.modalBackdropBottom]} onPress={() => setShowAlertHistoryModal(false)}>
-          <Pressable style={[styles.sosSheet, { paddingBottom: Math.max(insets.bottom + 10, 18) }]} onPress={(e) => e.stopPropagation()}>
+          <Pressable style={[{ backgroundColor: ts.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 18, paddingTop: 16, paddingBottom: Math.max(insets.bottom + 10, 18), borderTopWidth: 1, borderTopColor: ts.border }]} onPress={(e) => e.stopPropagation()}>
             <View style={styles.sosSheetHeader}>
               <Text style={styles.sosSheetTitle}>Alert History</Text>
               <Pressable style={styles.sosCloseBtn} onPress={() => setShowAlertHistoryModal(false)}>
-                <Ionicons name="close" size={24} color="rgba(255,255,255,0.75)" />
+                <Ionicons name="close" size={24} color={ts.muted} />
               </Pressable>
             </View>
             <ScrollView style={{ maxHeight: 360 }}>
               {alertHistory.length === 0 ? (
-                <Text style={styles.sosSheetSubtitle}>No alerts yet.</Text>
+                <Text style={[{ color: ts.text, fontSize: 14, lineHeight: 19, marginBottom: 14 }]}>No alerts yet.</Text>
               ) : (
                 alertHistory.map((a) => (
                   <View key={a.id} style={styles.alertHistoryRow}>
@@ -4466,10 +4655,10 @@ export function LiveTripScreen({ route, navigation }: Props) {
       </Modal>
 
       <Modal visible={showPinModal} transparent animationType="slide">
-        <Pressable style={styles.modalBackdrop} onPress={() => setShowPinModal(false)}>
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Add map pin</Text>
-            <Text style={styles.mutedSmall}>Type, label — uses your current GPS position.</Text>
+        <Pressable style={[styles.modalBackdrop, { backgroundColor: mode === "dark" ? "rgba(0,0,0,0.75)" : "rgba(0,0,0,0.45)" }]} onPress={() => setShowPinModal(false)}>
+          <Pressable style={[{ backgroundColor: ts.surface, borderColor: ts.border, borderWidth: 1, borderRadius: 20, padding: 20 }]} onPress={(e) => e.stopPropagation()}>
+            <Text style={[{ color: ts.text, fontSize: 18, fontWeight: "800", marginBottom: 8 }]}>Add map pin</Text>
+            <Text style={[styles.mutedSmall, { color: ts.text }]}>Type, label — uses your current GPS position.</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 10 }}>
               {(["parking", "fuel", "attraction", "hazard", "road-damage"] as const).map((t) => (
                 <Pressable
@@ -4484,15 +4673,15 @@ export function LiveTripScreen({ route, navigation }: Props) {
               ))}
             </ScrollView>
             <TextInput
-              style={styles.textInputDark}
+              style={[{ backgroundColor: ts.surface, borderColor: ts.border, borderWidth: 1, borderRadius: 12, padding: 12, color: ts.text, marginTop: 8 }]}
               placeholder="Label"
-              placeholderTextColor="rgba(255,255,255,0.35)"
+              placeholderTextColor={ts.muted}
               value={pinLabel}
               onChangeText={setPinLabel}
             />
             <View style={styles.modalActions}>
-              <Pressable style={[styles.primaryBtn, styles.outlineBtn]} onPress={() => setShowPinModal(false)}>
-                <Text style={styles.outlineBtnText}>Cancel</Text>
+              <Pressable style={[styles.primaryBtn, styles.outlineBtn, { borderColor: ts.border }]} onPress={() => setShowPinModal(false)}>
+                <Text style={[styles.outlineBtnText, { color: ts.text }]}>Cancel</Text>
               </Pressable>
               <Pressable style={styles.primaryBtn} onPress={() => void submitMapPin()}>
                 <Text style={styles.primaryBtnText}>Add pin</Text>
@@ -4503,11 +4692,11 @@ export function LiveTripScreen({ route, navigation }: Props) {
       </Modal>
 
       <Modal visible={showAttractionModal} transparent animationType="slide">
-        <Pressable style={styles.modalBackdrop} onPress={() => closeAttractionModal()}>
-          <Pressable style={[styles.modalCard, { maxHeight: "85%" }]} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Nearby attraction</Text>
-            <Text style={styles.mutedSmall}>Name and description — saved for organizers.</Text>
-            <Text style={[styles.mutedSmall, { marginTop: 6 }]}>
+        <Pressable style={[styles.modalBackdrop, { backgroundColor: mode === "dark" ? "rgba(0,0,0,0.75)" : "rgba(0,0,0,0.45)" }]} onPress={() => closeAttractionModal()}>
+          <Pressable style={[{ backgroundColor: ts.surface, borderColor: ts.border, borderWidth: 1, borderRadius: 20, padding: 20, maxHeight: "85%" }]} onPress={(e) => e.stopPropagation()}>
+            <Text style={[{ color: ts.text, fontSize: 18, fontWeight: "800", marginBottom: 8 }]}>Nearby attraction</Text>
+            <Text style={[styles.mutedSmall, { color: ts.text }]}>Name and description — saved for organizers.</Text>
+            <Text style={[styles.mutedSmall, { marginTop: 6, color: ts.text }]}>
               GPS:{" "}
               {userGeo
                 ? `${userGeo.lat.toFixed(5)}, ${userGeo.lng.toFixed(5)}`
@@ -4516,26 +4705,26 @@ export function LiveTripScreen({ route, navigation }: Props) {
                   : "—"}
             </Text>
             <TextInput
-              style={styles.textInputDark}
+              style={[{ backgroundColor: ts.surface, borderColor: ts.border, borderWidth: 1, borderRadius: 12, padding: 12, color: ts.text, marginTop: 8 }]}
               placeholder="Place name"
-              placeholderTextColor="rgba(255,255,255,0.35)"
+              placeholderTextColor={ts.muted}
               value={attrName}
               onChangeText={setAttrName}
             />
             <TextInput
-              style={[styles.textInputDark, { minHeight: 80, marginTop: 8 }]}
+              style={[{ backgroundColor: ts.surface, borderColor: ts.border, borderWidth: 1, borderRadius: 12, padding: 12, color: ts.text, marginTop: 8, minHeight: 80 }]}
               placeholder="What makes it special?"
-              placeholderTextColor="rgba(255,255,255,0.35)"
+              placeholderTextColor={ts.muted}
               value={attrDesc}
               onChangeText={setAttrDesc}
               multiline
             />
             <Pressable
-              style={[styles.primaryBtn, styles.outlineBtn, { marginTop: 10 }]}
+              style={[styles.primaryBtn, styles.outlineBtn, { marginTop: 10, borderColor: ts.border }]}
               onPress={() => void pickAttractionImages()}
               disabled={attrSaving || attrImages.length >= 5}
             >
-              <Text style={styles.outlineBtnText}>
+              <Text style={[styles.outlineBtnText, { color: ts.text }]}>
                 {attrImages.length > 0
                   ? `${attrImages.length} photo(s) selected — tap to add more`
                   : "+ Add photos (max 5)"}
@@ -4578,11 +4767,14 @@ export function LiveTripScreen({ route, navigation }: Props) {
             ) : null}
             <View style={styles.modalActions}>
               <Pressable
-                style={[styles.primaryBtn, styles.outlineBtn]}
+                style={[
+                  { backgroundColor: "transparent", borderWidth: 1, borderColor: mode === "dark" ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.2)", borderRadius: 12, paddingVertical: 12, paddingHorizontal: 20, alignItems: "center" },
+                  attrSaving && { opacity: 0.45 }
+                ]}
                 onPress={() => closeAttractionModal()}
                 disabled={attrSaving}
               >
-                <Text style={styles.outlineBtnText}>Cancel</Text>
+                <Text style={{ color: mode === "dark" ? "#ffffff" : "#000000", fontWeight: "700", fontSize: 14 }}>Cancel</Text>
               </Pressable>
               <Pressable
                 style={[styles.primaryBtn, attrSaving && { opacity: 0.65 }]}
@@ -4603,39 +4795,41 @@ export function LiveTripScreen({ route, navigation }: Props) {
       </Modal>
 
       <Modal visible={showMapPinRequestModal} transparent animationType="slide">
-        <Pressable style={styles.modalBackdrop} onPress={() => setShowMapPinRequestModal(false)}>
-          <Pressable style={[styles.modalCard, { maxHeight: "85%" }]} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Request map pin</Text>
-            <Text style={styles.mutedSmall}>
+        <Pressable style={[styles.modalBackdrop, { backgroundColor: mode === "dark" ? "rgba(0,0,0,0.75)" : "rgba(0,0,0,0.45)" }]} onPress={() => setShowMapPinRequestModal(false)}>
+          <Pressable style={[{ backgroundColor: ts.surface, borderColor: ts.border, borderWidth: 1, borderRadius: 20, padding: 20, maxHeight: "85%" }]} onPress={(e) => e.stopPropagation()}>
+            <Text style={[{ color: ts.text, fontSize: 18, fontWeight: "800", marginBottom: 8 }]}>Request map pin</Text>
+            <Text style={[styles.mutedSmall, { color: ts.text }]}>
               {canSendLineupFormation
                 ? "Adds a checkpoint immediately for organizers and staff."
                 : "Submit for organizer approval."}
             </Text>
             <TextInput
-              style={[styles.textInputDark, { marginTop: 10 }]}
+              style={[{ backgroundColor: ts.surface, borderColor: ts.border, borderWidth: 1, borderRadius: 12, padding: 12, color: ts.text, marginTop: 10 }]}
               placeholder="Label (checkpoint name)"
-              placeholderTextColor="rgba(255,255,255,0.35)"
+              placeholderTextColor={ts.muted}
               value={mapPinLabel}
               onChangeText={setMapPinLabel}
             />
             <TextInput
-              style={[styles.textInputDark, { marginTop: 8, minHeight: 72 }]}
+              style={[{ backgroundColor: ts.surface, borderColor: ts.border, borderWidth: 1, borderRadius: 12, padding: 12, color: ts.text, marginTop: 8, minHeight: 72 }]}
               placeholder="Reason / notes"
-              placeholderTextColor="rgba(255,255,255,0.35)"
+              placeholderTextColor={ts.muted}
               value={mapPinReason}
               onChangeText={setMapPinReason}
               multiline
             />
             <View style={styles.modalActions}>
               <Pressable
-                style={[styles.primaryBtn, styles.outlineBtn]}
+                style={[
+                  { backgroundColor: "transparent", borderWidth: 1, borderColor: mode === "dark" ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.2)", borderRadius: 12, paddingVertical: 12, paddingHorizontal: 20, alignItems: "center" }
+                ]}
                 onPress={() => {
                   setShowMapPinRequestModal(false);
                   setMapPinReason("");
                   setMapPinLabel("");
                 }}
               >
-                <Text style={styles.outlineBtnText}>Cancel</Text>
+                <Text style={{ color: mode === "dark" ? "#ffffff" : "#000000", fontWeight: "700", fontSize: 14 }}>Cancel</Text>
               </Pressable>
               <Pressable
                 style={[styles.primaryBtn, mapPinSubmitting && styles.primaryBtnDisabled]}
@@ -4652,12 +4846,12 @@ export function LiveTripScreen({ route, navigation }: Props) {
       </Modal>
 
       <Modal visible={canSendLineupFormation && pinRequestQueue.length > 0} transparent animationType="fade">
-        <View style={styles.modalBackdrop}>
-          <Pressable style={[styles.modalCard, { maxHeight: "88%" }]} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Pin request</Text>
+        <View style={[styles.modalBackdrop, { backgroundColor: mode === "dark" ? "rgba(0,0,0,0.75)" : "rgba(0,0,0,0.45)" }]}>
+          <Pressable style={[{ backgroundColor: ts.surface, borderColor: ts.border, borderWidth: 1, borderRadius: 20, padding: 20, maxHeight: "88%" }]} onPress={(e) => e.stopPropagation()}>
+            <Text style={[{ color: ts.text, fontSize: 18, fontWeight: "800", marginBottom: 8 }]}>Pin request</Text>
             {pinRequestQueue[0] ? (
               <>
-                <Text style={[styles.mutedSmall, { marginTop: 4 }]}>
+                <Text style={[styles.mutedSmall, { marginTop: 4, color: ts.text }]}>
                   From {pinRequestQueue[0].requestedBy.displayName}
                 </Text>
                 {pinRequestQueue.length > 1 ? (
@@ -4705,22 +4899,30 @@ export function LiveTripScreen({ route, navigation }: Props) {
         </View>
       </Modal>
 
-      <Modal visible={showExitConfirm} transparent animationType="fade">
-        <Pressable style={styles.modalBackdrop} onPress={() => setShowExitConfirm(false)}>
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Leave live trip?</Text>
-            <Text style={styles.mutedSmall}>Your position will stop broadcasting when you leave.</Text>
-            <View style={styles.modalActions}>
-              <Pressable style={[styles.primaryBtn, styles.outlineBtn]} onPress={() => setShowExitConfirm(false)}>
-                <Text style={styles.outlineBtnText}>Stay</Text>
-              </Pressable>
-              <Pressable style={styles.primaryBtn} onPress={onLeave}>
-                <Text style={styles.primaryBtnText}>Leave</Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <ConfirmModal
+        visible={showExitConfirm}
+        onClose={() => setShowExitConfirm(false)}
+        onConfirm={onLeave}
+        title="Leave live trip?"
+        message="Your position will stop broadcasting when you leave."
+        confirmLabel="Leave"
+        cancelLabel="Stay"
+        confirmDanger
+      />
+
+      <ConfirmModal
+        visible={showEndTripConfirm}
+        onClose={() => setShowEndTripConfirm(false)}
+        onConfirm={() => {
+          setShowEndTripConfirm(false);
+          void endTrip();
+        }}
+        title="End trip"
+        message="End this trip for everyone?"
+        confirmLabel="End trip"
+        cancelLabel="Cancel"
+        confirmDanger
+      />
 
       {transientToast ? (
         <View
@@ -5120,7 +5322,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(0,0,0,0.12)",
   },
   recenterPillText: {
-    color: "#0f7a8a",
+    color: "#34a853",
     fontSize: 14,
     fontWeight: "800",
   },
@@ -5613,11 +5815,11 @@ const navStyles = StyleSheet.create({
     zIndex: 50,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+    backgroundColor: '#34a853',
     borderRadius: 12,
     padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.15)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
@@ -5627,19 +5829,19 @@ const navStyles = StyleSheet.create({
   maneuverIcon: {
     fontSize: 24,
     marginRight: 10,
-    color: '#fff',
+    color: '#ffffff',
   },
   instructionContent: {
     flex: 1,
   },
   instructionDistance: {
     fontSize: 11,
-    color: 'rgba(255,255,255,0.5)',
+    color: 'rgba(255,255,255,0.7)',
     fontWeight: '600',
   },
   instructionText: {
     fontSize: 14,
-    color: '#fff',
+    color: '#ffffff',
     fontWeight: '700',
     lineHeight: 20,
   },
@@ -5652,7 +5854,7 @@ const navStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(234, 179, 8, 0.9)',
+    backgroundColor: 'rgba(220, 38, 38, 0.9)',
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 16,
@@ -5665,51 +5867,51 @@ const navStyles = StyleSheet.create({
   },
   speedometer: {
     position: 'absolute',
-    bottom: 140,
+    bottom: 212,
     right: 12,
     zIndex: 50,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    backgroundColor: '#34a853',
     borderRadius: 50,
     width: 72,
     height: 72,
     borderWidth: 2,
-    borderColor: 'rgba(66, 133, 244, 0.5)',
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   speedValue: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#fff',
+    color: '#ffffff',
     lineHeight: 26,
   },
   speedUnit: {
     fontSize: 10,
     fontWeight: '600',
-    color: 'rgba(255,255,255,0.5)',
+    color: 'rgba(255,255,255,0.7)',
   },
   etaBar: {
     position: 'absolute',
-    bottom: 110,
+    bottom: 212,
     left: 12,
-    right: 80,
+    right: 88,
     zIndex: 50,
-    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    backgroundColor: '#34a853',
     borderRadius: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(255,255,255,0.15)',
   },
   progressTrack: {
     height: 4,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.2)',
     borderRadius: 2,
     marginBottom: 6,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#4285F4',
+    backgroundColor: '#ffffff',
     borderRadius: 2,
   },
   etaRow: {
@@ -5719,6 +5921,6 @@ const navStyles = StyleSheet.create({
   etaText: {
     fontSize: 12,
     fontWeight: '700',
-    color: 'rgba(255,255,255,0.85)',
+    color: '#ffffff',
   },
 });

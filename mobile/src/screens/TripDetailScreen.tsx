@@ -6,7 +6,6 @@ import {
   StyleSheet,
   TextInput,
   Pressable,
-  Alert,
   Image,
   Modal,
   ActivityIndicator,
@@ -20,6 +19,7 @@ import { useAuth } from "../context/AuthContext";
 import { useThemeColors } from "../theme";
 import { MediaThumbnail } from "../components/MediaThumbnail";
 import { Badge } from "../components/ui";
+import { ConfirmModal } from "../components/ConfirmModal";
 
 type Props = NativeStackScreenProps<RootStackParamList, "TripDetail">;
 
@@ -33,6 +33,8 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const c = useThemeColors();
   const [trip, setTrip] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showBookConfirm, setShowBookConfirm] = useState(false);
+  const [bookAction, setBookAction] = useState<() => void>(() => {});
   const [coupon, setCoupon] = useState("");
   const [appliedPct, setAppliedPct] = useState<number | null>(null);
   const [appliedDiscountAmount, setAppliedDiscountAmount] = useState<number>(0);
@@ -45,6 +47,15 @@ export function TripDetailScreen({ route, navigation }: Props) {
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [fullscreenMediaIndex, setFullscreenMediaIndex] = useState<number | null>(null);
 
+  /** Theme-aware alert modal state */
+  const [alertState, setAlertState] = useState<{
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    onConfirm?: () => void;
+    singleButton?: boolean;
+  } | null>(null);
+
   const applyCoupon = async () => {
     const code = coupon.trim();
     if (!code) return;
@@ -54,7 +65,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok || body?.valid === false) {
-      Alert.alert("Coupon", typeof body?.error === "string" ? body.error : "Invalid code");
+      setAlertState({ title: "Coupon", message: typeof body?.error === "string" ? body.error : "Invalid code", singleButton: true });
       setAppliedPct(null);
       setAppliedDiscountAmount(0);
       return;
@@ -92,17 +103,22 @@ export function TripDetailScreen({ route, navigation }: Props) {
           const r = await apiFetch(`/api/payments/verify/${encodeURIComponent(orderId)}`);
           const j = (await r.json()) as { paymentStatus?: string };
           if (j.paymentStatus === "paid") {
-            Alert.alert("🎉 Payment Successful!", `You're now registered for ${String(trip?.name ?? "this trip")}`, [
-              { text: "View Trip", onPress: () => navigation.navigate("TripDetail", { id }) },
-            ]);
+            setAlertState({
+              title: "🎉 Payment Successful!",
+              message: `You're now registered for ${String(trip?.name ?? "this trip")}`,
+              confirmLabel: "View Trip",
+              onConfirm: () => navigation.navigate("TripDetail", { id }),
+              singleButton: true,
+            });
             void loadTrip();
             return;
           }
           if (j.paymentStatus === "failed") {
-            Alert.alert("Payment Failed", "Your payment was not completed. Please try again.", [
-              { text: "Try Again" },
-              { text: "Cancel" },
-            ]);
+            setAlertState({
+              title: "Payment Failed",
+              message: "Your payment was not completed. Please try again.",
+              singleButton: true,
+            });
             return;
           }
         } catch {
@@ -110,14 +126,14 @@ export function TripDetailScreen({ route, navigation }: Props) {
         }
         await sleep(500);
       }
-      Alert.alert("Payment", "Could not confirm payment status. Check My trips or try again.");
+      setAlertState({ title: "Payment", message: "Could not confirm payment status. Check My trips or try again.", singleButton: true });
     },
     [id, loadTrip, navigation, trip?.name],
   );
 
   const startCashfreeCheckout = async (bookingId: number, amount: number) => {
     if (!user?.email) {
-      Alert.alert("Profile", "Email missing — update your account.");
+      setAlertState({ title: "Profile", message: "Email missing — update your account.", singleButton: true });
       return;
     }
     setIsPaymentLoading(true);
@@ -138,7 +154,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
       const body = await res.json().catch(() => ({}));
       console.log("[startCashfreeCheckout] create-order response:", res.status, JSON.stringify(body));
       if (!res.ok) {
-        Alert.alert("Payment", typeof body?.error === "string" ? body.error : await readApiErrorMessage(res));
+        setAlertState({ title: "Payment", message: typeof body?.error === "string" ? body.error : await readApiErrorMessage(res), singleButton: true });
         return;
       }
       const p = body as { orderId: string; paymentSessionId: string; cashfreeMode?: "sandbox" | "production" };
@@ -149,7 +165,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
       setShowPaymentWebView(true);
     } catch (e) {
       console.error("Payment initiation error:", e);
-      Alert.alert("Payment", "Could not initiate payment. Please try again.");
+      setAlertState({ title: "Payment", message: "Could not initiate payment. Please try again.", singleButton: true });
     } finally {
       setIsPaymentLoading(false);
     }
@@ -157,7 +173,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
 
   const book = async () => {
     if (!user) {
-      Alert.alert("Sign in required", "Please sign in from the Profile tab.");
+      setAlertState({ title: "Sign in required", message: "Please sign in from the Profile tab.", singleButton: true });
       return;
     }
     setBooking(true);
@@ -176,14 +192,13 @@ export function TripDetailScreen({ route, navigation }: Props) {
       const body = await res.json().catch(() => ({}));
       console.log("[book] Bookings response:", res.status, JSON.stringify(body));
       if (!res.ok) {
-        Alert.alert("Booking", await readApiErrorMessage(res));
+        setAlertState({ title: "Booking", message: await readApiErrorMessage(res), singleButton: true });
         return;
       }
 
       if (body?.already_joined) {
-        Alert.alert("Already joined", "You're already on this trip.", [
-          { text: "OK", onPress: () => navigation.goBack() },
-        ]);
+        setBookAction(() => () => navigation.goBack());
+        setShowBookConfirm(true);
         return;
       }
 
@@ -196,15 +211,16 @@ export function TripDetailScreen({ route, navigation }: Props) {
 
       if (body?.needs_payment === false) {
         console.log("[book] needs_payment=false, confirming free booking");
-        Alert.alert("Success", "You're in!", [{ text: "OK", onPress: () => navigation.goBack() }]);
+        setBookAction(() => () => navigation.goBack());
+        setShowBookConfirm(true);
         return;
       }
 
       console.warn("[book] Unexpected booking response — missing needs_payment flag", body);
-      Alert.alert("Booking", "Unexpected response from server. Please check My Trips or try again.");
+      setAlertState({ title: "Booking", message: "Unexpected response from server. Please check My Trips or try again.", singleButton: true });
     } catch (e) {
       console.error("[book] Exception:", e);
-      Alert.alert("Booking", "Something went wrong. Please try again.");
+      setAlertState({ title: "Booking", message: "Something went wrong. Please try again.", singleButton: true });
     } finally {
       setBooking(false);
     }
@@ -447,7 +463,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
                 }
                 if (u.startsWith("tripsync://payment/failure")) {
                   setShowPaymentWebView(false);
-                  Alert.alert("Payment", "Payment failed or was cancelled.");
+                  setAlertState({ title: "Payment", message: "Payment failed or was cancelled.", singleButton: true });
                   return false;
                 }
                 return true;
@@ -460,7 +476,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
                 }
                 if (u.includes("tripsync://payment/failure")) {
                   setShowPaymentWebView(false);
-                  Alert.alert("Payment", "Payment failed or was cancelled.");
+                  setAlertState({ title: "Payment", message: "Payment failed or was cancelled.", singleButton: true });
                 }
               }}
               startInLoadingState
@@ -473,6 +489,27 @@ export function TripDetailScreen({ route, navigation }: Props) {
           ) : null}
         </View>
       </Modal>
+      <ConfirmModal
+        visible={showBookConfirm}
+        onClose={() => setShowBookConfirm(false)}
+        onConfirm={bookAction}
+        title="Success"
+        message="You're in!"
+        confirmLabel="OK"
+        cancelLabel=""
+      />
+      <ConfirmModal
+        visible={alertState !== null}
+        onClose={() => setAlertState(null)}
+        onConfirm={() => {
+          if (alertState?.onConfirm) alertState.onConfirm();
+          setAlertState(null);
+        }}
+        title={alertState?.title ?? ""}
+        message={alertState?.message ?? ""}
+        confirmLabel={alertState?.confirmLabel}
+        singleButton={alertState?.singleButton ?? false}
+      />
     </>
   );
 }
@@ -497,130 +534,62 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
       padding: 12,
       color: c.text,
     },
-    smallBtn: {
-      backgroundColor: c.surface,
-      paddingHorizontal: 16,
-      justifyContent: "center",
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: c.border,
-    },
-    smallBtnText: { color: c.text, fontWeight: "700" },
-    ok: { color: c.success, marginTop: 8, fontSize: 13 },
+    smallBtn: { backgroundColor: c.text, paddingHorizontal: 20, borderRadius: 12, justifyContent: "center" },
+    smallBtnText: { color: c.bg, fontWeight: "800", fontSize: 13 },
+    ok: { color: c.text, fontWeight: "700", marginTop: 4 },
     breakdownBox: {
-      marginTop: 10,
+      marginTop: 8,
       borderWidth: 1,
       borderColor: c.border,
       borderRadius: 12,
-      padding: 10,
-      backgroundColor: c.surface,
-      gap: 6,
+      padding: 12,
     },
-    breakdownRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-    },
+    breakdownRow: { flexDirection: "row", justifyContent: "space-between" },
     breakdownLabel: { color: c.muted, fontSize: 13 },
-    breakdownValue: { color: c.text, fontSize: 13, fontWeight: "600" },
-    breakdownPayable: { color: c.success, fontSize: 14, fontWeight: "800" },
+    breakdownValue: { color: c.text, fontWeight: "700", fontSize: 13 },
+    breakdownPayable: { color: c.text, fontWeight: "800" },
     bookBtn: {
-      marginTop: 24,
       backgroundColor: c.text,
       paddingVertical: 16,
       borderRadius: 14,
       alignItems: "center",
+      marginTop: 20,
     },
     bookText: { color: c.bg, fontWeight: "800", fontSize: 16 },
-    linkBtn: { marginTop: 16, alignItems: "center" },
-    linkText: { color: c.muted, textDecorationLine: "underline" },
-    payHeader: {
+    linkBtn: { alignItems: "center", marginTop: 10 },
+    linkText: { color: c.muted, fontWeight: "600", fontSize: 13 },
+    detailSection: {
+      marginTop: 24,
+      borderTopWidth: 1,
+      borderTopColor: c.border,
+      paddingTop: 16,
+    },
+    detailSectionTitle: { color: c.muted, fontSize: 10, fontWeight: "800", letterSpacing: 2, marginBottom: 12 },
+    detailRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 },
+    detailLabel: { color: c.muted, fontSize: 14 },
+    detailValue: { color: c.text, fontWeight: "600", fontSize: 14, maxWidth: "60%", textAlign: "right" },
+    detailBody: { color: c.text, lineHeight: 22 },
+    tagRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    galleryHeader: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
-      paddingHorizontal: 12,
-      paddingVertical: 14,
+    },
+    chevron: { color: c.muted, fontSize: 14 },
+    galleryGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
+    galleryGridItem: { width: "48%", minWidth: 140 },
+    galleryEmpty: { color: c.muted, fontStyle: "italic", marginTop: 8 },
+    payHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingHorizontal: 16,
+      paddingTop: 6,
+      paddingBottom: 8,
       borderBottomWidth: 1,
       borderBottomColor: c.border,
     },
-    payClose: { color: c.muted, fontSize: 16 },
-    payTitle: { color: c.text, fontWeight: "700", fontSize: 16 },
-    detailSection: {
-      marginTop: 20,
-      padding: 14,
-      backgroundColor: c.surface,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: c.border,
-    },
-    detailSectionTitle: {
-      fontSize: 11,
-      fontWeight: "800",
-      letterSpacing: 1.2,
-      color: c.muted,
-      marginBottom: 12,
-    },
-    detailRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      paddingVertical: 8,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: c.border,
-    },
-    detailLabel: {
-      fontSize: 13,
-      color: c.muted,
-      flex: 1,
-    },
-    detailValue: {
-      fontSize: 13,
-      fontWeight: "600",
-      color: c.text,
-      flex: 1,
-      textAlign: "right",
-    },
-    detailBody: {
-      fontSize: 13,
-      color: c.text,
-      lineHeight: 20,
-    },
-    galleryHeader: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-    },
-    chevron: {
-      fontSize: 14,
-      color: c.muted,
-      marginBottom: 12,
-    },
-    galleryGrid: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 8,
-    },
-    galleryGridItem: {
-      width: "48%",
-      aspectRatio: 1,
-      borderRadius: 12,
-      overflow: "hidden",
-    },
-    galleryEmpty: {
-      color: c.muted,
-      fontSize: 13,
-      fontStyle: "italic",
-      textAlign: "center",
-      paddingVertical: 16,
-    },
-    tagRow: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 6,
-    },
-    wvLoading: {
-      ...StyleSheet.absoluteFillObject,
-      justifyContent: "center",
-      alignItems: "center",
-      backgroundColor: c.bg,
-    },
+    payClose: { color: c.text, fontWeight: "700", fontSize: 15 },
+    payTitle: { color: c.text, fontWeight: "800", fontSize: 15 },
+    wvLoading: { ...StyleSheet.absoluteFillObject, justifyContent: "center", alignItems: "center" },
   });
