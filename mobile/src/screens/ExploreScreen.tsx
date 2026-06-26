@@ -87,39 +87,33 @@ export function ExploreScreen() {
 
   return (
     <View style={s.root}>
+      {/* Hero */}
       <View style={s.hero}>
         <Text style={s.heroTitle}>Explore Expeditions</Text>
         <Text style={s.heroSub}>Find your next adventure from our curated marketplace</Text>
       </View>
 
-      {/* Sort chips row */}
-      <View style={s.sortRowOuter}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={s.sortRowInner}
-        >
-          {SORTS.map((sort) => (
-            <Pressable
-              key={sort.id}
-              style={[s.sortChip, sortBy === sort.id && s.sortChipOn]}
-              onPress={() => setSortBy(sort.id)}
-            >
-              <Text style={[s.sortChipText, sortBy === sort.id && s.sortChipTextOn]}>{sort.label}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      </View>
-
       {/* Search bar */}
       <View style={s.searchWrap}>
-        <TextInput
-          style={s.search}
-          placeholder="Search trips, locations…"
-          placeholderTextColor={colors.muted}
-          value={search}
-          onChangeText={setSearch}
-        />
+        <View style={s.searchRow}>
+          <Text style={s.searchIcon}>🔍</Text>
+          <TextInput
+            style={s.search}
+            placeholder="Search trips, locations…"
+            placeholderTextColor={colors.muted}
+            value={search}
+            onChangeText={setSearch}
+          />
+          {search.length > 0 && (
+            <Pressable
+              onPress={() => setSearch("")}
+              style={s.clearBtn}
+              hitSlop={8}
+            >
+              <Text style={s.clearBtnText}>✕</Text>
+            </Pressable>
+          )}
+        </View>
       </View>
 
       {/* Theme pills row */}
@@ -136,23 +130,44 @@ export function ExploreScreen() {
               onPress={() => setTheme(t === "All" ? "" : t)}
             >
               <Text style={[s.pillText, (t === "All" ? theme === "" : theme === t) && s.pillTextOn]}>
-                {t}
+                {t === "All" ? "🏷️ All" : t}
               </Text>
             </Pressable>
           ))}
         </ScrollView>
       </View>
 
-      <Text style={s.count}>{filtered.length} expeditions found</Text>
+      {/* Sort chips + count row */}
+      <View style={s.sortRowOuter}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={s.sortRowInner}
+        >
+          {SORTS.map((sort) => (
+            <Pressable
+              key={sort.id}
+              style={[s.sortChip, sortBy === sort.id && s.sortChipOn]}
+              onPress={() => setSortBy(sort.id)}
+            >
+              <Text style={[s.sortChipText, sortBy === sort.id && s.sortChipTextOn]}>{sort.label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+        <Text style={s.count}>{filtered.length} expeditions</Text>
+      </View>
 
       <FlatList
         data={filtered}
         keyExtractor={(item) => String(item.id)}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.text} />}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 100 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 100 }}
         ListEmptyComponent={
           !loading ? (
-            <Text style={s.empty}>No trips found. Try adjusting search or theme.</Text>
+            <View style={s.emptyWrap}>
+              <Text style={s.emptyIcon}>🗺️</Text>
+              <Text style={s.empty}>No trips found. Try adjusting search or theme.</Text>
+            </View>
           ) : null
         }
         renderItem={({ item }) => (
@@ -170,8 +185,8 @@ export function ExploreScreen() {
                 ) : null}
                 {item.theme ? <Badge variant="default">{item.theme}</Badge> : null}
               </View>
-              <Text style={s.title}>{item.name ?? "Trip"}</Text>
-              <Text style={s.meta}>
+              <Text style={s.title} numberOfLines={1}>{item.name ?? "Trip"}</Text>
+              <Text style={s.meta} numberOfLines={1}>
                 {item.theme ?? "Adventure"} · {item.date ?? "TBA"}
               </Text>
               <Text style={s.price}>
@@ -191,10 +206,66 @@ export function ExploreScreen() {
 const makeStyles = (colors: ThemeColors, mode: ColorMode, topInset: number) =>
   StyleSheet.create({
     root: { flex: 1, backgroundColor: colors.bg, paddingTop: topInset },
-    hero: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
+    hero: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
     heroTitle: { ...typography.hero, color: colors.text, fontSize: 28, lineHeight: 34 },
     heroSub: { color: colors.muted, fontSize: 14, marginTop: 10 },
-    sortRowOuter: { paddingHorizontal: 16, marginBottom: 14 },
+
+    // Search
+    searchWrap: { paddingHorizontal: 16, marginBottom: 12 },
+    searchRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      borderWidth: 1.5,
+      borderColor: mode === "light" ? "rgba(0,0,0,0.25)" : "rgba(255,255,255,0.2)",
+      borderRadius: 16,
+      backgroundColor: colors.surface,
+      paddingLeft: 12,
+    },
+    searchIcon: { fontSize: 15, marginRight: 6, opacity: 0.6 },
+    search: {
+      flex: 1,
+      paddingVertical: 14,
+      paddingRight: 12,
+      color: colors.text,
+      fontSize: 15,
+    },
+    clearBtn: { paddingRight: 14, paddingVertical: 14 },
+    clearBtnText: { color: colors.muted, fontSize: 14, fontWeight: "600" },
+
+    // Theme pills
+    pillRowOuter: { paddingHorizontal: 16, marginBottom: 10 },
+    pillRowInner: {
+      gap: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      height: CHIP_HEIGHT + 4,
+      paddingVertical: 2,
+    },
+    pill: {
+      paddingHorizontal: 16,
+      height: CHIP_HEIGHT,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: mode === "light" ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.15)",
+      justifyContent: "center",
+      alignItems: "center",
+      backgroundColor: "transparent",
+    },
+    pillOn: {
+      backgroundColor: colors.text,
+      borderColor: colors.text,
+    },
+    pillText: { color: colors.muted, fontWeight: "600", fontSize: 13 },
+    pillTextOn: { color: colors.bg, fontWeight: "700" },
+
+    // Sort
+    sortRowOuter: {
+      paddingHorizontal: 16,
+      marginBottom: 12,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
     sortRowInner: {
       gap: 8,
       flexDirection: "row",
@@ -206,53 +277,35 @@ const makeStyles = (colors: ThemeColors, mode: ColorMode, topInset: number) =>
       height: CHIP_HEIGHT,
       borderRadius: 999,
       borderWidth: 1,
-      borderColor: colors.border,
+      borderColor: mode === "light" ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.15)",
       justifyContent: "center",
       alignItems: "center",
     },
     sortChipOn: { backgroundColor: colors.text, borderColor: colors.text },
     sortChipText: { color: colors.muted, fontWeight: "700", fontSize: 12 },
     sortChipTextOn: { color: colors.bg },
-    searchWrap: { paddingHorizontal: 16, marginBottom: 14 },
-    search: {
-      borderWidth: 1.5,
-      borderColor: mode === "light" ? "rgba(0,0,0,0.2)" : colors.border,
-      borderRadius: 16,
-      padding: 14,
-      color: colors.text,
-      fontSize: 15,
-      backgroundColor: colors.surface,
+    count: {
+      ...typography.label,
+      color: colors.muted,
+      marginLeft: 12,
+      flexShrink: 0,
     },
-    pillRowOuter: { paddingHorizontal: 16, marginBottom: 12 },
-    pillRowInner: {
-      gap: 8,
-      flexDirection: "row",
-      alignItems: "center",
-      height: CHIP_HEIGHT,
-    },
-    pill: {
-      paddingHorizontal: 16,
-      height: CHIP_HEIGHT,
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: colors.border,
-      justifyContent: "center",
-      alignItems: "center",
-    },
-    pillOn: { backgroundColor: colors.text, borderColor: colors.text },
-    pillText: { color: colors.muted, fontWeight: "600", fontSize: 13 },
-    pillTextOn: { color: colors.bg },
-    count: { ...typography.label, paddingHorizontal: 16, marginBottom: 16, color: colors.muted },
-    empty: { color: colors.muted, textAlign: "center", marginTop: 40 },
+
+    // Empty state
+    emptyWrap: { alignItems: "center", marginTop: 60 },
+    emptyIcon: { fontSize: 40, marginBottom: 12, opacity: 0.5 },
+    empty: { color: colors.muted, textAlign: "center", marginTop: 0, fontSize: 14, lineHeight: 20 },
+
+    // Card
     card: {
       backgroundColor: colors.surface,
       borderRadius: 16,
       marginBottom: 16,
       overflow: "hidden",
       borderWidth: 1,
-      borderColor: colors.border,
+      borderColor: mode === "light" ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)",
     },
-    banner: { width: "100%", height: 160, opacity: 0.88 },
+    banner: { width: "100%", height: 180 },
     cardBody: { padding: 14 },
     badgeRow: { flexDirection: "row", gap: 6, marginBottom: 8, flexWrap: "wrap" },
     title: { color: colors.text, fontSize: 18, fontWeight: "800" },
