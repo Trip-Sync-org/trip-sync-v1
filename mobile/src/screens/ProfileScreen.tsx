@@ -208,11 +208,11 @@ function RoleToggleCard({ user, addRole, switchRole, c, onToast }: {
   c: ReturnType<typeof useAuthPalette>;
   onToast: (msg: string) => void;
 }) {
-  const [switching, setSwitching] = useState<"explorer" | "organisor" | null>(null);
-  const [pendingRole, setPendingRole] = useState<"explorer" | "organisor" | null>(null);
+  const [switching, setSwitching] = useState<"explorer" | "organizer" | null>(null);
+  const [pendingRole, setPendingRole] = useState<"explorer" | "organizer" | null>(null);
   const activeAnim = useRef(new Animated.Value(user?.activeRole === "organizer" ? 1 : 0)).current;
 
-  const onPressRole = (role: "explorer" | "organisor") => {
+  const onPressRole = (role: "explorer" | "organizer") => {
     if (!user?.roles || switching) return;
     if (role === user.activeRole) return;
     setPendingRole(role);
@@ -227,7 +227,7 @@ function RoleToggleCard({ user, addRole, switchRole, c, onToast }: {
     try {
       if (roles.length > 1) { await switchRole(role); }
       else { const currentRole = roles[0]; if (currentRole !== role) { await addRole(role); } }
-      const label = role === "organisor" ? "Organizer" : "Explorer";
+      const label = role === "organizer" ? "Organizer" : "Explorer";
       onToast(`Switched to ${label}`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Couldn't switch roles, try again";
@@ -236,9 +236,9 @@ function RoleToggleCard({ user, addRole, switchRole, c, onToast }: {
   };
 
   const isExplorerActive = user?.activeRole === "explorer";
-  const isOrganizerActive = user?.activeRole === "organizer" || user?.activeRole === "organisor";
+  const isOrganizerActive = user?.activeRole === "organizer";
   const switchingToExplorer = switching === "explorer";
-  const switchingToOrganizer = switching === "organisor";
+  const switchingToOrganizer = switching === "organizer";
 
   return (
     <>
@@ -250,7 +250,7 @@ function RoleToggleCard({ user, addRole, switchRole, c, onToast }: {
               {switchingToExplorer ? <ActivityIndicator size="small" color={c.bgCard === "#000000" ? "#000" : "#fff"} /> : <Compass color={(isExplorerActive) ? (c.bgCard === "#000000" ? "#000" : "#fff") : c.textSecondary} size={16} strokeWidth={2} />}
               <Text style={[styles.roleToggleLabel, { color: (isExplorerActive || switchingToExplorer) ? (c.bgCard === "#000000" ? "#000" : "#fff") : c.textSecondary }]}>Explorer</Text>
             </Pressable>
-            <Pressable style={[styles.roleToggleSegment, (isOrganizerActive || switchingToOrganizer) && styles.roleToggleActive]} onPress={() => void onPressRole("organisor")}>
+            <Pressable style={[styles.roleToggleSegment, (isOrganizerActive || switchingToOrganizer) && styles.roleToggleActive]} onPress={() => void onPressRole("organizer")}>
               {switchingToOrganizer ? <ActivityIndicator size="small" color={c.bgCard === "#000000" ? "#000" : "#fff"} /> : <Briefcase color={(isOrganizerActive) ? (c.bgCard === "#000000" ? "#000" : "#fff") : c.textSecondary} size={16} strokeWidth={2} />}
               <Text style={[styles.roleToggleLabel, { color: (isOrganizerActive || switchingToOrganizer) ? (c.bgCard === "#000000" ? "#000" : "#fff") : c.textSecondary }]}>Organizer</Text>
             </Pressable>
@@ -261,9 +261,9 @@ function RoleToggleCard({ user, addRole, switchRole, c, onToast }: {
         visible={pendingRole !== null}
         onClose={() => setPendingRole(null)}
         onConfirm={confirmSwitch}
-        title={`Switch to ${pendingRole === "organisor" ? "Organizer" : "Explorer"}?`}
+        title={`Switch to ${pendingRole === "organizer" ? "Organizer" : "Explorer"}?`}
         message={
-          pendingRole === "organisor"
+          pendingRole === "organizer"
             ? "You'll be able to create and manage trips as an Organizer."
             : "You'll browse and join trips as an Explorer."
         }

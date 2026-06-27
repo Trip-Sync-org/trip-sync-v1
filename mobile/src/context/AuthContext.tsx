@@ -53,7 +53,7 @@ type AuthContextValue = {
     email: string,
     password: string,
     name: string,
-    userType: "explorer" | "organisor",
+    userType: "explorer" | "organizer",
   ) => Promise<SignupStepResult>;
   // --- Email verification step methods (signup flow) ---
   verifyEmailOtp: (code: string) => Promise<SignupStepResult>;
@@ -65,10 +65,10 @@ type AuthContextValue = {
   // --- Change password for logged-in user ---
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   // --- Existing ---
-  switchRole: (newRole: "explorer" | "organisor") => Promise<void>;
-  addRole: (newRole: "explorer" | "organisor") => Promise<void>;
+  switchRole: (newRole: "explorer" | "organizer") => Promise<void>;
+  addRole: (newRole: "explorer" | "organizer") => Promise<void>;
   logout: () => Promise<void>;
-  setPendingGoogleRole: (role: "explorer" | "organisor" | null) => void;
+  setPendingGoogleRole: (role: "explorer" | "organizer" | null) => void;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -91,8 +91,8 @@ function clerkUserToAppUser(cu: NonNullable<ReturnType<typeof useClerkUser>["use
   };
 }
 
-function mapTypeToRole(userType: "explorer" | "organisor"): string {
-  return userType === "organisor" ? "organizer" : "user";
+function mapTypeToRole(userType: "explorer" | "organizer"): string {
+  return userType === "organizer" ? "organizer" : "user";
 }
 
 function splitName(fullName: string): { firstName: string; lastName: string } {
@@ -139,7 +139,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   /** Set by SignupScreen before triggering Google OAuth — the role the user selected on the toggle. */
-  const pendingGoogleRoleRef = React.useRef<"explorer" | "organisor" | null>(null);
+  const pendingGoogleRoleRef = React.useRef<"explorer" | "organizer" | null>(null);
 
   /**
    * Set once an email/password signup is known to need email OTP. Lets
@@ -147,7 +147,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * time, and lets us finish the Supabase sync + setActive only once
    * verification actually completes.
    */
-  const pendingSignupRoleRef = React.useRef<{ userType: "explorer" | "organisor"; name: string; email: string } | null>(null);
+  const pendingSignupRoleRef = React.useRef<{ userType: "explorer" | "organizer"; name: string; email: string } | null>(null);
 
   // Load numeric id from storage on mount
   const [numericId, setNumericId] = useState<number | undefined>(undefined);
@@ -160,7 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const setPendingGoogleRole = useCallback((role: "explorer" | "organisor" | null) => {
+  const setPendingGoogleRole = useCallback((role: "explorer" | "organizer" | null) => {
     pendingGoogleRoleRef.current = role;
   }, []);
 
@@ -356,7 +356,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * throwing.
    */
   const signup = useCallback(
-    async (email: string, password: string, name: string, userType: "explorer" | "organisor"): Promise<SignupStepResult> => {
+    async (email: string, password: string, name: string, userType: "explorer" | "organizer"): Promise<SignupStepResult> => {
       if (!signUp) throw new Error("SignUp not ready");
       const { firstName, lastName } = splitName(name || email.split("@")[0] || "User");
       const mappedRole = mapTypeToRole(userType);
@@ -421,7 +421,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [signUp]);
 
   const switchRole = useCallback(
-    async (newRole: "explorer" | "organisor") => {
+    async (newRole: "explorer" | "organizer") => {
       if (!clerkUser) throw new Error("Not signed in");
       const mapped = mapTypeToRole(newRole);
       const currentRoles = (clerkUser.unsafeMetadata?.roles as string[]) ?? [];
@@ -454,7 +454,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const addRole = useCallback(
-    async (newRole: "explorer" | "organisor") => {
+    async (newRole: "explorer" | "organizer") => {
       if (!clerkUser) throw new Error("Not signed in");
       const mapped = mapTypeToRole(newRole);
       const currentRoles = (clerkUser.unsafeMetadata?.roles as string[]) ?? [];

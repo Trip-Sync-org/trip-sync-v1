@@ -221,8 +221,8 @@ export function GoogleButton({ onPress }: GoogleButtonProps) {
 }
 
 type RoleSwitchProps = {
-  value: "explorer" | "organisor";
-  onChange: (v: "explorer" | "organisor") => void;
+  value: "explorer" | "organizer";
+  onChange: (v: "explorer" | "organizer") => void;
 };
 
 export function RoleSwitch({ value, onChange }: RoleSwitchProps) {
@@ -239,11 +239,11 @@ export function RoleSwitch({ value, onChange }: RoleSwitchProps) {
         <Text style={[styles.roleText, { color: value === "explorer" ? c.bgCard : c.textSecondary }]}>Explorer</Text>
       </Pressable>
       <Pressable
-        onPress={() => onChange("organisor")}
-        style={[styles.roleBtn, value === "organisor" ? styles.roleBtnActive : null]}
-        accessibilityLabel="Organisor account type"
+        onPress={() => onChange("organizer")}
+        style={[styles.roleBtn, value === "organizer" ? styles.roleBtnActive : null]}
+        accessibilityLabel="Organizer account type"
       >
-        <Text style={[styles.roleText, { color: value === "organisor" ? c.bgCard : c.textSecondary }]}>Organisor</Text>
+        <Text style={[styles.roleText, { color: value === "organizer" ? c.bgCard : c.textSecondary }]}>Organizer</Text>
       </Pressable>
     </View>
   );

@@ -855,14 +855,14 @@ export function LiveTripScreen({ route, navigation }: Props) {
 
   // ── canSpeak: controls local microphone (setMicrophoneEnabled) ────────────
   //   Talk All   → everyone may speak
-  //   Staff Talk → only staff (organiser, co-admin, moderator) + approved speakers
+  //   Staff Talk → only staff (organizer, co-admin, moderator) + approved speakers
   const canSpeakConvoy =
     voiceMode === "open" ||
     localIsStaff ||
     (localMemberId != null && approvedSpeakers.includes(localMemberId));
 
   // ── canHear: controls remote audio output (track.setVolume) ──────────────
-  //   MUST be independent of canSpeak so staff (especially organiser) keeps
+  //   MUST be independent of canSpeak so staff (especially organizer) keeps
   //   hearing in Staff Talk while their mic is correctly gated.
   //   Talk All   → everyone hears
   //   Staff Talk → only staff hears (riders = full audio blackout)
@@ -1472,7 +1472,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
   // per the channel-comms blueprint:
   //   - Talk All        → everyone (staff + riders) can talk → unmuted
   //   - Staff Talk       → staff (org/admin/co-admin/moderator) unmuted; riders muted
-  // Approved speakers (riders the organiser allowed in controlled mode) stay unmuted.
+  // Approved speakers (riders the organizer allowed in controlled mode) stay unmuted.
   // This runs on join (isInVoice flips true) AND on every live mode switch, so a
   // joiner inherits the CURRENT mode and a mid-session switch re-applies talk rights.
   useEffect(() => {
@@ -2879,7 +2879,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
       setPinLabel("");
       setPinLocation(null);
       setShowPinModal(false);
-      Alert.alert("Map pin", "Pin added for the convoy.");
+      setTransientToast({ message: "📍 Pin added for the convoy!", tone: "success" });
     } catch (e: unknown) {
       if (isAbortLikeError(e)) return;
       Alert.alert("Map pin", "Could not add pin.");
@@ -3111,12 +3111,12 @@ export function LiveTripScreen({ route, navigation }: Props) {
       }
       closeAttractionModal();
       const n = media.length;
-      Alert.alert(
-        "Saved!",
-        n > 0
-          ? `Organizers can use this as a checkpoint. ${n} photo(s) attached.`
-          : "Organizers can use this as a checkpoint.",
-      );
+      setTransientToast({
+        message: n > 0
+          ? `✅ Saved! Organizers can use this as a checkpoint. ${n} photo(s) attached.`
+          : "✅ Saved! Organizers can use this as a checkpoint.",
+        tone: "success",
+      });
     } catch (e: unknown) {
       if (isAbortLikeError(e)) return;
       const msg = e instanceof Error ? e.message : "Network error while saving.";
@@ -4666,9 +4666,9 @@ export function LiveTripScreen({ route, navigation }: Props) {
                 <Pressable
                   key={t}
                   onPress={() => setPinType(t)}
-                  style={[styles.typeChip, pinType === t && styles.typeChipOn]}
+                  style={[styles.typeChip, { borderColor: pinType === t ? ts.text : ts.border }, pinType === t && styles.typeChipOn]}
                 >
-                  <Text style={{ fontSize: 10, fontWeight: "800", color: pinType === t ? "#000" : "rgba(255,255,255,0.5)" }}>
+                  <Text style={{ fontSize: 10, fontWeight: "800", color: pinType === t ? "#000" : ts.text }}>
                     {t}
                   </Text>
                 </Pressable>
