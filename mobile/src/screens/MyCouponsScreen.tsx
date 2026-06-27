@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { ActivityIndicator, FlatList, StyleSheet, Text, View, Pressable } from "react-native";
+import { ActivityIndicator, FlatList, StyleSheet, Text, View, Pressable, Share } from "react-native";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { apiFetch } from "../api/client";
 import { useAuth } from "../context/AuthContext";
@@ -35,7 +35,7 @@ type BookingWithCoupon = {
   organizer_coupons?: {
     id: number;
     code: string;
-    discount_percent: number;
+    discount_pct: number;
   } | null;
 };
 
@@ -52,7 +52,7 @@ type MergedCoupon = {
 
 export function MyCouponsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const c = useAuthPalette();
+  const palette = useAuthPalette();
   const { user } = useAuth();
   const [mergedCoupons, setMergedCoupons] = useState<MergedCoupon[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,20 +64,20 @@ export function MyCouponsScreen() {
       const numericId = Number(user.id);
       if (!Number.isFinite(numericId)) return;
 
-      // Fetch both in parallel
       const [assignedRes, bookingsRes] = await Promise.all([
         apiFetch(`/api/users/${numericId}/assigned-coupons`),
         apiFetch(`/api/users/${numericId}/bookings`),
       ]);
 
-      const assignedCoupons: AssignedCoupon[] = assignedRes.ok ? await assignedRes.json() : [];
-      const bookings: BookingWithCoupon[] = bookingsRes.ok ? await bookingsRes.json() : [];
+      const assignedRaw = assignedRes.ok ? await assignedRes.json() : [];
+      const assignedCoupons: AssignedCoupon[] = Array.isArray(assignedRaw) ? assignedRaw : [];
+
+      const bookingsRaw = bookingsRes.ok ? await bookingsRes.json() : [];
+      const bookings: BookingWithCoupon[] = Array.isArray(bookingsRaw) ? bookingsRaw : [];
 
       const mergedMap = new Map<string, MergedCoupon>();
 
-      // Process assigned coupons
       for (const ac of assignedCoupons) {
-        const now = new Date();
         let status: "Available" | "Used" | "Expired" = "Available";
         if (ac.expired) status = "Expired";
         if (ac.redeemed) status = "Used";
@@ -94,17 +94,16 @@ export function MyCouponsScreen() {
         });
       }
 
-      // Process booking coupons (deduplicate by coupon_id)
       for (const b of bookings) {
         if (!b.coupon_id) continue;
-        const coupon = b.organizer_coupons;
+        const cpn = b.organizer_coupons;
         const key = `booking-${b.id}`;
         if (!mergedMap.has(key)) {
           mergedMap.set(key, {
             id: key,
-            code: coupon?.code ?? "N/A",
-            discount_pct: coupon?.discount_percent ?? 0,
-            trip_id: b.trip_id,
+            code: cpn?.code ?? "N/A",
+            discount_pct: cpn?.discount_pct ?? 0,
+            trip_id: b.trip_id ?? null,
             trip_name: b.trip_name ?? null,
             expiry_date: null,
             status: "Used",
@@ -127,7 +126,7 @@ export function MyCouponsScreen() {
     }, [fetchCoupons]),
   );
 
-  const formatDate = (dateStr: string | null): string => {
+  const formatExpiry = (dateStr: string | null): string => {
     if (!dateStr) return "";
     try {
       const d = new Date(dateStr + "T00:00:00");
@@ -137,21 +136,15 @@ export function MyCouponsScreen() {
     }
   };
 
-  const statusColors: Record<string, { bg: string; text: string; label: string }> = {
-    Available: { bg: "rgba(34,197,94,0.15)", text: "#22c55e", label: "Available" },
-    Used: { bg: "rgba(234,179,8,0.15)", text: "#eab308", label: "Used" },
-    Expired: { bg: "rgba(239,68,68,0.15)", text: "#ef4444", label: "Expired" },
-  };
-
   return (
     <ProfileLayout navigation={navigation} title="My Coupons" fallback="Main" tabBarPadding>
       {loading ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-          <ActivityIndicator size="large" color={c.textPrimary} />
+          <ActivityIndicator size="large" color={palette.textPrimary} />
         </View>
       ) : mergedCoupons.length === 0 ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-          <Text style={{ color: c.textSecondary }}>No coupons found</Text>
+          <Text style={{ color: palette.textSecondary }}>No coupons found</Text>
         </View>
       ) : (
         <FlatList
@@ -160,30 +153,53 @@ export function MyCouponsScreen() {
           contentContainerStyle={{ paddingTop: 12, paddingBottom: 24 }}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => {
-            const sc = statusColors[item.status] ?? statusColors.Available;
+            const badgeVariant =
+              item.status === "Available" ? "success" :
+              item.status === "Used" ? "warning" : "default";
+
+            const statusColors = {
+              Available: { bg: "rgba(34,197,94,0.15)", text: "#22c55e" },
+              Used: { bg: "rgba(234,179,8,0.15)", text: "#eab308" },
+              Expired: { bg: "rgba(239,68,68,0.15)", text: "#ef4444" },
+            };
+            const sc = statusColors[item.status];
+
             return (
               <Card style={{ padding: 16, marginBottom: 12 }}>
                 <View style={styles.couponHeader}>
-                  <Text style={[styles.couponCode, { color: c.textPrimary }]}>
-                    {item.code}
-                  </Text>
-                  <Badge variant={item.status === "Available" ? "success" : item.status === "Used" ? "warning" : "default"}>
-                    {item.discount_pct}% OFF
-                  </Badge>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+                    <Text style={[styles.couponCode, { color: palette.textPrimary }]}>
+                      {item.code}
+                    </Text>
+                    <Pressable
+                      onPress={() => void Share.share({ message: item.code })}
+                      style={styles.copyBtn}
+                    >
+                      <Text style={styles.copyBtnText}>📋</Text>
+                    </Pressable>
+                  </View>
+                  <Badge variant={badgeVariant}>{item.discount_pct}% OFF</Badge>
                 </View>
+
                 {item.trip_name ? (
-                  <Text style={{ fontSize: 13, color: c.textSecondary, marginTop: 4 }}>
+                  <Text style={{ fontSize: 13, color: palette.textSecondary, marginTop: 4 }}>
                     Trip: {item.trip_name}
                   </Text>
                 ) : null}
+
                 {item.expiry_date ? (
-                  <Text style={{ fontSize: 12, color: c.textSecondary, marginTop: 2 }}>
-                    Expires: {formatDate(item.expiry_date)}
+                  <Text style={{ fontSize: 12, color: palette.textSecondary, marginTop: 2 }}>
+                    Expires: {formatExpiry(item.expiry_date)}
                   </Text>
                 ) : null}
+
+                <Text style={{ fontSize: 11, color: palette.textSecondary, marginTop: 2, fontStyle: "italic" }}>
+                  {item.source === "assigned" ? "🎁 Sent to you by the organizer" : "✓ Used in a booking"}
+                </Text>
+
                 <View style={styles.actionsRow}>
                   <View style={[styles.statusBadge, { backgroundColor: sc.bg }]}>
-                    <Text style={[styles.statusText, { color: sc.text }]}>{sc.label}</Text>
+                    <Text style={[styles.statusText, { color: sc.text }]}>{item.status}</Text>
                   </View>
                   {item.status === "Available" && item.trip_id ? (
                     <Pressable
@@ -215,6 +231,10 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 6,
   },
+  copyBtn: {
+    padding: 4,
+  },
+  copyBtnText: { fontSize: 16 },
   couponCode: { fontSize: 17, fontWeight: "800", letterSpacing: 1 },
   actionsRow: {
     flexDirection: "row",

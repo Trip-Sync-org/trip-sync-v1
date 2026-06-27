@@ -1484,24 +1484,33 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
       }
     }
 
-    // Fallback: find active coupon where trip_id = :tripId and used_count < usage_limit and not expired
-    const { data: coupons } = await supabase
+    // Get suggested coupon: trip-scoped first, then global from same organizer
+    const { data: allCandidates } = await supabase
       .from("organizer_coupons")
-      .select("id, code, discount_pct, description, trip_id, active, used_count, usage_limit, expiry_date")
-      .eq("trip_id", tripId)
+      .select("id, code, discount_pct, description, trip_id, is_global, active, used_count, usage_limit, expiry_date")
+      .eq("organizer_id", Number((trip as { organizer_id?: unknown }).organizer_id))
       .eq("active", true)
+      .or(`trip_id.eq.${tripId},trip_id.is.null`)
       .order("created_at", { ascending: false })
-      .limit(5);
+      .limit(10);
 
-    if (coupons && coupons.length > 0) {
-      const valid = coupons.find((c: any) => isOrganizerCouponRowValidNow(c));
+    console.log(`[suggested-coupon] tripId=${tripId} organizer=${(trip as any).organizer_id} candidates found:`, allCandidates?.length ?? 0);
+
+    if (allCandidates && allCandidates.length > 0) {
+      // Prefer trip-scoped over global
+      const tripScoped = allCandidates.filter((c: any) => c.trip_id === tripId || Number(c.trip_id) === tripId);
+      const globals = allCandidates.filter((c: any) => c.trip_id === null);
+      
+      const candidates = [...tripScoped, ...globals];
+      const valid = candidates.find((c: any) => isOrganizerCouponRowValidNow(c));
+      
       if (valid) {
         return res.json({
           code: String(valid.code),
           discount_pct: Number(valid.discount_pct),
           description: String(valid.description || `Get ${valid.discount_pct}% off`),
           coupon_id: Number(valid.id),
-          source: "trip",
+          source: valid.trip_id ? "trip" : "global",
         });
       }
     }
@@ -2452,16 +2461,33 @@ async function startServer(options: StartServerOptions = {}): Promise<express.Ex
     // Upsert assignments
     let pushedCount = 0;
     for (const uid of userIds) {
-      const { error: upsertErr } = await supabase
+      let existingQuery = supabase
         .from("coupon_user_assignments")
-        .upsert(
-          { coupon_id: couponId, user_id: uid, trip_id: tripId },
-          { onConflict: "coupon_id, user_id, trip_id" },
-        );
-      if (!upsertErr) {
-        pushedCount++;
+        .select("id")
+        .eq("coupon_id", couponId)
+        .eq("user_id", uid);
+
+      if (tripId === null) {
+        existingQuery = existingQuery.is("trip_id", null);
       } else {
-        console.warn("push coupon upsert error:", upsertErr.message);
+        existingQuery = existingQuery.eq("trip_id", tripId);
+      }
+
+      const { data: existing } = await existingQuery.maybeSingle();
+
+      if (!existing) {
+        const { error } = await supabase
+          .from("coupon_user_assignments")
+          .insert({
+            coupon_id: couponId,
+            user_id: uid,
+            trip_id: tripId ?? null,
+            assigned_by: Number(organizerId),
+          });
+        if (!error) pushedCount++;
+        else console.warn("push coupon insert error:", error.message);
+      } else {
+        pushedCount++;
       }
     }
 

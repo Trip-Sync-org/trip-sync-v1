@@ -920,7 +920,7 @@ export function OrganizerScreen() {
             <Text style={s.sectionTitle}>Generate New Coupon</Text>
             <View style={s.fieldGrid}>
               <View style={s.field}>
-                <Text style={typography.label}>Code Prefix</Text>
+                <Text style={s.mutedLabel}>Code Prefix</Text>
                 <TextInput
                   style={s.input}
                   value={newCoupon.prefix}
@@ -928,7 +928,7 @@ export function OrganizerScreen() {
                 />
               </View>
               <View style={s.field}>
-                <Text style={typography.label}>Discount %</Text>
+                <Text style={s.mutedLabel}>Discount %</Text>
                 <TextInput
                   style={s.input}
                   keyboardType="number-pad"
@@ -939,7 +939,7 @@ export function OrganizerScreen() {
                 />
               </View>
               <View style={s.field}>
-                <Text style={typography.label}>Usage Limit</Text>
+                <Text style={s.mutedLabel}>Usage Limit</Text>
                 <TextInput
                   style={s.input}
                   keyboardType="number-pad"
@@ -950,7 +950,7 @@ export function OrganizerScreen() {
                 />
               </View>
               <View style={s.field}>
-                <Text style={typography.label}>Expires</Text>
+                <Text style={s.mutedLabel}>Expires</Text>
                 <TextInput
                   style={s.input}
                   placeholder="YYYY-MM-DD"
@@ -979,7 +979,7 @@ export function OrganizerScreen() {
           </Card>
 
           {/* Coupon List */}
-          <Text style={typography.label}>All Coupons ({coupons.length})</Text>
+          <Text style={s.mutedLabel}>All Coupons ({coupons.length})</Text>
           {coupons.map((couponItem) => (
             <Card key={couponItem.id} style={{ padding: 14, marginBottom: 8 }}>
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
@@ -1074,7 +1074,7 @@ export function OrganizerScreen() {
               <Card key={stat.k} style={{ padding: 12, width: "48%" }}>
                 <Text style={s.mutedSmall}>{stat.t}</Text>
                 <Text style={s.statVal}>{stat.v}</Text>
-                <Text style={typography.label}>{stat.k}</Text>
+                <Text style={s.mutedLabel}>{stat.k}</Text>
               </Card>
             ))}
           </View>
@@ -1108,7 +1108,7 @@ export function OrganizerScreen() {
             <Text style={s.sectionTitle}>Custom date range</Text>
             {Platform.OS === "ios" ? (
               <>
-                <Text style={typography.label}>From</Text>
+                <Text style={s.mutedLabel}>From</Text>
                 <DateTimePicker
                   value={customFrom}
                   mode="date"
@@ -1118,7 +1118,7 @@ export function OrganizerScreen() {
                     if (d) setCustomFrom(d);
                   }}
                 />
-                <Text style={[typography.label, { marginTop: 12 }]}>To</Text>
+                <Text style={[s.mutedLabel, { marginTop: 12 }]}>To</Text>
                 <DateTimePicker
                   value={customTo}
                   mode="date"
@@ -1181,7 +1181,7 @@ export function OrganizerScreen() {
           <View style={[s.modalSheet, { paddingBottom: 28 }]}>
             <Text style={s.sectionTitle}>Push Coupon: {pushCouponModal.couponCode}</Text>
             <View style={{ marginBottom: 12 }}>
-              <Text style={typography.label}>User IDs / Emails</Text>
+              <Text style={s.mutedLabel}>User IDs / Emails</Text>
               <TextInput
                 style={s.input}
                 placeholder="Comma-separated user IDs or emails"
@@ -1357,6 +1357,14 @@ const makeStyles = (c: ReturnType<typeof useThemeColors>) =>
       marginBottom: 12,
     },
     fieldGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+    mutedLabel: {
+      color: c.text,
+      opacity: 0.6,
+      fontSize: 10,
+      fontWeight: "700",
+      letterSpacing: 2,
+      textTransform: "uppercase",
+    },
     field: { width: "48%", marginBottom: 8 },
     input: {
       borderWidth: 1,

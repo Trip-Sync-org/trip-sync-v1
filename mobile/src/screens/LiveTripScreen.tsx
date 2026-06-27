@@ -2696,6 +2696,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
             legDurations,
             start: j.start ? { lat: j.start.lat, lng: j.start.lng, type: "start" } : undefined,
             end: j.end ? { lat: j.end.lat, lng: j.end.lng, type: "end" } : undefined,
+            passedWaypointIds: Array.from(passedWaypointIdsRef.current),
           }
         });
         console.log('[LiveTrip] initial route sent to WebView, coords:', coords.length,
@@ -3249,6 +3250,7 @@ export function LiveTripScreen({ route, navigation }: Props) {
               legDurations: rwLegDurations,
               start: j.start ? { lat: j.start.lat, lng: j.start.lng, type: "start" } : undefined,
               end: j.end ? { lat: j.end.lat, lng: j.end.lng, type: "end" } : undefined,
+              passedWaypointIds: Array.from(passedWaypointIdsRef.current),
             }
           });
         }

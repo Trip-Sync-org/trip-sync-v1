@@ -21,6 +21,25 @@ export function ProfileScreen() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [avatarUrl, setAvatarUrl] = React.useState<string | null>(null);
   const [showSignOut, setShowSignOut] = useState(false);
+  const [roleToast, setRoleToast] = useState<string | null>(null);
+  const roleSlideAnim = useRef(new Animated.Value(80)).current;
+  const roleToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showRoleToast = useCallback((msg: string) => {
+    if (roleToastTimerRef.current) clearTimeout(roleToastTimerRef.current);
+    setRoleToast(msg);
+    roleSlideAnim.setValue(80);
+    Animated.timing(roleSlideAnim, { toValue: 0, duration: 250, useNativeDriver: true }).start();
+    roleToastTimerRef.current = setTimeout(() => {
+      Animated.timing(roleSlideAnim, { toValue: 80, duration: 200, useNativeDriver: true }).start(() => {
+        setRoleToast(null);
+      });
+    }, 1500);
+  }, [roleSlideAnim]);
+
+  useEffect(() => {
+    return () => { if (roleToastTimerRef.current) clearTimeout(roleToastTimerRef.current); };
+  }, []);
 
   const fetchAvatar = React.useCallback(async () => {
     if (!supabase || !user?.authUserId) return;
@@ -65,81 +84,95 @@ export function ProfileScreen() {
   };
 
   return (
-    <ProfileLayout navigation={navigation} title="Profile" fallback="Main" tabBarPadding>
-      <View style={styles.center}>
-        <Pressable onPress={() => navigateToRootStack(navigation, "EditProfile")}>
-          <Image source={{ uri: avatarUri }} style={styles.avatar} />
-        </Pressable>
-        <Text style={[styles.name, { color: c.textPrimary }]}>{user?.name || "User"}</Text>
-        <Text style={[styles.email, { color: c.textSecondary }]}>{user?.email || ""}</Text>
-        <Pressable
-          style={[styles.editBtn, { borderColor: c.accentOrange }]}
-          onPress={() => navigateToRootStack(navigation, "EditProfile")}
+    <View style={{ flex: 1 }}>
+      <ProfileLayout navigation={navigation} title="Profile" fallback="Main" tabBarPadding>
+        <View style={styles.center}>
+          <Pressable onPress={() => navigateToRootStack(navigation, "EditProfile")}>
+            <Image source={{ uri: avatarUri }} style={styles.avatar} />
+          </Pressable>
+          <Text style={[styles.name, { color: c.textPrimary }]}>{user?.name || "User"}</Text>
+          <Text style={[styles.email, { color: c.textSecondary }]}>{user?.email || ""}</Text>
+          <Pressable
+            style={[styles.editBtn, { borderColor: c.accentOrange }]}
+            onPress={() => navigateToRootStack(navigation, "EditProfile")}
+          >
+            <Text style={[styles.editText, { color: c.accentOrange }]}>Edit</Text>
+          </Pressable>
+        </View>
+
+        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>GENERAL</Text>
+        <View style={[styles.card, { backgroundColor: c.bgCard, borderColor: c.borderDefault }]}>
+          <MenuItem icon={<Calendar color={c.textPrimary} size={20} strokeWidth={2} />} title="My Trips" subtitle="View all your booked trips" onPress={() => navigateToRootStack(navigation, "MyTrips")} c={c} />
+          <MenuItem icon={<Tag color={c.textPrimary} size={20} strokeWidth={2} />} title="My Coupons" subtitle="View your coupon codes & discounts" onPress={() => navigateToRootStack(navigation, "MyCoupons")} c={c} />
+          <MenuItem icon={<Camera color={c.textPrimary} size={14} strokeWidth={2} />} title="Add Social Account" subtitle="Add Facebook, Instagram, Twitter etc" onPress={() => {}} c={c} />
+          <MenuItem icon={<Gift color={c.textPrimary} size={14} strokeWidth={2} />} title="Refer to Friends" subtitle="Get ₹250 for referring friends" onPress={() => navigateToRootStack(navigation, "ReferFriends")} c={c} last />
+        </View>
+
+        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>NOTIFICATIONS</Text>
+        <View style={[styles.card, { backgroundColor: c.bgCard, borderColor: c.borderDefault }]}>
+          <ToggleRow
+            icon={<Bell color={c.textPrimary} size={14} strokeWidth={2} />}
+            title="Push Notifications"
+            subtitle="For daily update and others."
+            value={pushNotifs}
+            onChange={setPushNotifs}
+            c={c}
+          />
+          <ToggleRow
+            icon={<Megaphone color={c.textPrimary} size={14} strokeWidth={2} />}
+            title="Promotional Notifications"
+            subtitle="New Campaign & Offers"
+            value={promoNotifs}
+            onChange={setPromoNotifs}
+            c={c}
+            last
+          />
+        </View>
+
+        <RoleToggleCard user={user} addRole={addRole} switchRole={switchRole} c={c} onToast={showRoleToast} />
+
+        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>MORE</Text>
+        <View style={[styles.card, { backgroundColor: c.bgCard, borderColor: c.borderDefault }]}>
+          <MenuItem icon={<SunMoon color={c.textPrimary} size={14} strokeWidth={2} />} title="Appearance" subtitle={themeLabel} onPress={() => navigateToRootStack(navigation, "Appearance")} c={c} />
+          <MenuItem icon={<Phone color={c.textPrimary} size={14} strokeWidth={2} />} title="Contact Us" subtitle="For more information" onPress={() => navigateToRootStack(navigation, "ContactUs")} c={c} />
+          <Pressable style={styles.rowNoBorder} onPress={() => setShowSignOut(true)}>
+        <LogOut color="#E05555" size={14} strokeWidth={2} />
+        <View style={styles.menuText}>
+          <Text style={[styles.menuTitle, { color: "#E05555" }]}>Logout</Text>
+        </View>
+          </Pressable>
+        </View>
+        <ConfirmModal
+          visible={showSignOut}
+          onClose={() => setShowSignOut(false)}
+          onConfirm={async () => {
+            setLoggingOut(true);
+            try {
+              await logout();
+            } finally {
+              setLoggingOut(false);
+            }
+          }}
+          title="Sign out?"
+          message="You will be signed out of your account."
+          confirmLabel="Sign out"
+          cancelLabel="Cancel"
+          confirmDanger
+        />
+      </ProfileLayout>
+
+      {roleToast ? (
+        <Animated.View
+          style={[styles.roleToastContainer, { transform: [{ translateY: roleSlideAnim }] }]}
+          pointerEvents="none"
         >
-          <Text style={[styles.editText, { color: c.accentOrange }]}>Edit</Text>
-        </Pressable>
-      </View>
-
-      <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>GENERAL</Text>
-      <View style={[styles.card, { backgroundColor: c.bgCard, borderColor: c.borderDefault }]}>
-        <MenuItem icon={<Calendar color={c.textPrimary} size={20} strokeWidth={2} />} title="My Trips" subtitle="View all your booked trips" onPress={() => navigateToRootStack(navigation, "MyTrips")} c={c} />
-        <MenuItem icon={<Tag color={c.textPrimary} size={20} strokeWidth={2} />} title="My Coupons" subtitle="View your coupon codes & discounts" onPress={() => navigateToRootStack(navigation, "MyCoupons")} c={c} />
-        <MenuItem icon={<Camera color={c.textPrimary} size={14} strokeWidth={2} />} title="Add Social Account" subtitle="Add Facebook, Instagram, Twitter etc" onPress={() => {}} c={c} />
-        <MenuItem icon={<Gift color={c.textPrimary} size={14} strokeWidth={2} />} title="Refer to Friends" subtitle="Get ₹250 for referring friends" onPress={() => navigateToRootStack(navigation, "ReferFriends")} c={c} last />
-      </View>
-
-      <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>NOTIFICATIONS</Text>
-      <View style={[styles.card, { backgroundColor: c.bgCard, borderColor: c.borderDefault }]}>
-        <ToggleRow
-          icon={<Bell color={c.textPrimary} size={14} strokeWidth={2} />}
-          title="Push Notifications"
-          subtitle="For daily update and others."
-          value={pushNotifs}
-          onChange={setPushNotifs}
-          c={c}
-        />
-        <ToggleRow
-          icon={<Megaphone color={c.textPrimary} size={14} strokeWidth={2} />}
-          title="Promotional Notifications"
-          subtitle="New Campaign & Offers"
-          value={promoNotifs}
-          onChange={setPromoNotifs}
-          c={c}
-          last
-        />
-      </View>
-
-      <RoleToggleCard user={user} addRole={addRole} switchRole={switchRole} c={c} />
-
-      <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>MORE</Text>
-      <View style={[styles.card, { backgroundColor: c.bgCard, borderColor: c.borderDefault }]}>
-        <MenuItem icon={<SunMoon color={c.textPrimary} size={14} strokeWidth={2} />} title="Appearance" subtitle={themeLabel} onPress={() => navigateToRootStack(navigation, "Appearance")} c={c} />
-        <MenuItem icon={<Phone color={c.textPrimary} size={14} strokeWidth={2} />} title="Contact Us" subtitle="For more information" onPress={() => navigateToRootStack(navigation, "ContactUs")} c={c} />
-        <Pressable style={styles.rowNoBorder} onPress={() => setShowSignOut(true)}>
-      <LogOut color="#E05555" size={14} strokeWidth={2} />
-      <View style={styles.menuText}>
-        <Text style={[styles.menuTitle, { color: "#E05555" }]}>Logout</Text>
-      </View>
-        </Pressable>
-      </View>
-      <ConfirmModal
-        visible={showSignOut}
-        onClose={() => setShowSignOut(false)}
-        onConfirm={async () => {
-          setLoggingOut(true);
-          try {
-            await logout();
-          } finally {
-            setLoggingOut(false);
-          }
-        }}
-        title="Sign out?"
-        message="You will be signed out of your account."
-        confirmLabel="Sign out"
-        cancelLabel="Cancel"
-        confirmDanger
-      />
-    </ProfileLayout>
+          <View style={[styles.roleToastInner, { backgroundColor: c.bgCard, borderWidth: 1, borderColor: c.borderDefault }]}>
+            <CheckCircle2 color={c.accentOrange} size={18} strokeWidth={2} />
+            <Text style={[styles.roleToastText, { color: c.textPrimary }]}>{roleToast}</Text>
+          </View>
+        </Animated.View>
+      ) : null}
+    </View>
   );
 }
 
@@ -163,51 +196,42 @@ const styles = StyleSheet.create({
   menuTitle: { fontSize: 15, fontWeight: "600" },
   menuSubtitle: { fontSize: 12, marginTop: 2 },
   arrow: { fontSize: 19, marginLeft: 6 },
-  roleToastContainer: { position: "absolute", bottom: 20, left: 16, right: 16, zIndex: 100, alignItems: "center" },
+  roleToastContainer: { position: "absolute", bottom: 90, left: 16, right: 16, zIndex: 100, alignItems: "center" },
   roleToastInner: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 12, paddingHorizontal: 18, borderRadius: 14, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 10 },
   roleToastText: { fontSize: 14, fontWeight: "700" },
 });
 
-function RoleToggleCard({ user, addRole, switchRole, c }: {
+function RoleToggleCard({ user, addRole, switchRole, c, onToast }: {
   user: ReturnType<typeof useAuth>["user"];
   addRole: ReturnType<typeof useAuth>["addRole"];
   switchRole: ReturnType<typeof useAuth>["switchRole"];
   c: ReturnType<typeof useAuthPalette>;
+  onToast: (msg: string) => void;
 }) {
   const [switching, setSwitching] = useState<"explorer" | "organisor" | null>(null);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const [toastVisible, setToastVisible] = useState(false);
-  const slideAnim = useRef(new Animated.Value(100)).current;
-  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pendingRole, setPendingRole] = useState<"explorer" | "organisor" | null>(null);
   const activeAnim = useRef(new Animated.Value(user?.activeRole === "organizer" ? 1 : 0)).current;
 
-  const showToast = useCallback((msg: string) => {
-    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-    setToastMsg(msg); setToastVisible(true);
-    slideAnim.setValue(100);
-    Animated.timing(slideAnim, { toValue: 0, duration: 250, useNativeDriver: true }).start();
-    toastTimeoutRef.current = setTimeout(() => {
-      Animated.timing(slideAnim, { toValue: 100, duration: 200, useNativeDriver: true }).start(() => {
-        setToastVisible(false); setToastMsg(null);
-      });
-    }, 1500);
-  }, [slideAnim]);
-
-  useEffect(() => { return () => { if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current); }; }, []);
-
-  const onPressRole = async (role: "explorer" | "organisor") => {
+  const onPressRole = (role: "explorer" | "organisor") => {
     if (!user?.roles || switching) return;
-    const roles = user.roles as string[];
     if (role === user.activeRole) return;
+    setPendingRole(role);
+  };
+
+  const confirmSwitch = async () => {
+    if (!pendingRole || !user?.roles) return;
+    const role = pendingRole;
+    setPendingRole(null);
+    const roles = user.roles as string[];
     setSwitching(role);
     try {
       if (roles.length > 1) { await switchRole(role); }
       else { const currentRole = roles[0]; if (currentRole !== role) { await addRole(role); } }
       const label = role === "organisor" ? "Organizer" : "Explorer";
-      showToast(`Switched to ${label}`);
+      onToast(`Switched to ${label}`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Couldn't switch roles, try again";
-      showToast(msg);
+      onToast(msg);
     } finally { setSwitching(null); }
   };
 
@@ -233,14 +257,19 @@ function RoleToggleCard({ user, addRole, switchRole, c }: {
           </View>
         ) : null}
       </View>
-      {toastVisible && toastMsg && toastMsg.length > 0 ? (
-        <Animated.View style={[styles.roleToastContainer, { transform: [{ translateY: slideAnim }] }]} pointerEvents="none">
-          <View style={[styles.roleToastInner, { backgroundColor: c.accentOrange }]}>
-            <CheckCircle2 color={c.bgCard} size={18} strokeWidth={2} />
-            <Text style={[styles.roleToastText, { color: c.bgCard }]}>{toastMsg}</Text>
-          </View>
-        </Animated.View>
-      ) : null}
+      <ConfirmModal
+        visible={pendingRole !== null}
+        onClose={() => setPendingRole(null)}
+        onConfirm={confirmSwitch}
+        title={`Switch to ${pendingRole === "organisor" ? "Organizer" : "Explorer"}?`}
+        message={
+          pendingRole === "organisor"
+            ? "You'll be able to create and manage trips as an Organizer."
+            : "You'll browse and join trips as an Explorer."
+        }
+        confirmLabel="Switch"
+        cancelLabel="Cancel"
+      />
     </>
   );
 }

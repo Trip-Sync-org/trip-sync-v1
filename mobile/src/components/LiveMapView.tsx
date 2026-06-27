@@ -171,6 +171,9 @@ const memberMarkers = new Map();
 let pinMarkers = [];
 let startMarker = null;
 let endMarker = null;
+let checkpointMarkers = [];
+let timeBubbleMarkers = [];
+let passedWaypointIds = new Set();
 
 // ── Navigation state ──────────────────────────────────────────────────────────
 let routeSteps = [];           // steps from backend (Mapbox Directions)
@@ -213,6 +216,36 @@ function remainingDistanceAlongRoute(coords, fromIdx) {
     total += haversineMeters(coords[i], coords[i+1]);
   }
   return total;
+}
+/** Split route coordinates into legs using waypoints as split points */
+function splitRouteIntoLegs(coords, waypoints) {
+  if (!coords || coords.length < 2 || !waypoints || waypoints.length < 2) {
+    return coords && coords.length >= 2 ? [coords] : [];
+  }
+  var wpIndices = [];
+  for (var w = 0; w < waypoints.length; w++) {
+    var wp = waypoints[w];
+    var bestIdx = 0;
+    var bestDist = Infinity;
+    for (var i = 0; i < coords.length; i++) {
+      var d = haversineMeters(coords[i], [wp.lng, wp.lat]);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    wpIndices.push(bestIdx);
+  }
+  var legs = [];
+  for (var i = 0; i < wpIndices.length - 1; i++) {
+    var start = wpIndices[i];
+    var end = wpIndices[i + 1];
+    if (start > end) { var tmp = start; start = end; end = tmp; }
+    if (end - start < 1) end = start + 1;
+    if (end >= coords.length) end = coords.length - 1;
+    if (start >= coords.length - 1) start = coords.length - 2;
+    var leg = coords.slice(start, end + 1);
+    if (leg.length >= 2) legs.push(leg);
+  }
+  if (legs.length === 0 && coords.length >= 2) legs.push(coords);
+  return legs;
 }
 
 function mkDot(color) {
@@ -685,63 +718,178 @@ function onRNMessage(raw) {
         nextWaypointIdx = 0;
       }
     } else if (msg.type === "SET_ROUTE" && msg.payload) {
-      // Handle SET_ROUTE with payload wrapper (from LiveTripScreen.handleOffRoute)
-      const { coordinates, steps, waypoints, checkpoints, mapPins } = msg.payload;
+      // Handle SET_ROUTE with all route/checkpoint/pin data
+      var payload = msg.payload;
+      var coordinates = payload.coordinates;
+      var steps = payload.steps;
+      var waypoints = payload.waypoints;
+      var checkpoints = payload.checkpoints;
+      var segmentOpacity = payload.segmentOpacity;
+      var legDurations = payload.legDurations;
+      var start = payload.start;
+      var end = payload.end;
+      var mapPins = payload.mapPins;
+      var passedIds = payload.passedWaypointIds;
       console.log('[WebView] SET_ROUTE received, coords:', coordinates?.length);
-      if (coordinates && coordinates.length >= 2) {
-        upsertRouteLayers(coordinates);
-        sourceRouteCoords = coordinates;
-        if (steps) routeSteps = steps;
-        if (waypoints) {
-          waypointList = waypoints.map(w => ({ lng: w.lng, lat: w.lat, id: w.id, name: w.name, type: w.type }));
-          nextWaypointIdx = 0;
+
+      // ── CLEANUP ──────────────────────────────────────────────────────────────
+      // Remove old route leg layers and sources
+      var existingLayers = map.getStyle().layers || [];
+      for (var li = 0; li < existingLayers.length; li++) {
+        var lid = existingLayers[li].id;
+        if (lid && /^route-leg-\d+$/.test(lid)) {
+          try { map.removeLayer(lid); } catch(e) {}
         }
-        console.log('[WebView] SET_ROUTE processed, segments:', coordinates.length);
       }
-      // Render checkpoint markers (green teardrops with numbers)
-      if (window.checkpointMarkers) {
-        window.checkpointMarkers.forEach(function(m) { try { m.remove(); } catch(e) {} });
+      var existingSources = map.getStyle().sources || {};
+      for (var sid in existingSources) {
+        if (existingSources.hasOwnProperty(sid) && /^route-leg-\d+$/.test(sid)) {
+          try { map.removeSource(sid); } catch(e) {}
+        }
       }
-      window.checkpointMarkers = [];
+      // Remove old markers
+      if (checkpointMarkers) {
+        checkpointMarkers.forEach(function(m) { try { m.remove(); } catch(e) {} });
+      }
+      checkpointMarkers = [];
+      if (timeBubbleMarkers) {
+        timeBubbleMarkers.forEach(function(m) { try { m.remove(); } catch(e) {} });
+      }
+      timeBubbleMarkers = [];
+      if (startMarker) { try { startMarker.remove(); } catch(e) {} startMarker = null; }
+      if (endMarker) { try { endMarker.remove(); } catch(e) {} endMarker = null; }
+      if (window._destMarker) { try { window._destMarker.remove(); } catch(e) {} window._destMarker = null; }
+      if (mapPinMarkers) {
+        mapPinMarkers.forEach(function(m) { try { m.remove(); } catch(e) {} });
+      }
+      mapPinMarkers = [];
+
+      // Update passed waypoint IDs
+      passedWaypointIds = new Set(passedIds || []);
+
+      sourceRouteCoords = coordinates;
+      if (steps) routeSteps = steps;
+      if (waypoints) {
+        waypointList = waypoints.map(function(w) { return { lng: w.lng, lat: w.lat, id: w.id, name: w.name, type: w.type }; });
+        nextWaypointIdx = 0;
+      }
+
+      if (!coordinates || coordinates.length < 2) return;
+
+      // ── 1. Route Segmentation ────────────────────────────────────────────────
+      var legs = splitRouteIntoLegs(coordinates, waypoints || []);
+      for (var i = 0; i < legs.length; i++) {
+        var legCoords = legs[i];
+        if (legCoords.length < 2) continue;
+        var opacity = (segmentOpacity && i < segmentOpacity.length) ? segmentOpacity[i] : 0.4;
+        var color, lineOpacity, lineWidth;
+        if (opacity >= 1.0) {
+          color = '#4285F4'; lineOpacity = 1; lineWidth = 6;
+        } else if (opacity >= 0.4) {
+          color = '#4285F4'; lineOpacity = 0.4; lineWidth = 5;
+        } else {
+          color = '#9AA0A6'; lineOpacity = 0.35; lineWidth = 4;
+        }
+        var srcId = 'route-leg-' + i;
+        var gj = { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: legCoords } };
+        if (!map.getSource(srcId)) {
+          try {
+            map.addSource(srcId, { type: 'geojson', data: gj });
+            map.addLayer({
+              id: srcId, type: 'line', source: srcId,
+              layout: { 'line-join': 'round', 'line-cap': 'round' },
+              paint: { 'line-color': color, 'line-opacity': lineOpacity, 'line-width': lineWidth }
+            });
+          } catch(e) { console.log('[WebView] Error adding leg layer', i, e); }
+        } else {
+          try {
+            map.getSource(srcId).setData(gj);
+            map.setPaintProperty(srcId, 'line-color', color);
+            map.setPaintProperty(srcId, 'line-opacity', lineOpacity);
+            map.setPaintProperty(srcId, 'line-width', lineWidth);
+          } catch(e) {}
+        }
+      }
+
+      // ── 2. Checkpoint Markers (Google Maps style A/B/C circles) ──────────────
       if (checkpoints && checkpoints.length > 0) {
         checkpoints.forEach(function(cp, i) {
           if (!cp.lat || !cp.lng) return;
+          var letter = String.fromCharCode(65 + i);
+          var isPassed = passedWaypointIds.has(cp.id);
           var el = document.createElement('div');
-          el.style.cssText = 'width:32px;height:32px;background:#10b981;border:3px solid white;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 2px 8px rgba(0,0,0,0.4);cursor:pointer;';
-          var label = document.createElement('div');
-          label.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(45deg);color:white;font-weight:bold;font-size:12px;';
-          label.textContent = String(i + 1);
-          el.appendChild(label);
-          var marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
+          el.style.cssText = 'width:32px;height:32px;border-radius:50%;background:' + (isPassed ? '#9AA0A6' : 'white') + ';border:2.5px solid ' + (isPassed ? '#9AA0A6' : '#4285F4') + ';display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:' + (isPassed ? 'white' : '#4285F4') + ';box-shadow:0 2px 6px rgba(0,0,0,0.25);' + (isPassed ? 'opacity:0.6;' : '');
+          el.textContent = letter;
+          var marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
             .setLngLat([cp.lng, cp.lat])
-            .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML('<strong>' + (cp.name || 'Checkpoint ' + (i+1)) + '</strong>'))
+            .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML('<strong>' + (cp.name || 'Checkpoint ' + letter) + '</strong>'))
             .addTo(map);
-          marker._passed = false;
-          window.checkpointMarkers.push(marker);
+          checkpointMarkers.push(marker);
         });
       }
-      // Render destination marker (red dot at last waypoint)
-      if (waypoints && waypoints.length > 0) {
-        var dest = waypoints[waypoints.length - 1];
-        if (dest) {
-          if (window._destMarker) { try { window._destMarker.remove(); } catch(e) {} }
-          var destEl = document.createElement('div');
-          destEl.style.cssText = 'width:20px;height:20px;background:#ef4444;border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.4);';
-          window._destMarker = new mapboxgl.Marker({ element: destEl }).setLngLat([dest.lng, dest.lat]).addTo(map);
+
+      // ── 3. Start Marker (hollow blue dot) ───────────────────────────────────
+      if (start && start.lat && start.lng) {
+        var startEl = document.createElement('div');
+        startEl.style.cssText = 'width:16px;height:16px;border:3px solid #4285F4;border-radius:50%;background:white;position:relative;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,0.2);';
+        var innerDot = document.createElement('div');
+        innerDot.style.cssText = 'width:6px;height:6px;background:#4285F4;border-radius:50%;';
+        startEl.appendChild(innerDot);
+        startMarker = new mapboxgl.Marker({ element: startEl, anchor: 'center' })
+          .setLngLat([start.lng, start.lat])
+          .addTo(map);
+      }
+
+      // ── 4. End Marker (red teardrop pin) ────────────────────────────────────
+      if (end && end.lat && end.lng) {
+        var endEl = document.createElement('div');
+        endEl.innerHTML = '<svg width="24" height="36" viewBox="0 0 24 36" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.37 0 0 5.37 0 12c0 9 12 24 12 24s12-15 12-24C24 5.37 18.63 0 12 0z" fill="#E53935"/><circle cx="12" cy="11" r="5" fill="white"/></svg>';
+        endEl.style.cssText = 'width:24px;height:36px;';
+        endMarker = new mapboxgl.Marker({ element: endEl, anchor: 'bottom' })
+          .setLngLat([end.lng, end.lat])
+          .addTo(map);
+      }
+
+      // ── 5. Per-Leg Time Bubbles ─────────────────────────────────────────────
+      if (legDurations && legDurations.length > 0 && legs.length > 0) {
+        for (var i = 0; i < legDurations.length && i < legs.length; i++) {
+          var dur = legDurations[i];
+          if (!dur || dur <= 0) continue;
+          var legCoords = legs[i];
+          if (!legCoords || legCoords.length < 2) continue;
+          var midIdx = Math.floor(legCoords.length / 2);
+          var midPt = legCoords[midIdx];
+          var opacity = (segmentOpacity && i < segmentOpacity.length) ? segmentOpacity[i] : 0.4;
+          var bgColor = opacity >= 1.0 ? '#4285F4' : 'rgba(66,133,244,0.55)';
+          var text = dur < 60 ? '<1 min' : Math.round(dur / 60) + ' min';
+          var bubbleEl = document.createElement('div');
+          bubbleEl.style.cssText = 'background:' + bgColor + ';color:white;font-size:11px;font-weight:700;padding:3px 8px;border-radius:12px;pointer-events:none;';
+          bubbleEl.textContent = text;
+          var bubble = new mapboxgl.Marker({ element: bubbleEl, anchor: 'center' })
+            .setLngLat(midPt)
+            .addTo(map);
+          timeBubbleMarkers.push(bubble);
         }
       }
-      // Render map pin markers (yellow with icons for fuel/parking/hazard)
+
+      // ── 6. Map Pin Markers (purple) ──────────────────────────────────────────
       if (mapPins && mapPins.length > 0) {
-        renderMapPins(mapPins);
-      } else {
-        // Clear map pins if none provided
-        if (mapPinMarkers) {
-          mapPinMarkers.forEach(function(m) { try { m.remove(); } catch(e) {} });
-          mapPinMarkers = [];
-        }
+        var pinIcons = { fuel: '\u26FD', parking: 'P', hazard: '\u26A0', 'road-damage': '\u26A0' };
+        mapPins.forEach(function(pin) {
+          if (!pin.lat || !pin.lng) return;
+          var el = document.createElement('div');
+          el.style.cssText = 'width:28px;height:28px;background:#a78bfa;border:2px solid white;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;color:white;box-shadow:0 2px 6px rgba(0,0,0,0.4);';
+          el.textContent = pinIcons[pin.type] || '\uD83D\uDCCD';
+          var marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
+            .setLngLat([pin.lng, pin.lat])
+            .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML('<strong>' + (pin.label || 'Map pin') + '</strong>'))
+            .addTo(map);
+          mapPinMarkers.push(marker);
+        });
       }
+
       // Send back confirmation to RN
-      post({ type: 'DEBUG', msg: 'SET_ROUTE received, coords: ' + (coordinates?.length ?? 'undefined') });
+      post({ type: 'DEBUG', msg: 'SET_ROUTE received, coords: ' + (coordinates?.length ?? 'undefined') + ', legs: ' + (legs?.length ?? 0) });
     }
   } catch {}
 }

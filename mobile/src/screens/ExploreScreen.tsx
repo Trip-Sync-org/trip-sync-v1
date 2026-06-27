@@ -16,6 +16,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { apiFetch } from "../api/client";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import type { TripListItem } from "../types";
+import { Search, X, Map } from "lucide-react-native";
 import { typography } from "../theme";
 import { Badge } from "../components/ui";
 import { useAppTheme } from "../context/ThemeContext";
@@ -41,6 +42,7 @@ export function ExploreScreen() {
   const [search, setSearch] = useState("");
   const [theme, setTheme] = useState("");
   const [sortBy, setSortBy] = useState<(typeof SORTS)[number]["id"]>("trending");
+  const [tab, setTab] = useState<"upcoming" | "past">("upcoming");
 
   const load = useCallback(async () => {
     try {
@@ -61,6 +63,18 @@ export function ExploreScreen() {
 
   const filtered = useMemo(() => {
     let list = trips.filter((t) => {
+      // Determine if the trip's start date has passed
+      const tripDate = t.date ? new Date(t.date) : null;
+      const isPast = tripDate ? tripDate < new Date() : false;
+      const isActive = (t as any).is_active === true || t.status === "active";
+
+      if (tab === "upcoming") {
+        // Show only active trips whose date hasn't passed
+        if (!isActive || isPast) return false;
+      } else {
+        // Past tab: show trips whose start date has passed OR are inactive
+        if (isActive && !isPast) return false;
+      }
       if (search) {
         const q = search.toLowerCase();
         if (!String(t.name || "").toLowerCase().includes(q)) return false;
@@ -76,7 +90,7 @@ export function ExploreScreen() {
       return Number(b.joined_count || 0) - Number(a.joined_count || 0);
     });
     return sorted;
-  }, [trips, search, theme, sortBy]);
+  }, [trips, search, theme, sortBy, tab]);
 
   const openTrip = (id: number) => {
     const parent = navigation.getParent();
@@ -93,10 +107,25 @@ export function ExploreScreen() {
         <Text style={s.heroSub}>Find your next adventure from our curated marketplace</Text>
       </View>
 
+      {/* Upcoming / Past toggle */}
+      <View style={s.tabRow}>
+        {(["upcoming", "past"] as const).map((t) => (
+          <Pressable
+            key={t}
+            style={[s.tabBtn, tab === t && s.tabBtnOn]}
+            onPress={() => setTab(t)}
+          >
+            <Text style={[s.tabBtnText, tab === t && s.tabBtnTextOn]}>
+              {t === "upcoming" ? "Upcoming" : "Past"}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
       {/* Search bar */}
       <View style={s.searchWrap}>
         <View style={s.searchRow}>
-          <Text style={s.searchIcon}>🔍</Text>
+          <Search size={15} color={colors.muted} />
           <TextInput
             style={s.search}
             placeholder="Search trips, locations…"
@@ -110,7 +139,7 @@ export function ExploreScreen() {
               style={s.clearBtn}
               hitSlop={8}
             >
-              <Text style={s.clearBtnText}>✕</Text>
+              <X size={14} color={colors.muted} />
             </Pressable>
           )}
         </View>
@@ -130,7 +159,7 @@ export function ExploreScreen() {
               onPress={() => setTheme(t === "All" ? "" : t)}
             >
               <Text style={[s.pillText, (t === "All" ? theme === "" : theme === t) && s.pillTextOn]}>
-                {t === "All" ? "🏷️ All" : t}
+                {t === "All" ? "All" : t}
               </Text>
             </Pressable>
           ))}
@@ -165,8 +194,12 @@ export function ExploreScreen() {
         ListEmptyComponent={
           !loading ? (
             <View style={s.emptyWrap}>
-              <Text style={s.emptyIcon}>🗺️</Text>
-              <Text style={s.empty}>No trips found. Try adjusting search or theme.</Text>
+              <Map size={40} color={colors.muted} style={{ opacity: 0.5, marginBottom: 12 }} />
+              <Text style={s.empty}>
+                {tab === "upcoming"
+                  ? "No upcoming trips found. Try adjusting search or theme."
+                  : "No past trips found."}
+              </Text>
             </View>
           ) : null
         }
@@ -210,6 +243,13 @@ const makeStyles = (colors: ThemeColors, mode: ColorMode, topInset: number) =>
     heroTitle: { ...typography.hero, color: colors.text, fontSize: 28, lineHeight: 34 },
     heroSub: { color: colors.muted, fontSize: 14, marginTop: 10 },
 
+    // Tab toggle
+    tabRow: { flexDirection: "row", marginHorizontal: 16, marginBottom: 14, borderRadius: 12, overflow: "hidden", borderWidth: 1, borderColor: mode === "light" ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.12)" },
+    tabBtn: { flex: 1, paddingVertical: 10, alignItems: "center", backgroundColor: "transparent" },
+    tabBtnOn: { backgroundColor: colors.text },
+    tabBtnText: { fontSize: 14, fontWeight: "700", color: colors.muted },
+    tabBtnTextOn: { color: colors.bg },
+
     // Search
     searchWrap: { paddingHorizontal: 16, marginBottom: 12 },
     searchRow: {
@@ -221,7 +261,6 @@ const makeStyles = (colors: ThemeColors, mode: ColorMode, topInset: number) =>
       backgroundColor: colors.surface,
       paddingLeft: 12,
     },
-    searchIcon: { fontSize: 15, marginRight: 6, opacity: 0.6 },
     search: {
       flex: 1,
       paddingVertical: 14,
@@ -230,7 +269,6 @@ const makeStyles = (colors: ThemeColors, mode: ColorMode, topInset: number) =>
       fontSize: 15,
     },
     clearBtn: { paddingRight: 14, paddingVertical: 14 },
-    clearBtnText: { color: colors.muted, fontSize: 14, fontWeight: "600" },
 
     // Theme pills
     pillRowOuter: { paddingHorizontal: 16, marginBottom: 10 },
@@ -293,7 +331,6 @@ const makeStyles = (colors: ThemeColors, mode: ColorMode, topInset: number) =>
 
     // Empty state
     emptyWrap: { alignItems: "center", marginTop: 60 },
-    emptyIcon: { fontSize: 40, marginBottom: 12, opacity: 0.5 },
     empty: { color: colors.muted, textAlign: "center", marginTop: 0, fontSize: 14, lineHeight: 20 },
 
     // Card

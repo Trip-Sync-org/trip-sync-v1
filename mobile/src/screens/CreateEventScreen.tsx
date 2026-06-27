@@ -958,6 +958,23 @@ export function CreateEventScreen({ navigation }: Props) {
           }
         }
       }
+      // Step 2: Bind coupons to trip BEFORE navigating
+      if (bindToTrip && couponIdsRef.current.length > 0 && user?.id) {
+        for (const couponId of couponIdsRef.current) {
+          try {
+            await apiFetch(`/api/organizers/${user.id}/coupons/${couponId}`, {
+              method: "PATCH",
+              body: JSON.stringify({ trip_id: Number(createdId) }),
+            });
+            console.log("[CreateEvent] Bound coupon", couponId, "to trip", createdId);
+          } catch {
+            console.warn("[CreateEvent] Failed to bind coupon", couponId);
+          }
+        }
+        couponIdsRef.current = [];
+      }
+
+      // Step 3: Navigate LAST
       navigation.replace("TripDetail", { id: String(createdId) });
     } catch (e) {
       console.error(e);
@@ -1005,6 +1022,9 @@ export function CreateEventScreen({ navigation }: Props) {
         ...p,
       ]);
       setCouponCode("");
+      if (bindToTrip && body.id) {
+        couponIdsRef.current = [...couponIdsRef.current, Number(body.id)];
+      }
     } catch {
       setAlertState({ title: "Network", message: "Could not reach the server. Check EXPO_PUBLIC_API_URL and that npm run dev is running.", singleButton: true });
     } finally {
@@ -1700,6 +1720,18 @@ export function CreateEventScreen({ navigation }: Props) {
               </Pressable>
             </View>
           ) : null}
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10, marginTop: 4 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.text, fontWeight: "700", fontSize: 13 }}>Bind to this trip</Text>
+              <Text style={styles.mutedXs}>Coupon will only work on this event after publish</Text>
+            </View>
+            <Switch
+              value={bindToTrip}
+              onValueChange={setBindToTrip}
+              trackColor={{ false: "rgba(255,255,255,0.15)", true: colors.text }}
+              thumbColor={bindToTrip ? colors.bg : colors.muted2}
+            />
+          </View>
           <View style={styles.couponActions}>
             <Pressable
               style={styles.outlineBtn}

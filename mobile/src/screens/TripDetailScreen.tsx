@@ -57,8 +57,8 @@ export function TripDetailScreen({ route, navigation }: Props) {
     singleButton?: boolean;
   } | null>(null);
 
-  const applyCoupon = async () => {
-    const code = coupon.trim();
+  const applyCoupon = async (codeOverride?: string) => {
+    const code = (codeOverride ?? coupon).trim();
     if (!code) return;
     const res = await apiFetch(`/api/trips/${id}/coupons/validate`, {
       method: "POST",
@@ -318,7 +318,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
                 style={s.suggestBannerBtn}
                 onPress={() => {
                   setCoupon(suggestedCoupon.code);
-                  setTimeout(() => void applyCoupon(), 100);
+                  void applyCoupon(suggestedCoupon.code);
                 }}
               >
                 <Text style={s.suggestBannerBtnText}>Apply</Text>
@@ -338,7 +338,7 @@ export function TripDetailScreen({ route, navigation }: Props) {
                   value={coupon}
                   onChangeText={setCoupon}
                 />
-                <Pressable style={s.smallBtn} onPress={applyCoupon}>
+                <Pressable style={s.smallBtn} onPress={() => void applyCoupon()}>
                   <Text style={s.smallBtnText}>Apply</Text>
                 </Pressable>
               </View>
@@ -346,6 +346,18 @@ export function TripDetailScreen({ route, navigation }: Props) {
                 <>
                   <Text style={s.ok}>{appliedPct}% discount applied</Text>
                   <Text style={s.ok}>Payable now: ₹{payablePreview.toLocaleString("en-IN")}</Text>
+                  <Pressable
+                    onPress={() => {
+                      setCoupon("");
+                      setAppliedPct(null);
+                      setAppliedDiscountAmount(0);
+                    }}
+                    style={{ marginTop: 6 }}
+                  >
+                    <Text style={{ color: c.muted, fontSize: 12, textDecorationLine: "underline" }}>
+                      Remove coupon
+                    </Text>
+                  </Pressable>
                 </>
               )}
               <View style={s.breakdownBox}>
