@@ -63,16 +63,48 @@ export function ExploreScreen() {
 
   const filtered = useMemo(() => {
     let list = trips.filter((t) => {
-      // Determine if the trip's start date has passed
-      const tripDate = t.date ? new Date(t.date) : null;
-      const isPast = tripDate ? tripDate < new Date() : false;
-      const isActive = (t as any).is_active === true || t.status === "active";
+      let tripDateTime: Date | null = null;
+      if (t.date) {
+        const dateStr = String(t.date);
+        const parts = dateStr.split("-").map(Number);
+        if (parts.length === 3 && !parts.some(isNaN)) {
+          const [y, m, d] = parts;
+          let hour = 23, min = 59, sec = 59; // default: end of day
+
+          const rawTime = (t as any).time;
+          if (rawTime) {
+            const timeStr = String(rawTime).trim();
+            // Match formats: "08:00 AM", "8:00 AM", "08:00", "08:00:00", "20:00"
+            const match = timeStr.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+            if (match) {
+              let h = parseInt(match[1], 10);
+              const mn = parseInt(match[2], 10);
+              const sc = match[3] ? parseInt(match[3], 10) : 0;
+              const meridiem = match[4] ? match[4].toUpperCase() : null;
+
+              if (meridiem === "PM" && h !== 12) h += 12;
+              if (meridiem === "AM" && h === 12) h = 0;
+
+              if (!isNaN(h) && !isNaN(mn)) {
+                hour = h; min = mn; sec = sc;
+              }
+            }
+          }
+
+          tripDateTime = new Date(y, m - 1, d, hour, min, sec);
+        }
+      }
+      const isPast = tripDateTime ? tripDateTime < new Date() : false;
+      // A trip is bookable/upcoming if it's not completed or cancelled
+      // "upcoming" = open for registration, "active" = currently live/in-progress
+      // Both should show in the Upcoming tab
+      const isActive = t.status !== "completed" && t.status !== "cancelled";
 
       if (tab === "upcoming") {
-        // Show only active trips whose date hasn't passed
+        // Exclude completed/cancelled trips AND trips whose datetime has passed
         if (!isActive || isPast) return false;
       } else {
-        // Past tab: show trips whose start date has passed OR are inactive
+        // Past tab: trips that are completed, cancelled, OR whose date has passed
         if (isActive && !isPast) return false;
       }
       if (search) {
